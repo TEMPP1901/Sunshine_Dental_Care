@@ -103,4 +103,14 @@ public class EmailLog {
         this.cost = cost;
     }
 
+    @ManyToOne(fetch = FetchType.LAZY, optional = false)
+    @JoinColumn(name = "templateId", nullable = false)
+    private EmailTemplate template;
+
+    public EmailTemplate getTemplate() {
+        return template;
+    }
+    public void setTemplate(EmailTemplate template) {
+        this.template = template;
+    }
 }

@@ -189,5 +189,14 @@ public class User {
     public void setDepartment(Department department) {
         this.department = department;
     }
+    @PrePersist
+    void prePersist() {
+        if (createdAt == null) createdAt = Instant.now();
+        if (updatedAt == null) updatedAt = createdAt;
+    }
 
+    @PreUpdate
+    void preUpdate() {
+        updatedAt = Instant.now();
+    }
 }

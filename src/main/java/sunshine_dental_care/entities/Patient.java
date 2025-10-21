@@ -166,5 +166,14 @@ public class Patient {
     public void setUpdatedAt(Instant updatedAt) {
         this.updatedAt = updatedAt;
     }
+    @PrePersist
+    void prePersist() {
+        if (createdAt == null) createdAt = Instant.now();
+        if (updatedAt == null) updatedAt = createdAt;
+    }
 
+    @PreUpdate
+    void preUpdate() {
+        updatedAt = Instant.now();
+    }
 }

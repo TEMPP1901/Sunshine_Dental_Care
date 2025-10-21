@@ -11,6 +11,6 @@ import java.util.Optional;
 
 public interface PatientSequenceRepo extends JpaRepository<PatientSequence, Integer> {
     @Lock(LockModeType.PESSIMISTIC_WRITE)
-    @Query("select ps from PatientSequence ps where ps.id = :clinicId")
+    @Query("select s from PatientSequence s where s.id = :clinicId")
     Optional<PatientSequence> lockByClinicId(@Param("clinicId") Integer clinicId);
 }

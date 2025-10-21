@@ -1,9 +1,9 @@
 package sunshine_dental_care.config;
 
 import org.springframework.context.annotation.Configuration;
-import org.springframework.scheduling.annotation.EnableAsync;
+import org.springframework.data.jpa.repository.config.EnableJpaAuditing;
 
 @Configuration
-@EnableAsync
-public class AsyncConfig {
+@EnableJpaAuditing
+public class JpaConfig {
 }

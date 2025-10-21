@@ -6,5 +6,5 @@ import sunshine_dental_care.entities.Clinic;
 import java.util.Optional;
 
 public interface ClinicRepo extends JpaRepository<Clinic, Integer> {
-    Optional<Clinic> findByClinicCode(String clinicCode);
+
 }
