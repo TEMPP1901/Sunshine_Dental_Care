@@ -1,4 +1,4 @@
-package sunshine_dental_care.dto;
+package sunshine_dental_care.dto.huybro_products;
 import lombok.Data;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;

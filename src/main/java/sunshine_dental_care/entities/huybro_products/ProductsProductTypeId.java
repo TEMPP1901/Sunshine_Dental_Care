@@ -1,4 +1,4 @@
-package sunshine_dental_care.entities.huypro_products;
+package sunshine_dental_care.entities.huybro_products;
 
 import jakarta.persistence.Column;
 import jakarta.persistence.Embeddable;
