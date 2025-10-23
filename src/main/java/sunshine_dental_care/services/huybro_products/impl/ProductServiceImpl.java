@@ -3,6 +3,7 @@ package sunshine_dental_care.services.huybro_products.impl;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import sunshine_dental_care.dto.huybro_products.ProductDto;
+import sunshine_dental_care.dto.huybro_products.ProductImageDto;
 import sunshine_dental_care.entities.huybro_products.Product;
 import sunshine_dental_care.entities.huybro_products.ProductImage;
 import sunshine_dental_care.entities.huybro_products.ProductsProductType;
@@ -65,11 +66,15 @@ public class ProductServiceImpl implements ProductService {
         dto.setUpdatedAt(product.getUpdatedAt());
 
         // Lấy danh sách ảnh
-        List<String> imageUrls = productImageRepository.findByProduct_Id(product.getId())
-                .stream()
-                .map(ProductImage::getImageUrl)
-                .collect(Collectors.toList());
-        dto.setImageUrls(imageUrls);
+        var images = productImageRepository.findByProduct_IdOrderByImageOrderAsc(product.getId())
+                .stream().map(img -> {
+                    var it = new ProductImageDto();
+                    it.setImageId(img.getId());
+                    it.setImageUrl(img.getImageUrl());
+                    it.setImageOrder(img.getImageOrder());
+                    return it;
+                }).toList();
+        dto.setImage(images);
 
         // Lấy danh sách loại
         List<String> typeNames = productsProductTypeRepository.findByProduct_Id(product.getId())

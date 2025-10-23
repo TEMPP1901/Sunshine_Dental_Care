@@ -19,6 +19,6 @@ public class ProductDto {
     private Boolean isActive;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
-    private List<String> imageUrls;
+    private List<ProductImageDto> image;
     private List<String> typeNames;
 }
