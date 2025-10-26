@@ -118,4 +118,9 @@ public class UserRole {
         this.description = description;
     }
 
+    @PrePersist
+    void prePersist() {
+        if (assignedDate == null) assignedDate = java.time.Instant.now();
+        if (isActive == null) isActive = true;
+    }
 }

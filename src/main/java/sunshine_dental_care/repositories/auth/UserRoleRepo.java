@@ -12,4 +12,14 @@ public interface UserRoleRepo extends JpaRepository<UserRole, Integer> {
       where ur.user.id = :userId and ur.isActive = true
     """)
     List<UserRole> findActiveByUserId(Integer userId);
+
+    @Query("""
+    select concat('ROLE_', upper(r.roleName))
+    from UserRole ur
+    join ur.role r
+    where ur.user.id = :userId
+      and (ur.isActive = true or ur.isActive is null)
+  """)
+    List<String> findRoleNamesByUserId(Integer userId);
+
 }

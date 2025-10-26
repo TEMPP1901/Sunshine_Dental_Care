@@ -5,6 +5,7 @@ import sunshine_dental_care.entities.Role;
 
 import java.util.Optional;
 
-public interface RoleRepo extends JpaRepository<Role, String> {
+public interface RoleRepo extends JpaRepository<Role, Integer> {
+    Optional<Role> findByRoleNameIgnoreCase(String roleName);
     Optional<Role> findByRoleName(String roleName);
 }
