@@ -1,6 +1,7 @@
 package sunshine_dental_care.api.auth;
 
 
+import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
@@ -10,6 +11,7 @@ import sunshine_dental_care.dto.authDTO.LoginResponse;
 import sunshine_dental_care.dto.authDTO.SignUpRequest;
 import sunshine_dental_care.dto.authDTO.SignUpResponse;
 import sunshine_dental_care.services.auth_service.AuthService;
+import java.io.IOException;
 
 @RestController
 @RequestMapping("/api/auth")
@@ -26,5 +28,10 @@ public class AuthController {
     @PostMapping("/login")
     public ResponseEntity<LoginResponse> login(@Valid @RequestBody LoginRequest body) {
         return ResponseEntity.ok(authService.login(body));
+    }
+
+    @GetMapping("/google")
+    public void google(HttpServletResponse response) throws IOException {
+        response.sendRedirect("/oauth2/authorization/google");
     }
 }
