@@ -87,7 +87,7 @@ public class HrEmployeeServiceImpl implements HrEmployeeService {
         }
         
         // Tạo UserRole
-        Role role = roleRepo.findById(request.getRoleId().toString())
+        Role role = roleRepo.findById(request.getRoleId())
                 .orElseThrow(() -> new EmployeeValidationException("Role not found"));
         
         Clinic clinic = clinicRepo.findById(request.getClinicId())

@@ -18,7 +18,6 @@ import org.springframework.security.web.authentication.AuthenticationSuccessHand
 
 @Configuration
 @RequiredArgsConstructor
-@EnableMethodSecurity
 @EnableMethodSecurity(prePostEnabled = true)
 public class SecurityConfig {
 
@@ -46,6 +45,10 @@ public class SecurityConfig {
                         //Oauth2 endpoints
                         .requestMatchers("/api/auth/google").permitAll()
                         .requestMatchers("/oauth2/**", "/login/oauth2/**").permitAll()
+                        
+                        // Additional auth endpoints
+                        .requestMatchers("/auth/sign-up").permitAll()  // Cho phép đăng ký PATIENT
+                        .requestMatchers("/api/hr/employees/**").hasRole("HR")  // Chỉ HR được phép
                         .anyRequest().authenticated()
                 )
                 .oauth2Login(oauth -> oauth
@@ -53,10 +56,6 @@ public class SecurityConfig {
                         .successHandler(oAuth2SuccessHandler)
                 )
                 .addFilterBefore(jwtAuthFilter, UsernamePasswordAuthenticationFilter.class);
-
-                        .requestMatchers("/auth/sign-up").permitAll()  // Cho phép đăng ký PATIENT
-                        .requestMatchers("/api/hr/employees/**").hasRole("HR")  // Chỉ HR được phép
-                        .anyRequest().permitAll());
         return http.build();
     }
 }
