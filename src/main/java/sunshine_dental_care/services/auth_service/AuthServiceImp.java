@@ -1,9 +1,10 @@
 package sunshine_dental_care.services.auth_service;
 
-import lombok.RequiredArgsConstructor;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+
+import lombok.RequiredArgsConstructor;
 import sunshine_dental_care.dto.authDTO.SignUpRequest;
 import sunshine_dental_care.dto.authDTO.SignUpResponse;
 import sunshine_dental_care.entities.Patient;
