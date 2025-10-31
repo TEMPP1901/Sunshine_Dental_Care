@@ -15,8 +15,7 @@ public class Patient {
     @Column(name = "patientId", nullable = false)
     private Integer id;
 
-    @Nationalized
-    @Column(name = "patientCode", length = 20)
+    @Column(name = "patientCode", length = 30, unique = true)
     private String patientCode;
 
     @OneToOne(fetch = FetchType.LAZY)

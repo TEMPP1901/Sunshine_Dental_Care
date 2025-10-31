@@ -13,28 +13,29 @@ import java.time.format.DateTimeFormatter;
 public class PatientCodeService {
     private final PatientSequenceRepo seqRepo;
 
-    @Transactional
-    public String nextPatientCode(Integer clinicId) {
-        PatientSequence seq = seqRepo.lockByClinicId(clinicId)
-                .orElseThrow(() -> new IllegalStateException("Patient sequence not initialized for clinicId=" + clinicId));
+    private static final int GLOBAL_SEQ_CLINIC_ID = 1;
+    private static final int WIDTH = 8;
 
-        int next = (seq.getCurrentNumber() == null ? 0 : seq.getCurrentNumber()) + 1;
+    @org.springframework.transaction.annotation.Transactional
+    public String nextPatientCode() {
+        PatientSequence seq = seqRepo.lockByClinicId(GLOBAL_SEQ_CLINIC_ID)
+                .orElseThrow(() -> new IllegalStateException(
+                        "Patient sequence not initialized (clinicId=" + GLOBAL_SEQ_CLINIC_ID + ")"));
+
+        int current = (seq.getCurrentNumber() == null ? 0 : seq.getCurrentNumber());
+        int next = current + 1;
+
+        if (next > 99_999_999) {
+            throw new IllegalStateException("Patient code capacity reached for 8-digit format; switch to 9 digits or Base36.");
+        }
+
         seq.setCurrentNumber(next);
         seq.setUpdatedAt(java.time.Instant.now());
 
-        String prefix = (seq.getPrefix() == null || seq.getPrefix().isBlank()) ? "SDC" : seq.getPrefix(); // <=10
-        String yyMM = YearMonth.now().format(DateTimeFormatter.ofPattern("yyMM")); // 4
-        String number = String.format("%06d", next); // 6
+        String prefix = (seq.getPrefix() == null || seq.getPrefix().isBlank()) ? "SDC" : seq.getPrefix();
+        String number = String.format("%0" + WIDTH + "d", next);
 
-        String code = prefix + "-" + yyMM + "-" + number;
-        if (code.length() > 20) {
-
-            code = (prefix + yyMM + number);
-            if (code.length() > 20) {
-                int maxPrefixLen = Math.max(0, 20 - (yyMM.length() + number.length()));
-                code = prefix.substring(0, Math.min(prefix.length(), maxPrefixLen)) + yyMM + number;
-            }
-        }
-        return code;
+        return (prefix + "-" + number).toUpperCase();
     }
 }
+

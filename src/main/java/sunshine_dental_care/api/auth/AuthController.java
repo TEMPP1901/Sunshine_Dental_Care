@@ -7,14 +7,20 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.*;
+import sunshine_dental_care.dto.authDTO.LoginRequest;
+import sunshine_dental_care.dto.authDTO.LoginResponse;
 import sunshine_dental_care.dto.authDTO.SignUpRequest;
 import sunshine_dental_care.dto.authDTO.SignUpResponse;
 import sunshine_dental_care.services.auth_service.AuthService;
+import java.io.IOException;
 
 @RestController
-@RequestMapping("/auth")
+@RequestMapping("/api/auth")
 @RequiredArgsConstructor
 public class AuthController {
 
@@ -23,5 +29,15 @@ public class AuthController {
     @PostMapping("/sign-up")
     public ResponseEntity<SignUpResponse> signUp(@Valid @RequestBody SignUpRequest body) {
         return ResponseEntity.ok(authService.signUp(body));
+    }
+
+    @PostMapping("/login")
+    public ResponseEntity<LoginResponse> login(@Valid @RequestBody LoginRequest body) {
+        return ResponseEntity.ok(authService.login(body));
+    }
+
+    @GetMapping("/google")
+    public void google(HttpServletResponse response) throws IOException {
+        response.sendRedirect("/oauth2/authorization/google");
     }
 }
