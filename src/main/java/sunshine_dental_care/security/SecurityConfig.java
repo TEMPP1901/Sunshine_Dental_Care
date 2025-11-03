@@ -1,5 +1,6 @@
 package sunshine_dental_care.security;
 
+import jakarta.servlet.http.HttpServletResponse;
 import lombok.RequiredArgsConstructor;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -35,20 +36,27 @@ public class SecurityConfig {
                 // Stateless
                 .sessionManagement(sm -> sm.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
 
-                // Authorize
+                .exceptionHandling(e -> e.authenticationEntryPoint((req, res, ex) -> {
+                    String uri = req.getRequestURI();
+                    if (uri != null && uri.startsWith("/api/")) {
+                        res.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
+                        res.setContentType("application/json;charset=UTF-8");
+                        res.getWriter().write("{\"message\":\"Unauthorized\"}");
+                    } else {
+                        res.sendError(HttpServletResponse.SC_UNAUTHORIZED);
+                    }
+                }))
+
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
                         .requestMatchers("/locale").permitAll()
-                        .requestMatchers("/api/auth/sign-up").permitAll()
-                        .requestMatchers("/api/auth/login").permitAll()
-
-                        //Oauth2 endpoints
-                        .requestMatchers("/api/auth/google").permitAll()
-                        .requestMatchers("/oauth2/**", "/login/oauth2/**").permitAll()
+                        .requestMatchers("/api/auth/sign-up", "/api/auth/login").permitAll()
+                        .requestMatchers("/uploads_avatar/**").permitAll()
+                        .requestMatchers("/api/auth/google", "/oauth2/**", "/login/oauth2/**").permitAll()
                         .anyRequest().authenticated()
                 )
                 .oauth2Login(oauth -> oauth
-                        .userInfoEndpoint(u-> u.userService(oAuth2UserService))
+                        .userInfoEndpoint(u -> u.userService(oAuth2UserService))
                         .successHandler(oAuth2SuccessHandler)
                 )
                 .addFilterBefore(jwtAuthFilter, UsernamePasswordAuthenticationFilter.class);

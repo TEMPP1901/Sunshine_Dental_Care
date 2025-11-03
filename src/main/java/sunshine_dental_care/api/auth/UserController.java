@@ -1,6 +1,7 @@
 package sunshine_dental_care.api.auth;
 
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
@@ -19,30 +20,98 @@ public class UserController {
     private final UserRepo userRepo;
     private final AvatarStorageService avatarStorageService;
 
+    @Value("${app.public-base-url}")
+    private String publicBaseUrl;
+
     @GetMapping("/me")
-    public Map<String, Object> me(@AuthenticationPrincipal CurrentUser user) {
-        return Map.of(
-                "userId", user.userId(),
-                "email", user.email(),
-                "fullName", user.fullName(),
-                "roles", user.roles()
-        );
+    public ResponseEntity<?> me(@AuthenticationPrincipal CurrentUser cu) {
+        User u = userRepo.findById(cu.userId())
+                .orElseThrow(() -> new IllegalArgumentException("User not found"));
+
+        String avatarAbs = toAbsolute(u.getAvatarUrl());
+
+        var body = new java.util.LinkedHashMap<String, Object>();
+        body.put("userId", u.getId());
+        body.put("email", u.getEmail());
+        body.put("fullName", u.getFullName());
+        body.put("phone", u.getPhone());
+        body.put("username", u.getUsername());
+        body.put("avatarUrl", avatarAbs);
+        body.put("roles", cu.roles());
+
+        return ResponseEntity.ok(body);
+    }
+
+    @PatchMapping("/{id}")
+    public ResponseEntity<?> updateProfile(
+            @PathVariable Integer id,
+            @RequestBody Map<String, String> dto,
+            @AuthenticationPrincipal CurrentUser cu
+    ) {
+        // Chỉ cho phép user tự sửa hồ sơ
+        if (!id.equals(cu.userId())) {
+            return ResponseEntity.status(403).body(Map.of("error", "Forbidden"));
+        }
+
+        User u = userRepo.findById(id)
+                .orElseThrow(() -> new IllegalArgumentException("User not found"));
+
+        if (dto.containsKey("fullName"))
+            u.setFullName(dto.get("fullName"));
+        if (dto.containsKey("email"))
+            u.setEmail(dto.get("email"));
+        if (dto.containsKey("phone"))
+            u.setPhone(dto.get("phone"));
+
+        userRepo.save(u);
+
+        return ResponseEntity.ok(new java.util.LinkedHashMap<String, Object>() {{
+            put("userId", u.getId());
+            put("fullName", u.getFullName());
+            put("email", u.getEmail());
+            put("phone", u.getPhone());
+            put("username", u.getUsername());
+            put("avatarUrl", toAbsolute(u.getAvatarUrl()));
+        }});
     }
 
     @PatchMapping("/{id}/avatar")
     public ResponseEntity<?> uploadAvatar(
             @PathVariable Integer id,
-            @RequestParam("file") MultipartFile file
+            @RequestParam("file") MultipartFile file,
+            @AuthenticationPrincipal CurrentUser cu
     ) throws Exception {
+        if (!id.equals(cu.userId())) {
+            return ResponseEntity.status(403).body(Map.of("error", "Forbidden"));
+        }
+
         User u = userRepo.findById(id)
                 .orElseThrow(() -> new IllegalArgumentException("User not found"));
 
-        String url = avatarStorageService.storeAvatar(file, id);
-        u.setAvatarUrl(url);
+        // Service hiện trả về relative path -> build absolute tại đây
+        String relative = avatarStorageService.storeAvatar(file, id);
+        String absolute = toAbsolute(relative);
+
+        u.setAvatarUrl(absolute);
         userRepo.save(u);
 
-        return ResponseEntity.ok().body(
-                java.util.Map.of("userId", u.getId(), "avatarUrl", u.getAvatarUrl())
-        );
+        return ResponseEntity.ok(Map.of(
+                "userId", u.getId(),
+                "avatarUrl", absolute
+        ));
+    }
+
+    private String toAbsolute(String path) {
+        if (path == null || path.isBlank()) {
+            return normalizeBase(publicBaseUrl) + "/uploads_avatar/default-avatar.png";
+        }
+        String p = path.trim();
+        if (p.startsWith("http://") || p.startsWith("https://")) return p;
+        if (!p.startsWith("/")) p = "/" + p;
+        return normalizeBase(publicBaseUrl) + p;
+    }
+
+    private String normalizeBase(String base) {
+        return (base != null && base.endsWith("/")) ? base.substring(0, base.length() - 1) : base;
     }
 }
