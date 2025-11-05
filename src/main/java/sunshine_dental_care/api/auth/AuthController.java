@@ -5,13 +5,13 @@ import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
-import sunshine_dental_care.dto.authDTO.LoginRequest;
-import sunshine_dental_care.dto.authDTO.LoginResponse;
-import sunshine_dental_care.dto.authDTO.SignUpRequest;
-import sunshine_dental_care.dto.authDTO.SignUpResponse;
+import sunshine_dental_care.dto.authDTO.*;
+import sunshine_dental_care.security.CurrentUser;
 import sunshine_dental_care.services.auth_service.AuthService;
 import java.io.IOException;
+import java.util.Map;
 
 @RestController
 @RequestMapping("/api/auth")
@@ -33,5 +33,17 @@ public class AuthController {
     @GetMapping("/google")
     public void google(HttpServletResponse response) throws IOException {
         response.sendRedirect("/oauth2/authorization/google");
+    }
+
+    @PostMapping("/change-password")
+    public ResponseEntity<?> changePassword(
+            @Valid @RequestBody ChangePasswordRequest req,
+            Authentication authentication
+    ) {
+        CurrentUser cu = (CurrentUser) authentication.getPrincipal();
+        Integer userId = cu.userId();
+
+        authService.changePassword(userId, req);
+        return ResponseEntity.ok(Map.of("message", "Password changed successfully"));
     }
 }

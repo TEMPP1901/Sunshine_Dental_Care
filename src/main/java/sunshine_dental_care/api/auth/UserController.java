@@ -9,6 +9,7 @@ import org.springframework.web.multipart.MultipartFile;
 import sunshine_dental_care.entities.User;
 import sunshine_dental_care.repositories.auth.UserRepo;
 import sunshine_dental_care.security.CurrentUser;
+import sunshine_dental_care.services.auth_service.AvatarUrlService;
 import sunshine_dental_care.services.upload_file.AvatarStorageService;
 
 import java.util.Map;
@@ -19,6 +20,8 @@ import java.util.Map;
 public class UserController {
     private final UserRepo userRepo;
     private final AvatarStorageService avatarStorageService;
+    private final AvatarUrlService avatarUrlService;
+
 
     @Value("${app.public-base-url}")
     private String publicBaseUrl;
@@ -28,7 +31,8 @@ public class UserController {
         User u = userRepo.findById(cu.userId())
                 .orElseThrow(() -> new IllegalArgumentException("User not found"));
 
-        String avatarAbs = toAbsolute(u.getAvatarUrl());
+        String avatarAbs = avatarUrlService.toAbsolute(u.getAvatarUrl());
+        boolean hasPassword = u.getPasswordHash() != null && !u.getPasswordHash().isBlank();
 
         var body = new java.util.LinkedHashMap<String, Object>();
         body.put("userId", u.getId());
@@ -38,6 +42,7 @@ public class UserController {
         body.put("username", u.getUsername());
         body.put("avatarUrl", avatarAbs);
         body.put("roles", cu.roles());
+        body.put("hasPassword", hasPassword);
 
         return ResponseEntity.ok(body);
     }
@@ -71,7 +76,7 @@ public class UserController {
             put("email", u.getEmail());
             put("phone", u.getPhone());
             put("username", u.getUsername());
-            put("avatarUrl", toAbsolute(u.getAvatarUrl()));
+            put("avatarUrl", avatarUrlService.toAbsolute(u.getAvatarUrl()));
         }});
     }
 
@@ -88,9 +93,7 @@ public class UserController {
         User u = userRepo.findById(id)
                 .orElseThrow(() -> new IllegalArgumentException("User not found"));
 
-        // Service hiện trả về relative path -> build absolute tại đây
-        String relative = avatarStorageService.storeAvatar(file, id);
-        String absolute = toAbsolute(relative);
+        String absolute = avatarStorageService.storeAvatar(file, id);
 
         u.setAvatarUrl(absolute);
         userRepo.save(u);
@@ -99,19 +102,5 @@ public class UserController {
                 "userId", u.getId(),
                 "avatarUrl", absolute
         ));
-    }
-
-    private String toAbsolute(String path) {
-        if (path == null || path.isBlank()) {
-            return normalizeBase(publicBaseUrl) + "/uploads_avatar/default-avatar.png";
-        }
-        String p = path.trim();
-        if (p.startsWith("http://") || p.startsWith("https://")) return p;
-        if (!p.startsWith("/")) p = "/" + p;
-        return normalizeBase(publicBaseUrl) + p;
-    }
-
-    private String normalizeBase(String base) {
-        return (base != null && base.endsWith("/")) ? base.substring(0, base.length() - 1) : base;
     }
 }

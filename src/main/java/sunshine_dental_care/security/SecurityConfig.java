@@ -4,18 +4,18 @@ import jakarta.servlet.http.HttpServletResponse;
 import lombok.RequiredArgsConstructor;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.http.HttpMethod;
 import org.springframework.security.config.Customizer;
 import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
+import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
 import org.springframework.security.config.http.SessionCreationPolicy;
-import org.springframework.security.web.SecurityFilterChain;
-import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
-
-import org.springframework.http.HttpMethod;
-import org.springframework.security.oauth2.client.userinfo.OAuth2UserService;
 import org.springframework.security.oauth2.client.userinfo.OAuth2UserRequest;
+import org.springframework.security.oauth2.client.userinfo.OAuth2UserService;
 import org.springframework.security.oauth2.core.user.OAuth2User;
+import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.AuthenticationSuccessHandler;
+import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
 
 @Configuration
 @RequiredArgsConstructor
@@ -31,34 +31,58 @@ public class SecurityConfig {
         http
                 // CORS + CSRF
                 .cors(Customizer.withDefaults())
-                .csrf(csrf -> csrf.disable())
+                .csrf(AbstractHttpConfigurer::disable)
 
-                // Stateless
+                // Stateless (JWT)
                 .sessionManagement(sm -> sm.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
 
-                .exceptionHandling(e -> e.authenticationEntryPoint((req, res, ex) -> {
-                    String uri = req.getRequestURI();
-                    if (uri != null && uri.startsWith("/api/")) {
-                        res.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
-                        res.setContentType("application/json;charset=UTF-8");
-                        res.getWriter().write("{\"message\":\"Unauthorized\"}");
-                    } else {
-                        res.sendError(HttpServletResponse.SC_UNAUTHORIZED);
-                    }
-                }))
+                // Trả JSON cho 401 & 403 để FE dễ xử lý
+                .exceptionHandling(e -> e
+                        .authenticationEntryPoint((req, res, ex) -> {
+                            String uri = req.getRequestURI();
+                            if (uri != null && uri.startsWith("/api/")) {
+                                res.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
+                                res.setContentType("application/json;charset=UTF-8");
+                                res.getWriter().write("{\"message\":\"Unauthorized\"}");
+                            } else {
+                                res.sendError(HttpServletResponse.SC_UNAUTHORIZED);
+                            }
+                        })
+                        .accessDeniedHandler((req, res, ex) -> {
+                            String uri = req.getRequestURI();
+                            if (uri != null && uri.startsWith("/api/")) {
+                                res.setStatus(HttpServletResponse.SC_FORBIDDEN);
+                                res.setContentType("application/json;charset=UTF-8");
+                                res.getWriter().write("{\"message\":\"Forbidden\"}");
+                            } else {
+                                res.sendError(HttpServletResponse.SC_FORBIDDEN);
+                            }
+                        })
+                )
 
                 .authorizeHttpRequests(auth -> auth
+                        // Preflight
                         .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
+
+                        // Public endpoints
                         .requestMatchers("/locale").permitAll()
                         .requestMatchers("/api/auth/sign-up", "/api/auth/login").permitAll()
-                        .requestMatchers("/uploads_avatar/**").permitAll()
                         .requestMatchers("/api/auth/google", "/oauth2/**", "/login/oauth2/**").permitAll()
+                        .requestMatchers("/uploads_avatar/**").permitAll()
+
+                        // Authenticated endpoints
+                        .requestMatchers(HttpMethod.POST, "/api/auth/change-password").authenticated()
+
                         .anyRequest().authenticated()
                 )
+
+                // OAuth2 login
                 .oauth2Login(oauth -> oauth
                         .userInfoEndpoint(u -> u.userService(oAuth2UserService))
                         .successHandler(oAuth2SuccessHandler)
                 )
+
+                // JWT filter
                 .addFilterBefore(jwtAuthFilter, UsernamePasswordAuthenticationFilter.class);
 
         return http.build();
