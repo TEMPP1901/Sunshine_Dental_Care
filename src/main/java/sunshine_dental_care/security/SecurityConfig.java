@@ -19,7 +19,7 @@ import org.springframework.security.web.authentication.UsernamePasswordAuthentic
 
 @Configuration
 @RequiredArgsConstructor
-@EnableMethodSecurity
+@EnableMethodSecurity(prePostEnabled = true)
 public class SecurityConfig {
 
     private final JwtAuthFilter jwtAuthFilter;
@@ -73,6 +73,9 @@ public class SecurityConfig {
                         // Authenticated endpoints
                         .requestMatchers(HttpMethod.POST, "/api/auth/change-password").authenticated()
 
+                        // Additional auth endpoints
+                        .requestMatchers("/auth/sign-up").permitAll()  // Cho phép đăng ký PATIENT
+                        .requestMatchers("/api/hr/employees/**").hasRole("HR")  // Chỉ HR được phép
                         .anyRequest().authenticated()
                 )
 
@@ -84,7 +87,6 @@ public class SecurityConfig {
 
                 // JWT filter
                 .addFilterBefore(jwtAuthFilter, UsernamePasswordAuthenticationFilter.class);
-
         return http.build();
     }
 }
