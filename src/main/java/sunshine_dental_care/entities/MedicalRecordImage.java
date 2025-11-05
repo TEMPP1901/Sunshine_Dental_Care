@@ -46,6 +46,7 @@ public class MedicalRecordImage {
         this.imageUrl = imageUrl;
     }
 
+
     public String getDescription() {
         return description;
     }
