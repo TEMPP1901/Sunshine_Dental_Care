@@ -1,7 +1,9 @@
 package sunshine_dental_care.api.auth;
 
+import java.io.IOException;
 
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -10,14 +12,11 @@ import org.springframework.web.bind.annotation.RestController;
 import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
-import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.annotation.*;
 import sunshine_dental_care.dto.authDTO.LoginRequest;
 import sunshine_dental_care.dto.authDTO.LoginResponse;
 import sunshine_dental_care.dto.authDTO.SignUpRequest;
 import sunshine_dental_care.dto.authDTO.SignUpResponse;
 import sunshine_dental_care.services.auth_service.AuthService;
-import java.io.IOException;
 
 @RestController
 @RequestMapping("/api/auth")

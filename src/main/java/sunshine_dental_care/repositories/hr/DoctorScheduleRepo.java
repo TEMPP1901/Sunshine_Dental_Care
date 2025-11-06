@@ -17,6 +17,10 @@ public interface DoctorScheduleRepo extends JpaRepository<DoctorSchedule, Intege
     @Query("SELECT d FROM DoctorSchedule d WHERE d.workDate = :workDate ORDER BY d.doctor.id")
     List<DoctorSchedule> findByWorkDate(@Param("workDate") LocalDate workDate);
     
+    // Lấy lịch cho cả tuần (từ Monday đến Saturday, 6 ngày)
+    @Query("SELECT d FROM DoctorSchedule d WHERE d.workDate >= :weekStart AND d.workDate <= :weekEnd ORDER BY d.workDate, d.doctor.id")
+    List<DoctorSchedule> findByWeekRange(@Param("weekStart") LocalDate weekStart, @Param("weekEnd") LocalDate weekEnd);
+    
     // Lấy lịch của cơ sở theo ngày
     @Query("SELECT d FROM DoctorSchedule d WHERE d.clinic.id = :clinicId AND d.workDate = :workDate ORDER BY d.doctor.id")
     List<DoctorSchedule> findByClinicAndDate(@Param("clinicId") Integer clinicId, @Param("workDate") LocalDate workDate);

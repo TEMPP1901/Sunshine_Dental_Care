@@ -1,10 +1,14 @@
 package sunshine_dental_care.services.auth_service;
 
-import lombok.RequiredArgsConstructor;
+import java.time.Instant;
+import java.util.List;
+
 import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+
+import lombok.RequiredArgsConstructor;
 import sunshine_dental_care.dto.authDTO.LoginRequest;
 import sunshine_dental_care.dto.authDTO.LoginResponse;
 import sunshine_dental_care.dto.authDTO.SignUpRequest;
@@ -17,9 +21,6 @@ import sunshine_dental_care.repositories.auth.RoleRepo;
 import sunshine_dental_care.repositories.auth.UserRepo;
 import sunshine_dental_care.repositories.auth.UserRoleRepo;
 import sunshine_dental_care.services.jwt_security.JwtService;
-
-import java.time.Instant;
-import java.util.List;
 
 @Service
 @RequiredArgsConstructor

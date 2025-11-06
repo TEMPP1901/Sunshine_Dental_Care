@@ -18,7 +18,7 @@ public class EmployeeRequest {
     @Pattern(regexp = "^[0-9]{10,11}$", message = "Phone must be 10-11 digits")
     private String phone;
     
-    @NotBlank(message = "Username is required")
+    // Username is optional - will be auto-generated from email if not provided
     @Size(min = 3, max = 50, message = "Username must be between 3 and 50 characters")
     private String username;
     
@@ -33,9 +33,9 @@ public class EmployeeRequest {
     @NotNull(message = "Role ID is required for new employee")
     private Integer roleId;           // Chỉ cần khi tạo mới
     
-    @NotNull(message = "Clinic ID is required for new employee")
-    private Integer clinicId;         // Chỉ cần khi tạo mới
-    private String roleAtClinic;
+    private Integer clinicId;         // Optional - can be null
+    private Integer roomId;           // Optional - room assignment
+    private String roleAtClinic;      // Optional - removed from form
     private String description;
     
     // Constructors
@@ -154,5 +154,13 @@ public class EmployeeRequest {
     
     public void setDescription(String description) {
         this.description = description;
+    }
+    
+    public Integer getRoomId() {
+        return roomId;
+    }
+    
+    public void setRoomId(Integer roomId) {
+        this.roomId = roomId;
     }
 }
