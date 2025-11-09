@@ -68,7 +68,7 @@ public class SecurityConfig {
                         .requestMatchers("/locale").permitAll()
                         .requestMatchers("/api/auth/sign-up", "/api/auth/login").permitAll()
                         .requestMatchers("/api/auth/google", "/oauth2/**", "/login/oauth2/**").permitAll()
-                        .requestMatchers("/uploads_avatar/**").permitAll()
+
 
                         // Authenticated endpoints
                         .requestMatchers(HttpMethod.POST, "/api/auth/change-password").authenticated()

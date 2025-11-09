@@ -51,6 +51,9 @@ public class User {
     @Column(name = "providerId", length = 200)
     private String providerId;
 
+    @Column(name = "avatarPublicId", length = 400)
+    private String avatarPublicId;
+
     @ColumnDefault("1")
     @Column(name = "isActive", nullable = false)
     private Boolean isActive = false;
@@ -145,6 +148,9 @@ public class User {
     public String getProviderId() {
         return providerId;
     }
+
+    public String getAvatarPublicId() { return avatarPublicId; }
+    public void setAvatarPublicId(String avatarPublicId) { this.avatarPublicId = avatarPublicId; }
 
     public void setProviderId(String providerId) {
         this.providerId = providerId;

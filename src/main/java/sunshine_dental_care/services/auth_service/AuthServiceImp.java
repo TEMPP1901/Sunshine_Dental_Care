@@ -30,7 +30,6 @@ public class AuthServiceImp implements AuthService {
     private final RoleRepo roleRepo;
     private final UserRoleRepo userRoleRepo;
     private final JwtService jwtService;
-    private final AvatarUrlService avatarUrlService;
 
     private String resolveUsername(String username, String email) {
         if (username != null && !username.isBlank()) return username.trim();
@@ -107,7 +106,7 @@ public class AuthServiceImp implements AuthService {
         String locale = (req.locale() == null || req.locale().isBlank()) ? "en" : req.locale();
         mailService.sendPatientCodeEmail(p, locale);
 
-        return new SignUpResponse(u.getId(), p.getId(), patientCode, avatarUrlService.toAbsolute(u.getAvatarUrl())
+        return new SignUpResponse(u.getId(), p.getId(), patientCode, u.getAvatarUrl()
         );
     }
 
@@ -146,7 +145,7 @@ public class AuthServiceImp implements AuthService {
                 u.getId(),
                 u.getFullName(),
                 u.getEmail(),
-                avatarUrlService.toAbsolute(u.getAvatarUrl()),
+                u.getAvatarUrl(),
                 roles
         );
     }
@@ -157,7 +156,7 @@ public class AuthServiceImp implements AuthService {
         User u = userRepo.findById(currentUserId)
                 .orElseThrow(() -> new IllegalArgumentException("User not found"));
 
-        // Tài khoản Google-only (chưa từng có mật khẩu local)
+        // Tài khoản Google-only
         if (u.getPasswordHash() == null || u.getPasswordHash().isBlank()) {
             throw new IllegalArgumentException("This account has no password. Please use Set Password instead.");
         }
