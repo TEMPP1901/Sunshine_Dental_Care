@@ -13,6 +13,14 @@ public class ImageResizeUtil {
 
         int w = originalImage.getWidth();
         int h = originalImage.getHeight();
+
+        if (w < targetWidth || h < targetHeight) {
+            throw new IOException(
+                    "Ảnh quá nhỏ, bỏ qua resize. Kích thước gốc: " + w + "x" + h +
+                            ", yêu cầu tối thiểu: " + targetWidth + "x" + targetHeight
+            );
+        }
+
         double scale = Math.min((double) targetWidth / w, (double) targetHeight / h);
         int newW = Math.max(1, (int) Math.round(w * scale));
         int newH = Math.max(1, (int) Math.round(h * scale));
