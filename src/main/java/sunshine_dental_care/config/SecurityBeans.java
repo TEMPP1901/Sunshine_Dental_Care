@@ -1,3 +1,4 @@
+// Đăng ký bean mã hóa mật khẩu (BCrypt) và bật xử lý bất đồng bộ @Async
 package sunshine_dental_care.config;
 
 import org.springframework.context.annotation.Bean;

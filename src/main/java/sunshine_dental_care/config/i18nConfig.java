@@ -1,3 +1,5 @@
+// xử lí config i18n
+
 package sunshine_dental_care.config;
 
 import org.springframework.context.annotation.Bean;

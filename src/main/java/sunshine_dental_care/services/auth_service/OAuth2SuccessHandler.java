@@ -1,9 +1,7 @@
 package sunshine_dental_care.services.auth_service;
 
-import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
-
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.core.Authentication;
@@ -34,8 +32,7 @@ public class OAuth2SuccessHandler implements AuthenticationSuccessHandler {
     @Override
     public void onAuthenticationSuccess(HttpServletRequest request,
                                         HttpServletResponse response,
-                                        Authentication authentication)
-            throws IOException, ServletException {
+                                        Authentication authentication) throws IOException {
 
         OAuth2User oAuth2User = (OAuth2User) authentication.getPrincipal();
         String email = String.valueOf(oAuth2User.getAttributes().get("email"));
@@ -46,26 +43,16 @@ public class OAuth2SuccessHandler implements AuthenticationSuccessHandler {
         List<String> roles = userRoleRepo.findRoleNamesByUserId(u.getId());
         String token = jwtService.generateToken(u.getId(), u.getEmail(), u.getFullName(), roles);
 
-        String userJson = String.format(
-                "{\"userId\":%d,\"fullName\":\"%s\",\"email\":\"%s\",\"avatarUrl\":\"%s\"}",
-                u.getId(),
-                escape(u.getFullName()),
-                escape(u.getEmail()),
-                escape(u.getAvatarUrl() == null ? "" : u.getAvatarUrl())
-        );
-
+        // Gửi token; FE sẽ gọi /api/users/me để lấy user + avatar absolute
         String redirectUrl = redirectUriSuccess
                 + "?access_token=" + enc(token)
-                + "&user=" + enc(userJson);
+                + "&token_type=Bearer"
+                + "&expires_in=" + jwtService.getExpirationSeconds();
 
         response.sendRedirect(redirectUrl);
     }
 
     private String enc(String s) {
         return URLEncoder.encode(s, StandardCharsets.UTF_8);
-    }
-
-    private String escape(String s) {
-        return s == null ? "" : s.replace("\"", "\\\"");
     }
 }
