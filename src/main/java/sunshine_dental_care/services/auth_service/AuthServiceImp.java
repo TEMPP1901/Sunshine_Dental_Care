@@ -13,6 +13,7 @@ import sunshine_dental_care.dto.authDTO.LoginRequest;
 import sunshine_dental_care.dto.authDTO.LoginResponse;
 import sunshine_dental_care.dto.authDTO.SignUpRequest;
 import sunshine_dental_care.dto.authDTO.SignUpResponse;
+import sunshine_dental_care.dto.authDTO.*;
 import sunshine_dental_care.entities.Patient;
 import sunshine_dental_care.entities.User;
 import sunshine_dental_care.entities.UserRole;
@@ -110,7 +111,8 @@ public class AuthServiceImp implements AuthService {
         String locale = (req.locale() == null || req.locale().isBlank()) ? "en" : req.locale();
         mailService.sendPatientCodeEmail(p, locale);
 
-        return new SignUpResponse(u.getId(), p.getId(), patientCode, u.getAvatarUrl());
+        return new SignUpResponse(u.getId(), p.getId(), patientCode, u.getAvatarUrl()
+        );
     }
 
     @Override
@@ -151,5 +153,26 @@ public class AuthServiceImp implements AuthService {
                 u.getAvatarUrl(),
                 roles
         );
+    }
+
+    @Override
+    @Transactional
+    public void changePassword(Integer currentUserId, ChangePasswordRequest req) {
+        User u = userRepo.findById(currentUserId)
+                .orElseThrow(() -> new IllegalArgumentException("User not found"));
+
+        // Tài khoản Google-only
+        if (u.getPasswordHash() == null || u.getPasswordHash().isBlank()) {
+            throw new IllegalArgumentException("This account has no password. Please use Set Password instead.");
+        }
+
+        // Sai current password
+        if (!encoder.matches(req.currentPassword(), u.getPasswordHash())) {
+            throw new IllegalArgumentException("Current password is incorrect");
+        }
+
+        // DTO đã check: confirm khớp + khác current
+        u.setPasswordHash(encoder.encode(req.newPassword()));
+        userRepo.save(u);
     }
 }
