@@ -16,6 +16,12 @@ import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 
 import lombok.extern.slf4j.Slf4j;
+import sunshine_dental_care.exceptions.hr.AttendanceExceptions.AlreadyCheckedInException;
+import sunshine_dental_care.exceptions.hr.AttendanceExceptions.AttendanceException;
+import sunshine_dental_care.exceptions.hr.AttendanceExceptions.AttendanceNotFoundException;
+import sunshine_dental_care.exceptions.hr.AttendanceExceptions.AttendanceValidationException;
+import sunshine_dental_care.exceptions.hr.AttendanceExceptions.FaceVerificationFailedException;
+import sunshine_dental_care.exceptions.hr.AttendanceExceptions.WiFiValidationFailedException;
 import sunshine_dental_care.exceptions.hr.DoctorNotAvailableException;
 import sunshine_dental_care.exceptions.hr.EmployeeExceptions.EmployeeException;
 import sunshine_dental_care.exceptions.hr.EmployeeExceptions.EmployeeNotFoundException;
@@ -228,6 +234,86 @@ public class GlobalExceptionHandler {
         response.put("message", ex.getMessage());
 
         log.error("HR Management error: {}", ex.getMessage(), ex);
+        return ResponseEntity.badRequest().body(response);
+    }
+
+    // ========== ATTENDANCE EXCEPTIONS ==========
+    
+    // Lỗi không tìm thấy attendance
+    @ExceptionHandler(AttendanceNotFoundException.class)
+    public ResponseEntity<Map<String, Object>> handleAttendanceNotFoundException(AttendanceNotFoundException ex) {
+        Map<String, Object> response = new HashMap<>();
+        response.put("timestamp", LocalDateTime.now());
+        response.put("status", HttpStatus.NOT_FOUND.value());
+        response.put("error", "Attendance Not Found");
+        response.put("message", ex.getMessage());
+
+        log.warn("Attendance not found: {}", ex.getMessage());
+        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(response);
+    }
+    
+    // Lỗi validation attendance (face, WiFi, ...)
+    @ExceptionHandler(AttendanceValidationException.class)
+    public ResponseEntity<Map<String, Object>> handleAttendanceValidationException(AttendanceValidationException ex) {
+        Map<String, Object> response = new HashMap<>();
+        response.put("timestamp", LocalDateTime.now());
+        response.put("status", HttpStatus.BAD_REQUEST.value());
+        response.put("error", "Attendance Validation Failed");
+        response.put("message", ex.getMessage());
+
+        log.warn("Attendance validation failed: {}", ex.getMessage());
+        return ResponseEntity.badRequest().body(response);
+    }
+    
+    // Lỗi đã check-in rồi
+    @ExceptionHandler(AlreadyCheckedInException.class)
+    public ResponseEntity<Map<String, Object>> handleAlreadyCheckedInException(AlreadyCheckedInException ex) {
+        Map<String, Object> response = new HashMap<>();
+        response.put("timestamp", LocalDateTime.now());
+        response.put("status", HttpStatus.CONFLICT.value());
+        response.put("error", "Already Checked In");
+        response.put("message", ex.getMessage());
+
+        log.warn("Already checked in: {}", ex.getMessage());
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(response);
+    }
+    
+    // Lỗi face verification failed
+    @ExceptionHandler(FaceVerificationFailedException.class)
+    public ResponseEntity<Map<String, Object>> handleFaceVerificationFailedException(FaceVerificationFailedException ex) {
+        Map<String, Object> response = new HashMap<>();
+        response.put("timestamp", LocalDateTime.now());
+        response.put("status", HttpStatus.UNAUTHORIZED.value());
+        response.put("error", "Face Verification Failed");
+        response.put("message", ex.getMessage());
+
+        log.warn("Face verification failed: {}", ex.getMessage());
+        return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(response);
+    }
+    
+    // Lỗi WiFi validation failed
+    @ExceptionHandler(WiFiValidationFailedException.class)
+    public ResponseEntity<Map<String, Object>> handleWiFiValidationFailedException(WiFiValidationFailedException ex) {
+        Map<String, Object> response = new HashMap<>();
+        response.put("timestamp", LocalDateTime.now());
+        response.put("status", HttpStatus.FORBIDDEN.value());
+        response.put("error", "WiFi Validation Failed");
+        response.put("message", ex.getMessage());
+
+        log.warn("WiFi validation failed: {}", ex.getMessage());
+        return ResponseEntity.status(HttpStatus.FORBIDDEN).body(response);
+    }
+    
+    // Lỗi logic khác của Attendance
+    @ExceptionHandler(AttendanceException.class)
+    public ResponseEntity<Map<String, Object>> handleAttendanceException(AttendanceException ex) {
+        Map<String, Object> response = new HashMap<>();
+        response.put("timestamp", LocalDateTime.now());
+        response.put("status", HttpStatus.BAD_REQUEST.value());
+        response.put("error", "Attendance Error");
+        response.put("message", ex.getMessage());
+
+        log.error("Attendance error: {}", ex.getMessage(), ex);
         return ResponseEntity.badRequest().body(response);
     }
 

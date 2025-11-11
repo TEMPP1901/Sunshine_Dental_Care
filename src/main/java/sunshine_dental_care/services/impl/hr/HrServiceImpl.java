@@ -155,6 +155,16 @@ public class HrServiceImpl implements HrService {
 
     @Override
     @Transactional(readOnly = true)
+    public List<DoctorScheduleDto> getScheduleByDate(LocalDate date) {
+        List<DoctorSchedule> schedules = doctorScheduleRepo.findByWorkDate(date);
+        log.debug("Fetching schedules for date {}, found {} schedules", date, schedules.size());
+        return schedules.stream()
+                .map(this::convertToDto)
+                .collect(Collectors.toList());
+    }
+
+    @Override
+    @Transactional(readOnly = true)
     // PHƯƠNG THỨC QUAN TRỌNG: Xác thực phân công tuần (luật phức tạp, đảm bảo hợp lệ)
     public ValidationResultDto validateSchedule(CreateWeeklyScheduleRequest request) {
         ValidationResultDto result = new ValidationResultDto();
@@ -212,15 +222,13 @@ public class HrServiceImpl implements HrService {
                 Integer doctorId = entry.getKey();
                 List<CreateWeeklyScheduleRequest.DoctorAssignmentRequest> assignments = entry.getValue();
 
-                if (assignments.size() > 1) {
-                    result.addError("Doctor ID " + doctorId + " has " + assignments.size() + " assignments on " + dayName + ". Each doctor should have only 1 assignment (full day) per day");
-                }
-
+                // Cho phép một bác sĩ có nhiều ca trong một ngày, nhưng không được overlap
                 for (int i = 0; i < assignments.size(); i++) {
                     CreateWeeklyScheduleRequest.DoctorAssignmentRequest assignment1 = assignments.get(i);
                     if (assignment1.getStartTime().isAfter(assignment1.getEndTime())) {
                         result.addError("Start time must be before end time for doctor ID " + doctorId + " on " + dayName);
                     }
+                    // Kiểm tra overlap giữa các ca mới
                     for (int j = i + 1; j < assignments.size(); j++) {
                         CreateWeeklyScheduleRequest.DoctorAssignmentRequest assignment2 = assignments.get(j);
                         boolean overlaps = assignment1.getStartTime().isBefore(assignment2.getEndTime())
@@ -232,10 +240,23 @@ public class HrServiceImpl implements HrService {
                         }
                     }
                 }
-                if (doctorScheduleRepo.existsByDoctorAndDate(doctorId, workDate)) {
-                    String errorMsg = "Doctor ID " + doctorId + " is already assigned on " + workDate;
-                    result.addError(errorMsg);
+                // Kiểm tra xem bác sĩ đã có lịch trong ngày này chưa (kiểm tra overlap với lịch hiện có)
+                List<DoctorSchedule> existingSchedules = doctorScheduleRepo.findByDoctorIdAndWorkDate(doctorId, workDate);
+                for (CreateWeeklyScheduleRequest.DoctorAssignmentRequest newAssignment : assignments) {
+                    for (DoctorSchedule existing : existingSchedules) {
+                        // Kiểm tra overlap: startTime < existing.endTime && existing.startTime < endTime
+                        boolean overlaps = newAssignment.getStartTime().isBefore(existing.getEndTime())
+                                && existing.getStartTime().isBefore(newAssignment.getEndTime());
+                        if (overlaps) {
+                            String errorMsg = "Doctor ID " + doctorId + " already has an overlapping schedule on " + workDate
+                                    + " (" + existing.getStartTime() + "-" + existing.getEndTime() + ")";
+                            result.addError(errorMsg);
+                            break;
+                        }
+                    }
                 }
+                
+                
             }
 
             Set<Integer> clinicIdsInDay = new HashSet<>();

@@ -28,4 +28,17 @@ public interface DoctorScheduleRepo extends JpaRepository<DoctorSchedule, Intege
     // Kiểm tra bác sĩ đã được phân công chưa trong ngày
     @Query("SELECT COUNT(d) > 0 FROM DoctorSchedule d WHERE d.doctor.id = :doctorId AND d.workDate = :workDate")
     boolean existsByDoctorAndDate(@Param("doctorId") Integer doctorId, @Param("workDate") LocalDate workDate);
+    
+    // Lấy schedule của user tại clinic trong ngày
+    @Query("SELECT d FROM DoctorSchedule d WHERE d.doctor.id = :userId AND d.clinic.id = :clinicId AND d.workDate = :workDate")
+    List<DoctorSchedule> findByUserIdAndClinicIdAndWorkDate(
+        @Param("userId") Integer userId, 
+        @Param("clinicId") Integer clinicId, 
+        @Param("workDate") LocalDate workDate);
+    
+    // Lấy tất cả schedule của bác sĩ trong ngày
+    @Query("SELECT d FROM DoctorSchedule d WHERE d.doctor.id = :doctorId AND d.workDate = :workDate ORDER BY d.startTime")
+    List<DoctorSchedule> findByDoctorIdAndWorkDate(
+        @Param("doctorId") Integer doctorId, 
+        @Param("workDate") LocalDate workDate);
 }

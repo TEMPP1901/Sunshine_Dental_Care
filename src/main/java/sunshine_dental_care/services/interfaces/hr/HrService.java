@@ -16,6 +16,7 @@ public interface HrService {
     List<DoctorScheduleDto> getCurrentWeekSchedule();
     List<DoctorScheduleDto> getScheduleByWeek(LocalDate weekStart);
     List<DoctorScheduleDto> getNextWeekSchedule();
+    List<DoctorScheduleDto> getScheduleByDate(LocalDate date);
     
     // 3. VALIDATION
     ValidationResultDto validateSchedule(CreateWeeklyScheduleRequest request);
