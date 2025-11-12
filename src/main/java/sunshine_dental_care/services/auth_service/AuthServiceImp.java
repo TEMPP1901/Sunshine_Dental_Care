@@ -9,6 +9,8 @@ import sunshine_dental_care.dto.authDTO.*;
 import sunshine_dental_care.entities.Patient;
 import sunshine_dental_care.entities.User;
 import sunshine_dental_care.entities.UserRole;
+import sunshine_dental_care.exceptions.auth.DuplicateEmailException;
+import sunshine_dental_care.exceptions.auth.DuplicateUsernameException;
 import sunshine_dental_care.repositories.auth.PatientRepo;
 import sunshine_dental_care.repositories.auth.RoleRepo;
 import sunshine_dental_care.repositories.auth.UserRepo;
@@ -62,12 +64,12 @@ public class AuthServiceImp implements AuthService {
     @Transactional
     public SignUpResponse signUp(SignUpRequest req) {
         userRepo.findByEmailIgnoreCase(req.email()).ifPresent(u -> {
-            throw new IllegalArgumentException("Email is already registered");
+            throw new DuplicateEmailException(req.email());
         });
 
         if (req.username() != null && !req.username().isBlank() &&
                 userRepo.findByUsernameIgnoreCase(req.username()).isPresent()) {
-            throw new IllegalArgumentException("Username is already taken");
+            throw new DuplicateUsernameException(req.username());
         }
 
         // 1) Tạo User
@@ -84,13 +86,12 @@ public class AuthServiceImp implements AuthService {
         try {
             userRepo.save(u);
         } catch (org.springframework.dao.DataIntegrityViolationException ex) {
-            Throwable root = (ex.getMostSpecificCause() != null ? ex.getMostSpecificCause() : ex);
-            throw new IllegalArgumentException("Sign up failed: " + root.getMessage(), ex);
+            throw ex;
         }
 
         ensureDefaultUserRole(u);
 
-        // 2) Tạo Patient + sinh patientCode (SDC-XXXXXXXX)
+        // 2) Tạo Patient + sinh patientCode
         Patient p = new Patient();
         p.setUser(u);
         p.setFullName(u.getFullName());
@@ -124,7 +125,7 @@ public class AuthServiceImp implements AuthService {
             throw new BadCredentialsException("Invalid email or password");
         }
 
-        // Lấy roles từ UserRoles; nếu trống → gán ROLE_USER mặc định
+        // Lấy roles từ UserRoles; nếu trống → gán ROLE_USER
         List<String> roles = userRoleRepo.findRoleNamesByUserId(u.getId());
         if (roles.isEmpty()) {
             ensureDefaultUserRole(u);
@@ -156,7 +157,7 @@ public class AuthServiceImp implements AuthService {
         User u = userRepo.findById(currentUserId)
                 .orElseThrow(() -> new IllegalArgumentException("User not found"));
 
-        // Tài khoản Google-only
+        // Account Google-only
         if (u.getPasswordHash() == null || u.getPasswordHash().isBlank()) {
             throw new IllegalArgumentException("This account has no password. Please use Set Password instead.");
         }
@@ -166,7 +167,7 @@ public class AuthServiceImp implements AuthService {
             throw new IllegalArgumentException("Current password is incorrect");
         }
 
-        // DTO đã check: confirm khớp + khác current
+        // DTO đã check: confirm match
         u.setPasswordHash(encoder.encode(req.newPassword()));
         userRepo.save(u);
     }
