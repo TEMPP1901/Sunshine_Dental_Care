@@ -4,6 +4,7 @@ import java.time.ZoneOffset;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 import org.springframework.data.domain.Page;
 import org.springframework.stereotype.Component;
@@ -12,6 +13,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import sunshine_dental_care.dto.hrDTO.EmployeeResponse;
 import sunshine_dental_care.entities.Clinic;
+import sunshine_dental_care.entities.EmployeeFaceProfile;
 import sunshine_dental_care.entities.Role;
 import sunshine_dental_care.entities.User;
 import sunshine_dental_care.entities.UserClinicAssignment;
@@ -19,6 +21,7 @@ import sunshine_dental_care.entities.UserRole;
 import sunshine_dental_care.repositories.auth.ClinicRepo;
 import sunshine_dental_care.repositories.auth.RoleRepo;
 import sunshine_dental_care.repositories.auth.UserRoleRepo;
+import sunshine_dental_care.repositories.hr.EmployeeFaceProfileRepo;
 import sunshine_dental_care.repositories.hr.UserClinicAssignmentRepo;
 
 @Component
@@ -30,6 +33,7 @@ public class EmployeeMapper {
     private final ClinicRepo clinicRepo;
     private final UserRoleRepo userRoleRepo;
     private final UserClinicAssignmentRepo userClinicAssignmentRepo;
+    private final EmployeeFaceProfileRepo faceProfileRepo;
 
     /**
      * Helper method to get Role entity directly from repository (not a proxy)
@@ -47,7 +51,7 @@ public class EmployeeMapper {
         } catch (Exception ex) {
             log.warn("Error loading role from repository: {}", ex.getMessage());
             try {
-                String roleName = role.getRoleName();
+                role.getRoleName();
                 return role; // Return initialized proxy
             } catch (Exception e) {
                 return null;
@@ -80,6 +84,11 @@ public class EmployeeMapper {
         if (user.getLastLoginAt() != null) {
             response.setLastLoginAt(user.getLastLoginAt().atZone(ZoneOffset.UTC).toLocalDateTime());
         }
+
+        // Set faceImageUrl = avatarUrl (ảnh lưu ở User.avatarUrl, không lưu ở EmployeeFaceProfile)
+        response.setFaceImageUrl(user.getAvatarUrl());
+
+        faceProfileRepo.findByUserId(user.getId()).ifPresent(profile -> applyFaceProfile(response, profile));
 
         return response;
     }
@@ -117,7 +126,11 @@ public class EmployeeMapper {
             log.error("Error batch loading roles: {}", ex.getMessage(), ex);
         }
 
+        Map<Integer, EmployeeFaceProfile> profileMap = faceProfileRepo.findAllById(userIds).stream()
+            .collect(Collectors.toMap(EmployeeFaceProfile::getUserId, profile -> profile));
+
         final Map<Integer, Role> roleMap = userRoleMap;
+        final Map<Integer, EmployeeFaceProfile> faceProfileMap = profileMap;
 
         return users.map(user -> {
             EmployeeResponse response = toEmployeeResponse(user);
@@ -131,11 +144,15 @@ public class EmployeeMapper {
             // Populate department if available (also initialize if needed)
             if (user.getDepartment() != null) {
                 try {
-                    String deptName = user.getDepartment().getDepartmentName();
                     response.setDepartment(user.getDepartment());
                 } catch (Exception ex) {
                     log.warn("Error initializing department for user {}: {}", user.getId(), ex.getMessage());
                 }
+            }
+
+            EmployeeFaceProfile profile = faceProfileMap.get(user.getId());
+            if (profile != null) {
+                applyFaceProfile(response, profile);
             }
 
             return response;
@@ -186,7 +203,17 @@ public class EmployeeMapper {
             log.debug("No clinic assignments found for employee {}", user.getId());
         }
 
+        faceProfileRepo.findByUserId(user.getId()).ifPresent(profile -> applyFaceProfile(response, profile));
+
         return response;
+    }
+
+    private void applyFaceProfile(EmployeeResponse response, EmployeeFaceProfile profile) {
+        if (profile == null) {
+            return;
+        }
+        // Chỉ lấy embedding từ profile, faceImageUrl lấy từ User.avatarUrl (đã set ở toEmployeeResponse)
+        response.setFaceEmbedding(profile.getFaceEmbedding());
     }
 }
 

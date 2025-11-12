@@ -23,6 +23,13 @@ import lombok.Setter;
 public class WiFiConfig {
     
     /**
+     * Bật/tắt enforcement WiFi validation (có throw exception khi fail không)
+     * true = enforce (throw exception khi WiFi không hợp lệ)
+     * false = chỉ log warning, không block check-in
+     */
+    private boolean enforce = true;
+    
+    /**
      * Global WiFi config (fallback nếu không có config riêng cho clinic)
      * Danh sách SSID được phép (comma-separated)
      */
@@ -86,8 +93,9 @@ public class WiFiConfig {
             return false;
         }
         List<String> allowedList = getAllowedSsidsList();
+        // Nếu whitelist empty, KHÔNG cho phép (security: phải có whitelist rõ ràng)
         if (allowedList.isEmpty()) {
-            return false; // Nếu không config thì không cho phép
+            return false;
         }
         return allowedList.contains(ssid.trim().toUpperCase());
     }
@@ -100,8 +108,9 @@ public class WiFiConfig {
             return false;
         }
         List<String> allowedList = getAllowedBssidsList();
+        // Nếu whitelist empty, KHÔNG cho phép (security: phải có whitelist rõ ràng)
         if (allowedList.isEmpty()) {
-            return false; // Nếu không config thì không cho phép
+            return false;
         }
         return allowedList.contains(bssid.trim().toUpperCase());
     }
@@ -128,13 +137,13 @@ public class WiFiConfig {
         ClinicWiFiConfig clinicConfig = clinic.get(String.valueOf(clinicId));
         if (clinicConfig != null) {
             // Dùng config riêng của clinic
-            List<String> allowedSsids = parseList(clinicConfig.getSsids());
-            List<String> allowedBssids = parseList(clinicConfig.getBssids());
+            List<String> clinicAllowedSsids = parseList(clinicConfig.getSsids());
+            List<String> clinicAllowedBssids = parseList(clinicConfig.getBssids());
             
             boolean ssidMatch = ssid != null && !ssid.trim().isEmpty() 
-                && allowedSsids.contains(ssid.trim().toUpperCase());
+                && clinicAllowedSsids.contains(ssid.trim().toUpperCase());
             boolean bssidMatch = bssid != null && !bssid.trim().isEmpty() 
-                && allowedBssids.contains(bssid.trim().toUpperCase());
+                && clinicAllowedBssids.contains(bssid.trim().toUpperCase());
             
             return ssidMatch || bssidMatch;
         }

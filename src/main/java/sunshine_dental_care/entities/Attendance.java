@@ -12,6 +12,8 @@ import jakarta.persistence.Entity;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
+import jakarta.persistence.PrePersist;
+import jakarta.persistence.PreUpdate;
 
 @Entity
 public class Attendance {
@@ -94,6 +96,28 @@ public class Attendance {
     @ColumnDefault("sysutcdatetime()")
     @Column(name = "updatedAt", nullable = false)
     private Instant updatedAt;
+
+    /**
+     * Tự động set createdAt và updatedAt trước khi persist (insert)
+     */
+    @PrePersist
+    protected void onCreate() {
+        Instant now = Instant.now();
+        if (createdAt == null) {
+            createdAt = now;
+        }
+        if (updatedAt == null) {
+            updatedAt = now;
+        }
+    }
+
+    /**
+     * Tự động set updatedAt trước khi update
+     */
+    @PreUpdate
+    protected void onUpdate() {
+        updatedAt = Instant.now();
+    }
 
     public Integer getId() {
         return id;

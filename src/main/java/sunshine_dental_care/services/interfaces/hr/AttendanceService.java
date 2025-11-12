@@ -6,8 +6,11 @@ import java.util.Map;
 
 import org.springframework.data.domain.Page;
 
+import sunshine_dental_care.dto.hrDTO.AdminExplanationActionRequest;
 import sunshine_dental_care.dto.hrDTO.AttendanceCheckInRequest;
 import sunshine_dental_care.dto.hrDTO.AttendanceCheckOutRequest;
+import sunshine_dental_care.dto.hrDTO.AttendanceExplanationRequest;
+import sunshine_dental_care.dto.hrDTO.AttendanceExplanationResponse;
 import sunshine_dental_care.dto.hrDTO.AttendanceResponse;
 import sunshine_dental_care.dto.hrDTO.DailyAttendanceListItemResponse;
 import sunshine_dental_care.dto.hrDTO.DailySummaryResponse;
@@ -101,5 +104,25 @@ public interface AttendanceService {
      * Admin cập nhật trạng thái và ghi chú phê duyệt
      */
     AttendanceResponse updateAttendanceStatus(Integer attendanceId, String newStatus, String adminNote, Integer adminUserId);
+    
+    /**
+     * Nhân viên xem danh sách attendance cần giải trình (LATE, ABSENT, missing check-in/out)
+     */
+    List<AttendanceExplanationResponse> getAttendanceNeedingExplanation(Integer userId);
+    
+    /**
+     * Nhân viên gửi giải trình (update note với format [EXPLANATION_REQUEST:type] reason)
+     */
+    AttendanceResponse submitExplanation(AttendanceExplanationRequest request);
+    
+    /**
+     * Admin xem danh sách tất cả giải trình đang chờ xử lý
+     */
+    List<AttendanceExplanationResponse> getPendingExplanations(Integer clinicId);
+    
+    /**
+     * Admin approve/reject giải trình và cập nhật attendance status
+     */
+    AttendanceResponse processExplanation(AdminExplanationActionRequest request, Integer adminUserId);
 }
 

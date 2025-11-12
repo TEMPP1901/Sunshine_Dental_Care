@@ -2,44 +2,87 @@ package sunshine_dental_care.services.impl.hr;
 
 import java.io.File;
 import java.io.IOException;
+import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.core.io.ClassPathResource;
+import org.springframework.core.io.Resource;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 
+import ai.onnxruntime.OrtException;
+import jakarta.annotation.PostConstruct;
+import jakarta.annotation.PreDestroy;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import sunshine_dental_care.services.interfaces.hr.FaceRecognitionService;
+import sunshine_dental_care.utils.ArcFaceOnnx;
 
 /**
  * Implementation của FaceRecognitionService
  * Xử lý ArcFace .onnx model để extract và verify face embeddings
- * 
- * LƯU Ý: Hiện tại implementation này là STUB (mock)
- * Cần tích hợp ONNX Runtime để load và chạy ArcFace model thực tế
+ * Sử dụng ONNX Runtime và OpenCV
  */
 @Service
 @RequiredArgsConstructor
 @Slf4j
 public class FaceRecognitionServiceImpl implements FaceRecognitionService {
     
-    // TODO: Load ONNX model từ modelPath khi app start
-    // @Value("${app.face-recognition.model-path:models/arcface.onnx}")
-    // private String modelPath;
+    @Value("${app.face-recognition.model-path:models/arcface.onnx}")
+    private String modelPath;
     
     @Value("${app.face-recognition.similarity-threshold:0.7}")
     private double similarityThreshold;
     
     private final ObjectMapper objectMapper = new ObjectMapper();
     
-    // TODO: Load ONNX model khi app start
-    // private OrtEnvironment env;
-    // private OrtSession session;
+    private ArcFaceOnnx arcFaceOnnx;
+    private Path modelFilePath;
+    private boolean deleteModelOnCleanup = false;
+    
+    @PostConstruct
+    public void init() {
+        try {
+            resolveModelFile();
+            if (modelFilePath == null) {
+                log.warn("ArcFace model path could not be resolved. Face recognition will not work.");
+                return;
+            }
+            
+            log.info("Initializing ArcFace ONNX model from: {}", modelFilePath);
+            arcFaceOnnx = new ArcFaceOnnx(modelFilePath.toString());
+            log.info("ArcFace ONNX model initialized successfully");
+            
+        } catch (Exception e) {
+            log.error("Failed to initialize ArcFace ONNX model: {}", e.getMessage(), e);
+            // Không throw exception để app vẫn có thể start, nhưng face recognition sẽ fail
+        }
+    }
+    
+    @PreDestroy
+    public void cleanup() {
+        try {
+            if (arcFaceOnnx != null) {
+                arcFaceOnnx.close();
+            }
+            if (deleteModelOnCleanup && modelFilePath != null) {
+                try {
+                    Files.deleteIfExists(modelFilePath);
+                    log.debug("Temporary ArcFace model file deleted: {}", modelFilePath);
+                } catch (IOException ex) {
+                    log.warn("Failed to delete temporary ArcFace model file {}: {}", modelFilePath, ex.getMessage());
+                }
+            }
+            log.info("ArcFace ONNX resources cleaned up");
+        } catch (Exception e) {
+            log.error("Error cleaning up ArcFace ONNX: {}", e.getMessage(), e);
+        }
+    }
     
     @Override
     public String extractEmbedding(MultipartFile imageFile) throws Exception {
@@ -84,31 +127,32 @@ public class FaceRecognitionServiceImpl implements FaceRecognitionService {
             throw new IOException("Image file not found: " + imagePath);
         }
         
-        // TODO: Implement actual ArcFace inference
-        // 1. Load image với OpenCV hoặc Java ImageIO
-        // 2. Preprocess: Resize to 112x112, normalize, convert to tensor
-        // 3. Run ONNX model inference
-        // 4. Get output (512-dim embedding)
-        // 5. Convert to JSON string
+        // Check if ArcFace model is available
+        if (arcFaceOnnx == null) {
+            throw new IllegalStateException("ArcFace ONNX model not loaded. Please check model path: " + modelPath);
+        }
         
-        // STUB: Tạm thời return mock embedding
-        // Trong thực tế, cần:
-        // - Load ONNX model từ modelPath
-        // - Preprocess ảnh (detect face, align, resize to 112x112)
-        // - Run inference: session.run(inputTensor)
-        // - Extract output[0] (512 float array)
-        // - Convert to JSON
-        
-        log.warn("Face embedding extraction is using STUB implementation. Need to integrate ONNX Runtime.");
-        
-        // Mock: Generate random embedding for testing
-        float[] mockEmbedding = generateMockEmbedding(512);
-        String embeddingJson = objectMapper.writeValueAsString(mockEmbedding);
-        
-        // Validate format
-        validateEmbeddingFormat(embeddingJson);
-        
-        return embeddingJson;
+        try {
+            // Sử dụng ArcFaceOnnx để extract embedding
+            float[] embedding = arcFaceOnnx.getEmbeddingFromImagePath(imagePath);
+            
+            // Convert to JSON string
+            String embeddingJson = ArcFaceOnnx.embeddingToJson(embedding);
+            
+            // Validate format
+            validateEmbeddingFormat(embeddingJson);
+            
+            log.info("Face embedding extracted successfully. Dimensions: {}", embedding.length);
+            
+            return embeddingJson;
+            
+        } catch (OrtException e) {
+            log.error("ONNX Runtime error: {}", e.getMessage(), e);
+            throw new Exception("Failed to run face recognition inference: " + e.getMessage(), e);
+        } catch (Exception e) {
+            log.error("Error extracting face embedding: {}", e.getMessage(), e);
+            throw e;
+        }
     }
     
     @Override
@@ -134,6 +178,12 @@ public class FaceRecognitionServiceImpl implements FaceRecognitionService {
                     inputEmbedding.length, storedEmbedding.length));
         }
         
+        // Log first few values for debugging
+        log.debug("Input embedding sample (first 5): [{}, {}, {}, {}, {}]", 
+                inputEmbedding[0], inputEmbedding[1], inputEmbedding[2], inputEmbedding[3], inputEmbedding[4]);
+        log.debug("Stored embedding sample (first 5): [{}, {}, {}, {}, {}]", 
+                storedEmbedding[0], storedEmbedding[1], storedEmbedding[2], storedEmbedding[3], storedEmbedding[4]);
+        
         // Tính cosine similarity
         double similarity = calculateCosineSimilarity(inputEmbedding, storedEmbedding);
         
@@ -145,7 +195,15 @@ public class FaceRecognitionServiceImpl implements FaceRecognitionService {
             : String.format("Face verification failed. Similarity: %.4f (threshold: %.4f)", 
                 similarity, similarityThreshold);
         
-        log.info("Face verification result: verified={}, similarity={:.4f}", verified, similarity);
+        // Log chi tiết để debug (đặc biệt khi chụp bằng laptop camera)
+        log.info("Face verification result: verified={}, similarity={}, threshold={}, message={}", 
+                verified, String.format("%.4f", similarity), String.format("%.4f", similarityThreshold), message);
+        
+        // Log warning nếu similarity quá thấp (có thể do điều kiện chụp khác nhau)
+        if (similarity < 0.1) {
+            log.warn("Very low similarity score ({}). Possible causes: different camera/lighting/angle, or different person.", 
+                    String.format("%.4f", similarity));
+        }
         
         return new FaceVerificationResult(verified, similarity, message);
     }
@@ -213,27 +271,44 @@ public class FaceRecognitionServiceImpl implements FaceRecognitionService {
         
         return dotProduct / denominator;
     }
-    
+
     /**
-     * Generate mock embedding for testing (sẽ được thay thế bằng ONNX inference)
+     * Resolve model file from configuration string.
+     * Supports absolute/relative paths and classpath resources (classpath:models/arcface.onnx).
      */
-    private float[] generateMockEmbedding(int dimensions) {
-        float[] embedding = new float[dimensions];
-        for (int i = 0; i < dimensions; i++) {
-            embedding[i] = (float) (Math.random() * 2 - 1); // Random values between -1 and 1
+    private void resolveModelFile() throws IOException {
+        if (modelPath == null || modelPath.trim().isEmpty()) {
+            log.warn("app.face-recognition.model-path is empty");
+            modelFilePath = null;
+            return;
         }
-        // Normalize
-        double norm = 0.0;
-        for (float v : embedding) {
-            norm += v * v;
-        }
-        norm = Math.sqrt(norm);
-        if (norm > 0) {
-            for (int i = 0; i < embedding.length; i++) {
-                embedding[i] = (float) (embedding[i] / norm);
+
+        String trimmedPath = modelPath.trim();
+        if (trimmedPath.startsWith("classpath:")) {
+            String resourcePath = trimmedPath.substring("classpath:".length());
+            Resource resource = new ClassPathResource(resourcePath);
+            if (!resource.exists()) {
+                log.warn("ArcFace model resource not found on classpath: {}", resourcePath);
+                modelFilePath = null;
+                return;
             }
+
+            try (InputStream inputStream = resource.getInputStream()) {
+                Path tempFile = Files.createTempFile("arcface-", ".onnx");
+                Files.copy(inputStream, tempFile, StandardCopyOption.REPLACE_EXISTING);
+                modelFilePath = tempFile;
+                deleteModelOnCleanup = true;
+                log.debug("ArcFace model loaded from classpath to temporary file: {}", modelFilePath);
+            }
+        } else {
+            Path candidate = Path.of(trimmedPath).toAbsolutePath().normalize();
+            if (!Files.exists(candidate)) {
+                log.warn("ArcFace model file not found at path: {}", candidate);
+                modelFilePath = null;
+                return;
+            }
+            modelFilePath = candidate;
+            deleteModelOnCleanup = false;
         }
-        return embedding;
     }
 }
-

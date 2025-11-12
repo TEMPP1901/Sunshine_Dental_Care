@@ -1,5 +1,11 @@
 package sunshine_dental_care.services.impl.hr;
 
+import java.io.InputStream;
+import java.net.URI;
+import java.net.URL;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneOffset;
@@ -26,6 +32,7 @@ import sunshine_dental_care.dto.hrDTO.helper.EmployeeStatisticsHelper;
 import sunshine_dental_care.dto.hrDTO.mapper.EmployeeMapper;
 import sunshine_dental_care.entities.Clinic;
 import sunshine_dental_care.entities.Department;
+import sunshine_dental_care.entities.EmployeeFaceProfile;
 import sunshine_dental_care.entities.Role;
 import sunshine_dental_care.entities.User;
 import sunshine_dental_care.entities.UserClinicAssignment;
@@ -37,8 +44,10 @@ import sunshine_dental_care.repositories.auth.RoleRepo;
 import sunshine_dental_care.repositories.auth.UserRepo;
 import sunshine_dental_care.repositories.auth.UserRoleRepo;
 import sunshine_dental_care.repositories.hr.DepartmentRepo;
+import sunshine_dental_care.repositories.hr.EmployeeFaceProfileRepo;
 import sunshine_dental_care.repositories.hr.RoomRepo;
 import sunshine_dental_care.repositories.hr.UserClinicAssignmentRepo;
+import sunshine_dental_care.services.interfaces.hr.FaceRecognitionService;
 import sunshine_dental_care.services.interfaces.hr.HrEmployeeService;
 
 @Service
@@ -57,6 +66,8 @@ public class HrEmployeeServiceImpl implements HrEmployeeService {
     private final EmployeeMapper employeeMapper;
     private final EmployeeFilterHelper filterHelper;
     private final EmployeeStatisticsHelper statisticsHelper;
+    private final FaceRecognitionService faceRecognitionService;
+    private final EmployeeFaceProfileRepo faceProfileRepo;
     @PersistenceContext
     private EntityManager entityManager;
 
@@ -174,6 +185,11 @@ public class HrEmployeeServiceImpl implements HrEmployeeService {
                 }
             }
 
+        // Đồng bộ face profile từ avatarUrl (nếu có)
+        String avatarUrlToSync = user.getAvatarUrl();
+        log.info("Attempting to sync face profile for user {} with avatarUrl: {}", user.getId(), avatarUrlToSync);
+        syncFaceProfileFromAvatar(user, avatarUrlToSync);
+
             // Chuẩn bị dữ liệu trả về cho client
             EmployeeResponse response = new EmployeeResponse();
             response.setId(user.getId());
@@ -202,13 +218,20 @@ public class HrEmployeeServiceImpl implements HrEmployeeService {
                 response.setLastLoginAt(user.getLastLoginAt().atZone(ZoneOffset.UTC).toLocalDateTime());
             }
             log.info("Employee created successfully: userId={}, email={}", user.getId(), user.getEmail());
+
+            // Set faceImageUrl = avatarUrl (ảnh lưu ở User.avatarUrl)
+            response.setFaceImageUrl(user.getAvatarUrl());
+            
+            // Lấy embedding từ EmployeeFaceProfile
+            faceProfileRepo.findByUserId(user.getId()).ifPresent(profile -> {
+                response.setFaceEmbedding(profile.getFaceEmbedding());
+            });
             return response;
         } catch (EmployeeValidationException | EmployeeNotFoundException ex) {
             log.error("Validation/Not found error: {}", ex.getMessage(), ex);
             throw ex;
         } catch (Exception ex) {
             log.error("Unexpected error creating employee: {}", ex.getMessage(), ex);
-            ex.printStackTrace();
             throw new EmployeeValidationException("Failed to create employee: " + ex.getMessage(), ex);
         }
     }
@@ -303,6 +326,13 @@ public class HrEmployeeServiceImpl implements HrEmployeeService {
 
         user = userRepo.save(user);
 
+        // KHÔNG sync face profile khi HR update employee
+        // Chỉ extract embedding khi HR tạo mới employee hoặc upload avatar lần đầu
+        // Để tránh ghi đè embedding đã được tạo từ lần đăng ký đầu tiên
+        // if (request.getAvatarUrl() != null && !request.getAvatarUrl().trim().isEmpty()) {
+        //     syncFaceProfileFromAvatar(user, request.getAvatarUrl());
+        // }
+
         return employeeMapper.toEmployeeResponse(user);
     }
 
@@ -387,7 +417,6 @@ public class HrEmployeeServiceImpl implements HrEmployeeService {
             }
 
             // Đặt isActive=false cho user
-            boolean wasAlreadyInactive = Boolean.FALSE.equals(user.getIsActive());
             user.setIsActive(false);
             user.setUpdatedAt(Instant.now());
             user = userRepo.save(user);
@@ -416,6 +445,71 @@ public class HrEmployeeServiceImpl implements HrEmployeeService {
         } catch (Exception ex) {
             log.error("Unexpected error deleting employee {}: {}", id, ex.getMessage(), ex);
             throw new EmployeeValidationException("Failed to delete employee: " + ex.getMessage(), ex);
+        }
+    }
+
+    private void syncFaceProfileFromAvatar(User user, String avatarUrl) {
+        if (user == null || user.getId() == null) {
+            log.debug("syncFaceProfileFromAvatar: user is null or userId is null");
+            return;
+        }
+        if (avatarUrl == null || avatarUrl.trim().isEmpty()) {
+            log.debug("syncFaceProfileFromAvatar: avatarUrl is null or empty for user {}", user.getId());
+            return;
+        }
+        
+        String trimmedUrl = avatarUrl.trim();
+        log.info("Syncing face profile from avatar URL for user {}: {}", user.getId(), trimmedUrl);
+
+        Path tempFile = null;
+        try {
+            URI uri = URI.create(trimmedUrl);
+            URL url = uri.toURL();
+            log.debug("Downloading avatar from URL: {}", trimmedUrl);
+            tempFile = Files.createTempFile("hr-avatar-", ".img");
+            try (InputStream inputStream = url.openStream()) {
+                Files.copy(inputStream, tempFile, StandardCopyOption.REPLACE_EXISTING);
+            }
+            log.debug("Avatar downloaded to temp file: {}", tempFile);
+
+            log.info("Extracting face embedding for user {} from avatar URL", user.getId());
+            String embedding = faceRecognitionService.extractEmbeddingFromPath(tempFile.toString());
+            if (embedding == null || embedding.trim().isEmpty()) {
+                throw new IllegalArgumentException("Extracted embedding is empty");
+            }
+            
+            // Validate embedding format
+            String trimmedEmbedding = embedding.trim();
+            if (!trimmedEmbedding.startsWith("[") || !trimmedEmbedding.endsWith("]")) {
+                throw new IllegalArgumentException("Invalid embedding format: must be JSON array");
+            }
+            
+            log.debug("Embedding extracted successfully, length: {} chars", trimmedEmbedding.length());
+
+            EmployeeFaceProfile profile = faceProfileRepo.findByUserId(user.getId())
+                    .orElse(new EmployeeFaceProfile());
+            profile.setUserId(user.getId());
+            // Chỉ lưu embedding, không lưu faceImageUrl (ảnh lưu ở User.avatarUrl)
+            profile.setFaceEmbedding(embedding);
+            faceProfileRepo.save(profile);
+            log.info("Face profile synced successfully for user {}: embedding saved", user.getId());
+        } catch (java.net.MalformedURLException | java.net.URISyntaxException ex) {
+            log.warn("Invalid avatar URL for user {}: {}. Error: {}", user.getId(), trimmedUrl, ex.getMessage());
+        } catch (java.io.IOException ex) {
+            log.warn("Failed to download avatar from URL for user {}: {}. Error: {}", user.getId(), trimmedUrl, ex.getMessage());
+        } catch (IllegalStateException ex) {
+            log.warn("Face recognition model not available for user {}: {}", user.getId(), ex.getMessage());
+        } catch (Exception ex) {
+            log.error("Failed to sync face profile from avatar URL for user {}: {}. Error: {}", 
+                user.getId(), trimmedUrl, ex.getMessage(), ex);
+        } finally {
+            if (tempFile != null) {
+                try {
+                    Files.deleteIfExists(tempFile);
+                } catch (Exception cleanupEx) {
+                    log.debug("Failed to delete temporary avatar file {}: {}", tempFile, cleanupEx.getMessage());
+                }
+            }
         }
     }
 

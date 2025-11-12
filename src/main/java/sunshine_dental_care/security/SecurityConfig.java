@@ -1,7 +1,5 @@
 package sunshine_dental_care.security;
 
-import jakarta.servlet.http.HttpServletResponse;
-import lombok.RequiredArgsConstructor;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpMethod;
@@ -17,8 +15,8 @@ import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.AuthenticationSuccessHandler;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
 
+import jakarta.servlet.http.HttpServletResponse;
 import lombok.RequiredArgsConstructor;
-import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
 
 @Configuration
 @RequiredArgsConstructor
@@ -84,6 +82,7 @@ public class SecurityConfig {
 
                         // Public endpoints
                         .requestMatchers("/locale").permitAll()
+                        .requestMatchers("/uploads_avatar/**").permitAll()
                         .requestMatchers("/api/auth/sign-up", "/api/auth/login").permitAll()
                         .requestMatchers("/api/auth/google", "/oauth2/**", "/login/oauth2/**").permitAll()
 

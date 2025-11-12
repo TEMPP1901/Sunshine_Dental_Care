@@ -33,10 +33,22 @@ public interface AttendanceRepository extends JpaRepository<Attendance, Integer>
         Integer userId, LocalDate startDate, LocalDate endDate);
     
     /**
+     * Lấy lịch sử attendance của user trong khoảng thời gian (có phân trang)
+     */
+    Page<Attendance> findByUserIdAndWorkDateBetweenOrderByWorkDateDesc(
+        Integer userId, LocalDate startDate, LocalDate endDate, Pageable pageable);
+    
+    /**
      * Lấy lịch sử attendance của user tại clinic trong khoảng thời gian
      */
     List<Attendance> findByUserIdAndClinicIdAndWorkDateBetweenOrderByWorkDateDesc(
         Integer userId, Integer clinicId, LocalDate startDate, LocalDate endDate);
+    
+    /**
+     * Lấy lịch sử attendance của user tại clinic trong khoảng thời gian (có phân trang)
+     */
+    Page<Attendance> findByUserIdAndClinicIdAndWorkDateBetweenOrderByWorkDateDesc(
+        Integer userId, Integer clinicId, LocalDate startDate, LocalDate endDate, Pageable pageable);
     
     /**
      * Lấy danh sách attendance của clinic trong ngày
@@ -50,6 +62,8 @@ public interface AttendanceRepository extends JpaRepository<Attendance, Integer>
         Integer clinicId, LocalDate startDate, LocalDate endDate, Pageable pageable);
 
     List<Attendance> findByWorkDate(LocalDate workDate);
+    
+    List<Attendance> findByWorkDateBetween(LocalDate startDate, LocalDate endDate);
 
     List<Attendance> findByWorkDateAndAttendanceStatus(LocalDate workDate, String attendanceStatus);
 

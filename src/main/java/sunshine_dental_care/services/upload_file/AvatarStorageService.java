@@ -79,12 +79,12 @@ public class AvatarStorageService {
                 throw new IllegalArgumentException("Invalid embedding format: must be JSON array");
             }
             
-            // Lưu hoặc cập nhật EmployeeFaceProfile
+            // Lưu hoặc cập nhật EmployeeFaceProfile (chỉ lưu embedding, ảnh lưu ở User.avatarUrl)
             EmployeeFaceProfile profile = faceProfileRepo.findByUserId(userId)
                 .orElse(new EmployeeFaceProfile());
             profile.setUserId(userId);
             profile.setFaceEmbedding(embedding);
-            profile.setFaceImageUrl(avatarUrl); // Lưu URL của avatar làm face image
+            // Không lưu faceImageUrl nữa, ảnh đã lưu ở User.avatarUrl
             faceProfileRepo.save(profile);
             
             log.info("Face embedding saved successfully for user {}", userId);

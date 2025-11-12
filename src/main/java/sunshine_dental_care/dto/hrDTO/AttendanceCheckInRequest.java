@@ -13,7 +13,7 @@ public class AttendanceCheckInRequest {
     @NotNull(message = "User ID is required")
     private Integer userId;
     
-    @NotNull(message = "Clinic ID is required")
+    // Clinic ID is optional - will be resolved from UserClinicAssignment if not provided
     private Integer clinicId;
     
     /**
