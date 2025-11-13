@@ -28,4 +28,7 @@ public interface HrEmployeeService {
     
     // Thống kê nhân viên
     Map<String, Object> getStatistics(Integer clinicId, Integer departmentId);
+    
+    // Xóa nhân viên (soft delete - set isActive = false)
+    void deleteEmployee(Integer id, String reason);
 }

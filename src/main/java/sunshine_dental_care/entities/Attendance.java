@@ -1,12 +1,19 @@
 package sunshine_dental_care.entities;
 
-import jakarta.persistence.*;
-import org.hibernate.annotations.ColumnDefault;
-import org.hibernate.annotations.Nationalized;
-
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.LocalDate;
+
+import org.hibernate.annotations.ColumnDefault;
+import org.hibernate.annotations.Nationalized;
+
+import jakarta.persistence.Column;
+import jakarta.persistence.Entity;
+import jakarta.persistence.GeneratedValue;
+import jakarta.persistence.GenerationType;
+import jakarta.persistence.Id;
+import jakarta.persistence.PrePersist;
+import jakarta.persistence.PreUpdate;
 
 @Entity
 public class Attendance {
@@ -64,6 +71,24 @@ public class Attendance {
     @Column(name = "note", length = 400)
     private String note;
 
+    // Face Recognition fields
+    @Column(name = "faceMatchScore", precision = 5, scale = 4)
+    private BigDecimal faceMatchScore; // Similarity score 0.0 - 1.0
+
+    @Nationalized
+    @Column(name = "verificationStatus", length = 20)
+    private String verificationStatus; // PENDING, VERIFIED, FAILED
+
+    /**
+     * Trạng thái chấm công: ON_TIME, LATE, ABSENT
+     * - ON_TIME: Check-in đúng giờ (trước hoặc đúng startTime)
+     * - LATE: Check-in muộn (sau startTime)
+     * - ABSENT: Không check-in trong ngày có schedule
+     */
+    @Nationalized
+    @Column(name = "attendanceStatus", length = 20)
+    private String attendanceStatus; // ON_TIME, LATE, ABSENT
+
     @ColumnDefault("sysutcdatetime()")
     @Column(name = "createdAt", nullable = false)
     private Instant createdAt;
@@ -71,6 +96,28 @@ public class Attendance {
     @ColumnDefault("sysutcdatetime()")
     @Column(name = "updatedAt", nullable = false)
     private Instant updatedAt;
+
+    /**
+     * Tự động set createdAt và updatedAt trước khi persist (insert)
+     */
+    @PrePersist
+    protected void onCreate() {
+        Instant now = Instant.now();
+        if (createdAt == null) {
+            createdAt = now;
+        }
+        if (updatedAt == null) {
+            updatedAt = now;
+        }
+    }
+
+    /**
+     * Tự động set updatedAt trước khi update
+     */
+    @PreUpdate
+    protected void onUpdate() {
+        updatedAt = Instant.now();
+    }
 
     public Integer getId() {
         return id;
@@ -206,6 +253,30 @@ public class Attendance {
 
     public void setUpdatedAt(Instant updatedAt) {
         this.updatedAt = updatedAt;
+    }
+
+    public BigDecimal getFaceMatchScore() {
+        return faceMatchScore;
+    }
+
+    public void setFaceMatchScore(BigDecimal faceMatchScore) {
+        this.faceMatchScore = faceMatchScore;
+    }
+
+    public String getVerificationStatus() {
+        return verificationStatus;
+    }
+
+    public void setVerificationStatus(String verificationStatus) {
+        this.verificationStatus = verificationStatus;
+    }
+
+    public String getAttendanceStatus() {
+        return attendanceStatus;
+    }
+
+    public void setAttendanceStatus(String attendanceStatus) {
+        this.attendanceStatus = attendanceStatus;
     }
 
 }

@@ -56,6 +56,14 @@ public class HrController {
         return ResponseEntity.ok(schedules);
     }
     
+    // Xem lịch theo ngày cụ thể
+    @GetMapping("/date/{date}")
+    public ResponseEntity<List<DoctorScheduleDto>> getScheduleByDate(
+            @PathVariable @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate date) {
+        List<DoctorScheduleDto> schedules = hrService.getScheduleByDate(date);
+        return ResponseEntity.ok(schedules);
+    }
+    
     // 3. VALIDATION
     @PostMapping("/validate")
     public ResponseEntity<ValidationResultDto> validateSchedule(@Valid @RequestBody CreateWeeklyScheduleRequest request) {

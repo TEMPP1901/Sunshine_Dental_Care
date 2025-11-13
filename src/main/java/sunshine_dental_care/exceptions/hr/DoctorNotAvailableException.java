@@ -1,9 +1,9 @@
 package sunshine_dental_care.exceptions.hr;
 
-/*
-  Exception khi bác sĩ không có sẵn (đã được phân công)
- Tác dụng: Xử lý riêng cho trường hợp conflict bác sĩ
- */
+
+  //Exception khi bác sĩ không có sẵn (đã được phân công)
+ //Tác dụng: Xử lý riêng cho trường hợp conflict bác sĩ
+ 
 public class DoctorNotAvailableException extends ScheduleException {
     
     private final Integer doctorId;

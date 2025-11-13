@@ -6,10 +6,10 @@ import java.time.LocalTime;
 
 public class DoctorScheduleDto {
     private Integer id;
-    private Object doctor;        // Sử dụng Object thay vì UserDto
-    private Object clinic;        // Sử dụng Object thay vì ClinicDto
-    private Object room;          // Sử dụng Object thay vì RoomDto
-    private Object chair;         // Sử dụng Object thay vì ChairDto
+    private HrDocDto doctor;           // DTO cho doctor
+    private ClinicResponse clinic;     // DTO cho clinic
+    private RoomResponse room;         // DTO cho room
+    private Object chair;              // Chair không cần trong phân công
     private LocalDate workDate;
     private LocalTime startTime;
     private LocalTime endTime;
@@ -21,8 +21,8 @@ public class DoctorScheduleDto {
     // Constructors
     public DoctorScheduleDto() {}
     
-    public DoctorScheduleDto(Integer id, Object doctor, Object clinic, 
-                           Object room, Object chair, LocalDate workDate, 
+    public DoctorScheduleDto(Integer id, HrDocDto doctor, ClinicResponse clinic, 
+                           RoomResponse room, Object chair, LocalDate workDate, 
                            LocalTime startTime, LocalTime endTime, String status, 
                            String note, LocalDateTime createdAt, LocalDateTime updatedAt) {
         this.id = id;
@@ -48,27 +48,27 @@ public class DoctorScheduleDto {
         this.id = id;
     }
     
-    public Object getDoctor() {
+    public HrDocDto getDoctor() {
         return doctor;
     }
     
-    public void setDoctor(Object doctor) {
+    public void setDoctor(HrDocDto doctor) {
         this.doctor = doctor;
     }
     
-    public Object getClinic() {
+    public ClinicResponse getClinic() {
         return clinic;
     }
     
-    public void setClinic(Object clinic) {
+    public void setClinic(ClinicResponse clinic) {
         this.clinic = clinic;
     }
     
-    public Object getRoom() {
+    public RoomResponse getRoom() {
         return room;
     }
     
-    public void setRoom(Object room) {
+    public void setRoom(RoomResponse room) {
         this.room = room;
     }
     

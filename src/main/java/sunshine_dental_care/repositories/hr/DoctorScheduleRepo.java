@@ -17,6 +17,10 @@ public interface DoctorScheduleRepo extends JpaRepository<DoctorSchedule, Intege
     @Query("SELECT d FROM DoctorSchedule d WHERE d.workDate = :workDate ORDER BY d.doctor.id")
     List<DoctorSchedule> findByWorkDate(@Param("workDate") LocalDate workDate);
     
+    // Lấy lịch cho cả tuần (từ Monday đến Saturday, 6 ngày)
+    @Query("SELECT d FROM DoctorSchedule d WHERE d.workDate >= :weekStart AND d.workDate <= :weekEnd ORDER BY d.workDate, d.doctor.id")
+    List<DoctorSchedule> findByWeekRange(@Param("weekStart") LocalDate weekStart, @Param("weekEnd") LocalDate weekEnd);
+    
     // Lấy lịch của cơ sở theo ngày
     @Query("SELECT d FROM DoctorSchedule d WHERE d.clinic.id = :clinicId AND d.workDate = :workDate ORDER BY d.doctor.id")
     List<DoctorSchedule> findByClinicAndDate(@Param("clinicId") Integer clinicId, @Param("workDate") LocalDate workDate);
@@ -24,4 +28,17 @@ public interface DoctorScheduleRepo extends JpaRepository<DoctorSchedule, Intege
     // Kiểm tra bác sĩ đã được phân công chưa trong ngày
     @Query("SELECT COUNT(d) > 0 FROM DoctorSchedule d WHERE d.doctor.id = :doctorId AND d.workDate = :workDate")
     boolean existsByDoctorAndDate(@Param("doctorId") Integer doctorId, @Param("workDate") LocalDate workDate);
+    
+    // Lấy schedule của user tại clinic trong ngày
+    @Query("SELECT d FROM DoctorSchedule d WHERE d.doctor.id = :userId AND d.clinic.id = :clinicId AND d.workDate = :workDate")
+    List<DoctorSchedule> findByUserIdAndClinicIdAndWorkDate(
+        @Param("userId") Integer userId, 
+        @Param("clinicId") Integer clinicId, 
+        @Param("workDate") LocalDate workDate);
+    
+    // Lấy tất cả schedule của bác sĩ trong ngày
+    @Query("SELECT d FROM DoctorSchedule d WHERE d.doctor.id = :doctorId AND d.workDate = :workDate ORDER BY d.startTime")
+    List<DoctorSchedule> findByDoctorIdAndWorkDate(
+        @Param("doctorId") Integer doctorId, 
+        @Param("workDate") LocalDate workDate);
 }
