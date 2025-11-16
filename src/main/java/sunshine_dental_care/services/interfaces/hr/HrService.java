@@ -20,4 +20,11 @@ public interface HrService {
     
     // 3. VALIDATION
     ValidationResultDto validateSchedule(CreateWeeklyScheduleRequest request);
+    
+    // 4. AI GENERATE SCHEDULE (deprecated - use AiScheduleGenerationService instead)
+    @Deprecated
+    CreateWeeklyScheduleRequest generateScheduleFromDescription(LocalDate weekStart, String description);
+    
+    // 5. RULE-BASED GENERATE SCHEDULE (fallback for AI)
+    CreateWeeklyScheduleRequest generateScheduleFromDescriptionRuleBased(LocalDate weekStart, String description);
 }

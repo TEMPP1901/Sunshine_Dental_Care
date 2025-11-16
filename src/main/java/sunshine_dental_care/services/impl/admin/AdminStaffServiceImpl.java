@@ -32,6 +32,7 @@ public class AdminStaffServiceImpl implements AdminStaffService {
 
     @Override
     @Transactional(readOnly = true)
+    // Lấy danh sách nhân viên theo từ khóa tìm kiếm (nếu có)
     public List<AdminStaffDto> getStaff(String search) {
         log.debug("Fetching admin staff list with search: {}", search);
 
@@ -42,6 +43,7 @@ public class AdminStaffServiceImpl implements AdminStaffService {
                 .collect(Collectors.toList());
     }
 
+    // Kiểm tra xem user có khớp với từ khóa tìm kiếm không
     private boolean matchesSearch(User user, String search) {
         if (search == null || search.trim().isEmpty()) {
             return true;
@@ -54,10 +56,12 @@ public class AdminStaffServiceImpl implements AdminStaffService {
                 || containsIgnoreCase(user.getCode(), keyword);
     }
 
+    // So sánh chuỗi không phân biệt hoa thường
     private boolean containsIgnoreCase(String value, String keyword) {
         return value != null && value.toLowerCase().contains(keyword);
     }
 
+    // Chuyển đổi entity User thành AdminStaffDto, lấy thêm thông tin roles và clinics
     private AdminStaffDto mapToDto(User user) {
         AdminStaffDto dto = new AdminStaffDto();
         dto.setId(user.getId());
@@ -93,4 +97,3 @@ public class AdminStaffServiceImpl implements AdminStaffService {
         return dto;
     }
 }
-

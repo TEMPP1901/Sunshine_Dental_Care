@@ -20,30 +20,25 @@ public class EmployeeFilterHelper {
     private final UserRoleRepo userRoleRepo;
     private final UserClinicAssignmentRepo userClinicAssignmentRepo;
 
-    // Allowed role names for employee list (case-insensitive)
+    // Danh sách tên vai trò được phép hiển thị trong danh sách nhân viên (không phân biệt hoa thường)
     private static final List<String> ALLOWED_ROLE_NAMES = List.of(
         "RECEPTIONIST", "ACCOUNTANT", "DOCTOR", "HR",
         "Receptionist", "Accountant", "Doctor", "HR",
         "lễ tân", "kế toán", "bác sĩ", "hr"
     );
 
-    /**
-     * Apply mandatory role filter: Only show employees with specific roles
-     */
+    // Lọc bắt buộc: chỉ lấy nhân viên có các vai trò thuộc danh sách cho phép
     public Stream<User> applyMandatoryRoleFilter(Stream<User> userStream) {
         log.debug("Applying mandatory role filter (RECEPTIONIST, ACCOUNTANT, DOCTOR, HR)");
         return userStream.filter(u -> {
             if (u == null || u.getId() == null) {
-                log.debug("Filtering out null user or null user ID");
                 return false;
             }
             try {
                 List<sunshine_dental_care.entities.UserRole> userRoles = userRoleRepo.findActiveByUserId(u.getId());
                 if (userRoles == null || userRoles.isEmpty()) {
-                    log.debug("User {} has no active roles, excluding", u.getId());
                     return false;
                 }
-
                 boolean hasAllowedRole = userRoles.stream()
                     .anyMatch(ur -> {
                         if (ur == null || ur.getRole() == null) {
@@ -56,28 +51,21 @@ public class EmployeeFilterHelper {
                         return ALLOWED_ROLE_NAMES.stream()
                             .anyMatch(allowedName -> roleName.equalsIgnoreCase(allowedName));
                     });
-
-                if (!hasAllowedRole) {
-                    log.debug("User {} does not have any allowed role, excluding", u.getId());
-                }
                 return hasAllowedRole;
             } catch (Exception ex) {
-                log.warn("Error filtering by default roles for user {}: {}", u.getId(), ex.getMessage());
+                log.warn("Lỗi khi filter theo vai trò mặc định cho user {}: {}", u.getId(), ex.getMessage());
                 return false;
             }
         });
     }
 
-    /**
-     * Apply search filter (by name, email, username, phone)
-     */
+    // Lọc tìm kiếm nhân viên theo tên, email, username, số điện thoại
     public Stream<User> applySearchFilter(Stream<User> userStream, String search) {
         if (search == null || search.trim().isEmpty()) {
             return userStream;
         }
 
         String lowerSearch = search.toLowerCase();
-        log.debug("Applying search filter: {}", search);
         return userStream.filter(u -> {
             return (u.getFullName() != null && u.getFullName().toLowerCase().contains(lowerSearch)) ||
                    (u.getEmail() != null && u.getEmail().toLowerCase().contains(lowerSearch)) ||
@@ -86,91 +74,65 @@ public class EmployeeFilterHelper {
         });
     }
 
-    /**
-     * Apply department filter
-     */
+    // Lọc nhân viên theo phòng ban
     public Stream<User> applyDepartmentFilter(Stream<User> userStream, Integer departmentId) {
         if (departmentId == null) {
             return userStream;
         }
-
-        log.debug("Applying departmentId filter: {}", departmentId);
         return userStream.filter(u -> {
             try {
                 if (u.getDepartment() == null) {
-                    log.debug("User {} has no department, excluding", u.getId());
                     return false;
                 }
                 Integer userDeptId = u.getDepartment().getId();
                 boolean matches = userDeptId != null && userDeptId.equals(departmentId);
-                if (!matches) {
-                    log.debug("User {} departmentId {} does not match filter {}, excluding", 
-                            u.getId(), userDeptId, departmentId);
-                }
                 return matches;
             } catch (Exception ex) {
-                log.warn("Error filtering by departmentId for user {}: {}", u.getId(), ex.getMessage());
+                log.warn("Lỗi khi filter theo departmentId cho user {}: {}", u.getId(), ex.getMessage());
                 return false;
             }
         });
     }
 
-    /**
-     * Apply isActive filter
-     */
+    // Lọc trạng thái hoạt động của nhân viên
     public Stream<User> applyIsActiveFilter(Stream<User> userStream, Boolean isActive) {
         if (isActive == null) {
             return userStream;
         }
-
-        log.debug("Applying isActive filter: {}", isActive);
         return userStream.filter(u -> {
             Boolean userIsActive = u.getIsActive();
             boolean matches = isActive.equals(userIsActive);
-            if (!matches) {
-                log.debug("User {} isActive {} does not match filter {}, excluding", 
-                        u.getId(), userIsActive, isActive);
-            }
             return matches;
         });
     }
 
-    /**
-     * Apply clinic filter
-     */
+    // Lọc nhân viên theo phòng khám
     public Stream<User> applyClinicFilter(Stream<User> userStream, Integer clinicId) {
         if (clinicId == null) {
             return userStream;
         }
-
-        log.debug("Applying clinicId filter: {}", clinicId);
         return userStream.filter(u -> {
             try {
                 List<UserClinicAssignment> assignments = userClinicAssignmentRepo.findByUserId(u.getId());
                 return assignments != null && assignments.stream()
-                    .anyMatch(a -> a != null && a.getClinic() != null && 
+                    .anyMatch(a -> a != null && a.getClinic() != null &&
                             a.getClinic().getId() != null && a.getClinic().getId().equals(clinicId));
             } catch (Exception ex) {
-                log.warn("Error filtering by clinicId for user {}: {}", u.getId(), ex.getMessage());
+                log.warn("Lỗi khi filter theo clinicId cho user {}: {}", u.getId(), ex.getMessage());
                 return false;
             }
         });
     }
 
-    /**
-     * Apply role filter (additional to mandatory filter)
-     */
+    // Lọc nhân viên theo vai trò được chọn bổ sung (ngoài filter mặc định)
     public Stream<User> applyRoleFilter(Stream<User> userStream, Integer roleId) {
         if (roleId == null) {
             return userStream;
         }
-
-        log.debug("Applying additional roleId filter: {}", roleId);
         return userStream.filter(u -> {
             try {
                 List<sunshine_dental_care.entities.UserRole> userRoles = userRoleRepo.findActiveByUserId(u.getId());
                 if (userRoles == null || userRoles.isEmpty()) {
-                    log.debug("User {} has no active roles for roleId filter, excluding", u.getId());
                     return false;
                 }
                 boolean matchesRoleId = userRoles.stream()
@@ -181,17 +143,11 @@ public class EmployeeFilterHelper {
                         Integer urRoleId = ur.getRole().getId();
                         return urRoleId != null && urRoleId.equals(roleId);
                     });
-                if (!matchesRoleId) {
-                    log.debug("User {} does not match roleId {}, excluding", u.getId(), roleId);
-                } else {
-                    log.debug("User {} matches roleId {}", u.getId(), roleId);
-                }
                 return matchesRoleId;
             } catch (Exception ex) {
-                log.warn("Error filtering by roleId for user {}: {}", u.getId(), ex.getMessage());
+                log.warn("Lỗi khi filter theo roleId cho user {}: {}", u.getId(), ex.getMessage());
                 return false;
             }
         });
     }
 }
-

@@ -40,6 +40,7 @@ public class AttendanceStatusCalculator {
     @Value("${app.attendance.default-start-time:08:00}")
     private String defaultStartTime;
 
+    // Kiểm tra quyền của user cho phép chấm công hay không
     public void validateUserRoleForAttendance(Integer userId) {
         List<UserRole> userRoles = userRoleRepo.findActiveByUserId(userId);
 
@@ -59,16 +60,36 @@ public class AttendanceStatusCalculator {
         log.debug("User {} role validated for attendance", userId);
     }
 
+    // Đánh giá trạng thái chấm công dựa vào thời gian check-in
     public String determineAttendanceStatus(Integer userId,
                                             Integer clinicId,
                                             LocalDate workDate,
                                             Instant checkInTime) {
-        // Giờ chuẩn để đánh giá ON_TIME/LATE: 8h (08:00)
-        LocalTime expectedStartTime = LocalTime.of(8, 0);
-        
         LocalTime checkInLocalTime = checkInTime.atZone(ZoneId.systemDefault()).toLocalTime();
+        LocalTime expectedStartTime = LocalTime.of(8, 0); // Mặc định 8:00
+        
+        // Kiểm tra xem user có phải bác sĩ không
+        List<UserRole> userRoles = userRoleRepo.findActiveByUserId(userId);
+        boolean isDoctor = userRoles.stream().anyMatch(this::isDoctorRole);
+        
+        if (isDoctor) {
+            // Bác sĩ: Lấy giờ bắt đầu từ lịch phân công
+            var schedules = doctorScheduleRepo.findByUserIdAndClinicIdAndWorkDate(userId, clinicId, workDate);
+            if (!schedules.isEmpty()) {
+                // Lấy ca đầu tiên trong ngày
+                var firstSchedule = schedules.stream()
+                        .min((s1, s2) -> s1.getStartTime().compareTo(s2.getStartTime()))
+                        .orElse(null);
+                if (firstSchedule != null) {
+                    expectedStartTime = firstSchedule.getStartTime();
+                    log.debug("Doctor {} expected start time from schedule: {}", userId, expectedStartTime);
+                }
+            } else {
+                log.warn("Doctor {} has no schedule on {} at clinic {}. Using default 8:00 for status calculation.",
+                        userId, workDate, clinicId);
+            }
+        }
 
-        // Đánh giá: check-in trước hoặc đúng 8h = ON_TIME, sau 8h = LATE
         if (checkInLocalTime.isBefore(expectedStartTime) || checkInLocalTime.equals(expectedStartTime)) {
             log.info("User {} checked in ON_TIME: {} (expected: {})",
                     userId, checkInLocalTime, expectedStartTime);
@@ -81,19 +102,13 @@ public class AttendanceStatusCalculator {
         }
     }
 
-    /**
-     * Đánh giá ABSENT: Khi workDate không có cả check-in và check-out
-     * Nếu chỉ có check-out mà không có check-in → vẫn là ABSENT
-     */
+    // Đánh dấu vắng mặt nếu không có check-in
     public void markAbsentIfNeeded(Integer userId, Integer clinicId, LocalDate workDate) {
         Optional<Attendance> attendance = attendanceRepository
                 .findByUserIdAndClinicIdAndWorkDate(userId, clinicId, workDate);
 
-        // Kiểm tra: không có check-in HOẶC không có cả check-in và check-out
         boolean hasCheckIn = attendance.isPresent() && attendance.get().getCheckInTime() != null;
-        boolean hasCheckOut = attendance.isPresent() && attendance.get().getCheckOutTime() != null;
-        
-        // ABSENT nếu: không có check-in (dù có check-out hay không)
+
         if (!hasCheckIn) {
             Attendance absentRecord = attendance.orElseGet(Attendance::new);
             if (attendance.isEmpty()) {
@@ -105,13 +120,15 @@ public class AttendanceStatusCalculator {
             attendanceRepository.save(absentRecord);
 
             log.info("Marked user {} as ABSENT at clinic {} on {} (no check-in found. check-out: {})",
-                    userId, clinicId, workDate, hasCheckOut);
+                    userId, clinicId, workDate,
+                    attendance.isPresent() && attendance.get().getCheckOutTime() != null);
         } else {
-            log.debug("User {} has check-in at clinic {} on {}, skipping ABSENT check", 
+            log.debug("User {} has check-in at clinic {} on {}, skipping ABSENT check",
                     userId, clinicId, workDate);
         }
     }
 
+    // Kiểm tra role bị cấm chấm công
     public boolean isForbiddenRole(UserRole userRole) {
         if (userRole == null || userRole.getRole() == null) {
             return false;
@@ -121,6 +138,7 @@ public class AttendanceStatusCalculator {
                 .anyMatch(forbidden -> roleName.equalsIgnoreCase(forbidden));
     }
 
+    // Kiểm tra role có phải bác sĩ không
     public boolean isDoctorRole(UserRole userRole) {
         if (userRole == null || userRole.getRole() == null) {
             return false;
@@ -134,6 +152,7 @@ public class AttendanceStatusCalculator {
         return roles != null && roles.stream().anyMatch(this::isForbiddenRole);
     }
 
+    // Lấy giờ bắt đầu ca làm mặc định
     public LocalTime getDefaultStartTime() {
         try {
             return LocalTime.parse(defaultStartTime);
@@ -143,5 +162,3 @@ public class AttendanceStatusCalculator {
         }
     }
 }
-
-

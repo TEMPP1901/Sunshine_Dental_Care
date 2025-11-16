@@ -21,6 +21,7 @@ import sunshine_dental_care.entities.UserRole;
 import sunshine_dental_care.repositories.auth.ClinicRepo;
 import sunshine_dental_care.repositories.auth.RoleRepo;
 import sunshine_dental_care.repositories.auth.UserRoleRepo;
+import sunshine_dental_care.repositories.hr.DoctorSpecialtyRepo;
 import sunshine_dental_care.repositories.hr.EmployeeFaceProfileRepo;
 import sunshine_dental_care.repositories.hr.UserClinicAssignmentRepo;
 
@@ -34,10 +35,9 @@ public class EmployeeMapper {
     private final UserRoleRepo userRoleRepo;
     private final UserClinicAssignmentRepo userClinicAssignmentRepo;
     private final EmployeeFaceProfileRepo faceProfileRepo;
+    private final DoctorSpecialtyRepo doctorSpecialtyRepo;
 
-    /**
-     * Helper method to get Role entity directly from repository (not a proxy)
-     */
+    // Lấy thực thể Role, tránh lỗi proxy Hibernate
     public Role getRoleFromEntity(Role role) {
         if (role == null) {
             return null;
@@ -52,16 +52,14 @@ public class EmployeeMapper {
             log.warn("Error loading role from repository: {}", ex.getMessage());
             try {
                 role.getRoleName();
-                return role; // Return initialized proxy
+                return role;
             } catch (Exception e) {
                 return null;
             }
         }
     }
 
-    /**
-     * Map a single User to EmployeeResponse
-     */
+    // Chuyển User sang EmployeeResponse cơ bản
     public EmployeeResponse toEmployeeResponse(User user) {
         EmployeeResponse response = new EmployeeResponse();
         response.setId(user.getId());
@@ -73,8 +71,20 @@ public class EmployeeMapper {
         response.setAvatarUrl(user.getAvatarUrl());
         response.setIsActive(user.getIsActive());
         response.setDepartment(user.getDepartment());
+        response.setSpecialty(user.getSpecialty()); // Backward compatibility
+        
+        // Lấy danh sách specialties từ bảng DoctorSpecialties
+        try {
+            List<String> specialties = doctorSpecialtyRepo.findByDoctorIdAndIsActiveTrue(user.getId())
+                .stream()
+                .map(ds -> ds.getSpecialtyName())
+                .collect(Collectors.toList());
+            response.setSpecialties(specialties);
+        } catch (Exception ex) {
+            log.warn("Error loading specialties for user {}: {}", user.getId(), ex.getMessage());
+            response.setSpecialties(List.of());
+        }
 
-        // Convert timestamps
         if (user.getCreatedAt() != null) {
             response.setCreatedAt(user.getCreatedAt().atZone(ZoneOffset.UTC).toLocalDateTime());
         }
@@ -85,7 +95,7 @@ public class EmployeeMapper {
             response.setLastLoginAt(user.getLastLoginAt().atZone(ZoneOffset.UTC).toLocalDateTime());
         }
 
-        // Set faceImageUrl = avatarUrl (ảnh lưu ở User.avatarUrl, không lưu ở EmployeeFaceProfile)
+        // Gán image khuôn mặt là avatar của user
         response.setFaceImageUrl(user.getAvatarUrl());
 
         faceProfileRepo.findByUserId(user.getId()).ifPresent(profile -> applyFaceProfile(response, profile));
@@ -93,16 +103,12 @@ public class EmployeeMapper {
         return response;
     }
 
-    /**
-     * Map a Page of Users to Page of EmployeeResponse with role and clinic information
-     */
+    // Chuyển trang User thành trang EmployeeResponse, preload map role, profile
     public Page<EmployeeResponse> mapUsersToResponses(Page<User> users) {
-        // Collect user IDs first to batch load roles
         List<Integer> userIds = users.getContent().stream()
             .map(User::getId)
             .toList();
 
-        // Batch load all roles for all users from repository (not proxy)
         Map<Integer, Role> userRoleMap = new HashMap<>();
         try {
             for (Integer userId : userIds) {
@@ -135,13 +141,11 @@ public class EmployeeMapper {
         return users.map(user -> {
             EmployeeResponse response = toEmployeeResponse(user);
 
-            // Set role from pre-loaded map (loaded from repository)
             Role role = roleMap.get(user.getId());
             if (role != null) {
                 response.setRole(role);
             }
 
-            // Populate department if available (also initialize if needed)
             if (user.getDepartment() != null) {
                 try {
                     response.setDepartment(user.getDepartment());
@@ -159,17 +163,14 @@ public class EmployeeMapper {
         });
     }
 
-    /**
-     * Map a single User to EmployeeResponse with full details (including role and clinic)
-     */
+    // Chuyển User sang EmployeeResponse đầy đủ, gồm role và phòng khám đầu tiên
     public EmployeeResponse toEmployeeResponseWithDetails(User user) {
         EmployeeResponse response = toEmployeeResponse(user);
 
-        // Get user roles and assignments
         List<UserRole> userRoles = userRoleRepo.findActiveByUserId(user.getId());
         List<UserClinicAssignment> assignments = userClinicAssignmentRepo.findByUserId(user.getId());
 
-        // Add role info if available
+        // Gán role chính nếu có
         if (!userRoles.isEmpty()) {
             Role role = userRoles.get(0).getRole();
             if (role != null) {
@@ -180,7 +181,7 @@ public class EmployeeMapper {
             }
         }
 
-        // Add clinic info if available
+        // Gán clinic đầu tiên nếu có phân công phòng khám
         if (!assignments.isEmpty()) {
             UserClinicAssignment assignment = assignments.get(0);
             if (assignment != null && assignment.getClinic() != null) {
@@ -208,12 +209,11 @@ public class EmployeeMapper {
         return response;
     }
 
+    // Gán embedding khuôn mặt vào EmployeeResponse
     private void applyFaceProfile(EmployeeResponse response, EmployeeFaceProfile profile) {
         if (profile == null) {
             return;
         }
-        // Chỉ lấy embedding từ profile, faceImageUrl lấy từ User.avatarUrl (đã set ở toEmployeeResponse)
         response.setFaceEmbedding(profile.getFaceEmbedding());
     }
 }
-

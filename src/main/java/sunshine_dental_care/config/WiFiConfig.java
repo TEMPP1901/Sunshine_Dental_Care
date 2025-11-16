@@ -12,54 +12,37 @@ import org.springframework.context.annotation.Configuration;
 import lombok.Getter;
 import lombok.Setter;
 
-/**
- * Configuration class để đọc WiFi settings từ application.properties
- * Hỗ trợ config global và config theo từng clinic
- */
+// Lớp cấu hình để đọc cài đặt WiFi từ application.properties
+// Hỗ trợ cả cấu hình toàn cục và cấu hình riêng từng cơ sở (clinic)
 @Configuration
 @ConfigurationProperties(prefix = "app.attendance.wifi")
 @Getter
 @Setter
 public class WiFiConfig {
-    
-    /**
-     * Bật/tắt enforcement WiFi validation (có throw exception khi fail không)
-     * true = enforce (throw exception khi WiFi không hợp lệ)
-     * false = chỉ log warning, không block check-in
-     */
+
+    // true = bắt buộc kiểm tra (nếu sai sẽ throw exception)
+    // false = chỉ ghi log cảnh báo, không chặn check-in
     private boolean enforce = true;
-    
-    /**
-     * Global WiFi config (fallback nếu không có config riêng cho clinic)
-     * Danh sách SSID được phép (comma-separated)
-     */
+
+    // Danh sách SSID cho phép, cách nhau bằng dấu phẩy (dùng toàn cục, fallback)
     private String allowedSsids = "";
-    
-    /**
-     * Global WiFi config (fallback)
-     * Danh sách BSSID được phép (comma-separated)
-     */
+
+    // Danh sách BSSID cho phép, cách nhau bằng dấu phẩy (dùng toàn cục, fallback)
     private String allowedBssids = "";
-    
-    /**
-     * WiFi config theo clinic (Map<clinicId, ClinicWiFiConfig>)
-     * Key: clinicId (String), Value: ClinicWiFiConfig
-     */
+
+    // Cấu hình WiFi riêng cho từng clinic
     private Map<String, ClinicWiFiConfig> clinic = new HashMap<>();
-    
-    /**
-     * Inner class để lưu config cho từng clinic
-     */
+
     @Getter
     @Setter
     public static class ClinicWiFiConfig {
+        // Danh sách SSID riêng của clinic đó (cách nhau bằng dấu phẩy)
         private String ssids = "";
+        // Danh sách BSSID riêng của clinic đó (cách nhau bằng dấu phẩy)
         private String bssids = "";
     }
-    
-    /**
-     * Lấy danh sách SSID dưới dạng List (đã trim và uppercase)
-     */
+
+    // Lấy danh sách SSID hợp lệ từ config toàn cục
     public List<String> getAllowedSsidsList() {
         if (allowedSsids == null || allowedSsids.trim().isEmpty()) {
             return List.of();
@@ -70,10 +53,8 @@ public class WiFiConfig {
             .filter(s -> !s.isEmpty())
             .collect(Collectors.toList());
     }
-    
-    /**
-     * Lấy danh sách BSSID dưới dạng List (đã trim và uppercase)
-     */
+
+    // Lấy danh sách BSSID hợp lệ từ config toàn cục
     public List<String> getAllowedBssidsList() {
         if (allowedBssids == null || allowedBssids.trim().isEmpty()) {
             return List.of();
@@ -84,77 +65,64 @@ public class WiFiConfig {
             .filter(s -> !s.isEmpty())
             .collect(Collectors.toList());
     }
-    
-    /**
-     * Kiểm tra SSID có trong whitelist không
-     */
+
+    // Kiểm tra SSID có nằm trong whitelist cho phép không
     public boolean isSsidAllowed(String ssid) {
         if (ssid == null || ssid.trim().isEmpty()) {
             return false;
         }
         List<String> allowedList = getAllowedSsidsList();
-        // Nếu whitelist empty, KHÔNG cho phép (security: phải có whitelist rõ ràng)
+        // Nếu không có whitelist thì không cho phép (phải cấu hình rõ ràng)
         if (allowedList.isEmpty()) {
             return false;
         }
         return allowedList.contains(ssid.trim().toUpperCase());
     }
-    
-    /**
-     * Kiểm tra BSSID có trong whitelist không
-     */
+
+    // Kiểm tra BSSID có nằm trong whitelist cho phép không
     public boolean isBssidAllowed(String bssid) {
         if (bssid == null || bssid.trim().isEmpty()) {
             return false;
         }
         List<String> allowedList = getAllowedBssidsList();
-        // Nếu whitelist empty, KHÔNG cho phép (security: phải có whitelist rõ ràng)
+        // Nếu không có whitelist thì không cho phép (phải cấu hình rõ ràng)
         if (allowedList.isEmpty()) {
             return false;
         }
         return allowedList.contains(bssid.trim().toUpperCase());
     }
-    
-    /**
-     * Kiểm tra SSID hoặc BSSID có match không (dùng cho validation)
-     * Trả về true nếu ít nhất một trong hai match
-     */
+
+    // Kiểm tra WiFi hợp lệ dùng cho check-in: đúng ít nhất 1 trong 2 (SSID hoặc BSSID)
     public boolean isWiFiAllowed(String ssid, String bssid) {
         return isSsidAllowed(ssid) || isBssidAllowed(bssid);
     }
-    
-    /**
-     * Kiểm tra WiFi theo clinic cụ thể
-     * Nếu có config riêng cho clinic thì dùng, không thì dùng global config
-     */
+
+    // Kiểm tra WiFi theo từng clinic (ưu tiên config riêng của clinic, nếu k có dùng config toàn cục)
     public boolean isWiFiAllowedForClinic(String ssid, String bssid, Integer clinicId) {
         if (clinicId == null) {
-            // Nếu không có clinicId, dùng global config
+            // Không truyền vào id clinic - sử dụng config toàn cục
             return isWiFiAllowed(ssid, bssid);
         }
-        
-        // Kiểm tra có config riêng cho clinic không
+
+        // Nếu có cấu hình riêng cho clinic thì kiểm tra theo clinic đó
         ClinicWiFiConfig clinicConfig = clinic.get(String.valueOf(clinicId));
         if (clinicConfig != null) {
-            // Dùng config riêng của clinic
             List<String> clinicAllowedSsids = parseList(clinicConfig.getSsids());
             List<String> clinicAllowedBssids = parseList(clinicConfig.getBssids());
-            
-            boolean ssidMatch = ssid != null && !ssid.trim().isEmpty() 
+
+            boolean ssidMatch = ssid != null && !ssid.trim().isEmpty()
                 && clinicAllowedSsids.contains(ssid.trim().toUpperCase());
-            boolean bssidMatch = bssid != null && !bssid.trim().isEmpty() 
+            boolean bssidMatch = bssid != null && !bssid.trim().isEmpty()
                 && clinicAllowedBssids.contains(bssid.trim().toUpperCase());
-            
+
             return ssidMatch || bssidMatch;
         }
-        
-        // Không có config riêng, dùng global config
+
+        // Không có cấu hình riêng thì fallback sang cấu hình toàn cục
         return isWiFiAllowed(ssid, bssid);
     }
-    
-    /**
-     * Parse comma-separated string thành List
-     */
+
+    // Chuyển chuỗi các giá trị cách nhau bởi dấu phẩy thành List<String>, loại bỏ khoảng trắng, in hoa
     private List<String> parseList(String value) {
         if (value == null || value.trim().isEmpty()) {
             return List.of();
@@ -166,4 +134,3 @@ public class WiFiConfig {
             .collect(Collectors.toList());
     }
 }
-

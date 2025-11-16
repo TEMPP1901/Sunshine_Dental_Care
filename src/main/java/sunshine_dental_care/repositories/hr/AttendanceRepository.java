@@ -15,81 +15,54 @@ import sunshine_dental_care.entities.Attendance;
 
 @Repository
 public interface AttendanceRepository extends JpaRepository<Attendance, Integer> {
-    
-    /**
-     * Tìm attendance của user trong ngày cụ thể
-     */
+
+    // Tìm bản ghi chấm công của user trong ngày
     Optional<Attendance> findByUserIdAndWorkDate(Integer userId, LocalDate workDate);
-    
-    /**
-     * Tìm attendance của user tại clinic trong ngày cụ thể
-     */
+
+    // Tìm bản ghi chấm công của user tại phòng khám trong ngày
     Optional<Attendance> findByUserIdAndClinicIdAndWorkDate(Integer userId, Integer clinicId, LocalDate workDate);
-    
-    /**
-     * Lấy lịch sử attendance của user trong khoảng thời gian
-     */
+
+    // Lấy danh sách lịch sử chấm công của user trong khoảng thời gian, sắp xếp mới nhất trước
     List<Attendance> findByUserIdAndWorkDateBetweenOrderByWorkDateDesc(
         Integer userId, LocalDate startDate, LocalDate endDate);
-    
-    /**
-     * Lấy lịch sử attendance của user trong khoảng thời gian (có phân trang)
-     */
+
+    // Lấy danh sách lịch sử chấm công của user trong khoảng thời gian, có phân trang
     Page<Attendance> findByUserIdAndWorkDateBetweenOrderByWorkDateDesc(
         Integer userId, LocalDate startDate, LocalDate endDate, Pageable pageable);
-    
-    /**
-     * Lấy lịch sử attendance của user tại clinic trong khoảng thời gian
-     */
+
+    // Lấy lịch sử chấm công của user tại một clinic trong khoảng thời gian
     List<Attendance> findByUserIdAndClinicIdAndWorkDateBetweenOrderByWorkDateDesc(
         Integer userId, Integer clinicId, LocalDate startDate, LocalDate endDate);
-    
-    /**
-     * Lấy lịch sử attendance của user tại clinic trong khoảng thời gian (có phân trang)
-     */
+
+    // Lấy lịch sử chấm công của user tại một clinic trong khoảng thời gian, có phân trang
     Page<Attendance> findByUserIdAndClinicIdAndWorkDateBetweenOrderByWorkDateDesc(
         Integer userId, Integer clinicId, LocalDate startDate, LocalDate endDate, Pageable pageable);
-    
-    /**
-     * Lấy danh sách attendance của clinic trong ngày
-     */
+
     List<Attendance> findByClinicIdAndWorkDate(Integer clinicId, LocalDate workDate);
-    
-    /**
-     * Lấy danh sách attendance của clinic trong khoảng thời gian (có phân trang)
-     */
+
     Page<Attendance> findByClinicIdAndWorkDateBetween(
         Integer clinicId, LocalDate startDate, LocalDate endDate, Pageable pageable);
 
     List<Attendance> findByWorkDate(LocalDate workDate);
-    
+
     List<Attendance> findByWorkDateBetween(LocalDate startDate, LocalDate endDate);
 
     List<Attendance> findByWorkDateAndAttendanceStatus(LocalDate workDate, String attendanceStatus);
 
     List<Attendance> findByClinicIdAndWorkDateAndAttendanceStatus(Integer clinicId, LocalDate workDate, String attendanceStatus);
-    
-    /**
-     * Đếm số lần chấm công của user trong khoảng thời gian
-     */
+
+    // Đếm số lần chấm công của user trong khoảng thời gian
     long countByUserIdAndWorkDateBetween(Integer userId, LocalDate startDate, LocalDate endDate);
-    
-    /**
-     * Đếm số lần chấm công của user tại clinic trong khoảng thời gian
-     */
+
+    // Đếm số lần chấm công của user tại một clinic trong khoảng thời gian
     long countByUserIdAndClinicIdAndWorkDateBetween(
         Integer userId, Integer clinicId, LocalDate startDate, LocalDate endDate);
-    
-    /**
-     * Kiểm tra user đã check-in trong ngày chưa
-     */
+
+    // Kiểm tra user đã check-in trong ngày hay chưa
     @Query("SELECT COUNT(a) > 0 FROM Attendance a WHERE a.userId = :userId AND a.workDate = :workDate AND a.checkInTime IS NOT NULL")
     boolean existsByUserIdAndWorkDateWithCheckIn(@Param("userId") Integer userId, @Param("workDate") LocalDate workDate);
-    
-    /**
-     * Kiểm tra user đã check-out trong ngày chưa
-     */
+
+    // Kiểm tra user đã check-out trong ngày hay chưa
     @Query("SELECT COUNT(a) > 0 FROM Attendance a WHERE a.userId = :userId AND a.workDate = :workDate AND a.checkOutTime IS NOT NULL")
     boolean existsByUserIdAndWorkDateWithCheckOut(@Param("userId") Integer userId, @Param("workDate") LocalDate workDate);
 }
-

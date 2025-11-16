@@ -21,10 +21,10 @@ public class AdminStaffController {
 
     private final AdminStaffService adminStaffService;
 
+    // Lấy danh sách nhân viên (ADMIN)
     @GetMapping
     public ResponseEntity<List<AdminStaffDto>> getStaff(
             @RequestParam(value = "search", required = false) String search) {
         return ResponseEntity.ok(adminStaffService.getStaff(search));
     }
 }
-

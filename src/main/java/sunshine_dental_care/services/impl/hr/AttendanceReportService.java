@@ -49,7 +49,6 @@ public class AttendanceReportService {
 
         List<Department> departments = departmentRepo.findAllByOrderByDepartmentNameAsc();
         List<DailySummaryResponse> summaries = new ArrayList<>();
-
         List<User> eligibleUsers = getEligibleUsersForAttendance(null);
         List<Attendance> allAttendances = attendanceRepository.findAll().stream()
                 .filter(a -> a.getWorkDate().equals(workDate))
@@ -76,6 +75,7 @@ public class AttendanceReportService {
             summary.setMale(0);
             summary.setFemale(0);
 
+            // Kiểm tra số lượng nhân viên hợp lệ, nếu không có thì bỏ qua các tính toán
             if (totalEmployees == 0) {
                 summary.setPresent(0);
                 summary.setPresentPercent(BigDecimal.ZERO);
@@ -121,16 +121,12 @@ public class AttendanceReportService {
 
             summary.setPresent(present);
             summary.setPresentPercent(calculatePercent(present, totalEmployees));
-
             summary.setLate(late);
             summary.setLatePercent(calculatePercent(late, totalEmployees));
-
             summary.setAbsent(absent);
             summary.setAbsentPercent(calculatePercent(absent, totalEmployees));
-
             summary.setLeave(leave);
             summary.setLeavePercent(calculatePercent(leave, totalEmployees));
-
             summary.setOffday(offday);
             summary.setOffdayPercent(calculatePercent(offday, totalEmployees));
 
@@ -183,6 +179,7 @@ public class AttendanceReportService {
 
             Attendance attendance = attendanceByUserId.get(user.getId());
             if (attendance == null) {
+                // Nếu không có dữ liệu chấm công thì mặc định là vắng mặt
                 item.setStatus("Absent");
                 item.setStatusColor("red");
                 item.setCheckInTime(null);
@@ -220,6 +217,7 @@ public class AttendanceReportService {
         LocalDate startDate = LocalDate.of(year, month, 1);
         LocalDate endDate = startDate.withDayOfMonth(startDate.lengthOfMonth());
 
+        // Tính số ngày làm việc trong tháng (trừ thứ 7, CN)
         int workingDays = 0;
         LocalDate current = startDate;
         while (!current.isAfter(endDate)) {
@@ -257,6 +255,7 @@ public class AttendanceReportService {
             int totalEmployees = deptUsers.size();
             summary.setTotalEmployees(totalEmployees);
 
+            // Nếu không có nhân viên thì bỏ qua tính toán
             if (totalEmployees == 0) {
                 summary.setPresent(0);
                 summary.setLate(0);
@@ -438,6 +437,7 @@ public class AttendanceReportService {
                     && u.getDepartment().getId().equals(departmentId));
         }
 
+        // Loại các user có vai trò không hợp lệ chấm công
         return stream
                 .filter(u -> {
                     List<UserRole> roles = userRoleRepo.findActiveByUserId(u.getId());
@@ -460,10 +460,10 @@ public class AttendanceReportService {
         boolean hasCheckIn = attendance.getCheckInTime() != null;
         boolean hasCheckOut = attendance.getCheckOutTime() != null;
         
-        // Nếu có check-in hoặc check-out thì không phải Offday
+        // Phân loại trạng thái chấm công (rất quan trọng, xử lý nghiệp vụ phần hiển thị chấm công)
         if (status == null) {
             if (hasCheckIn || hasCheckOut) {
-                // Có check-in/check-out nhưng status null → hiển thị theo check-in/check-out
+                // Nếu có check-in hoặc check-out thì được xem là có mặt
                 if (hasCheckIn && hasCheckOut) {
                     item.setStatus("Present");
                     item.setStatusColor("green");
@@ -475,9 +475,9 @@ public class AttendanceReportService {
                     item.setStatusColor("red");
                 }
             } else {
-                // Không có check-in/check-out và status null → Offday
-            item.setStatus("Offday");
-            item.setStatusColor("gray");
+                // Không có check-in, check-out và trạng thái null thì xem là ngày nghỉ
+                item.setStatus("Offday");
+                item.setStatusColor("gray");
             }
         } else if ("ON_TIME".equals(status)) {
             item.setStatus("Present");
@@ -502,6 +502,7 @@ public class AttendanceReportService {
             item.setStatusColor("gray");
         }
 
+        // Nếu là làm thêm giờ thì đánh dấu lại trạng thái là Overtime
         if (attendance.getIsOvertime() != null && attendance.getIsOvertime()) {
             item.setStatus("Overtime");
             item.setStatusColor("blue");
@@ -523,6 +524,7 @@ public class AttendanceReportService {
             item.setWorkedDisplay("0 hr 00 min");
         }
 
+        // Lấy ca trực cho bác sĩ (nếu có)
         List<DoctorSchedule> schedules = doctorScheduleRepo
                 .findByUserIdAndClinicIdAndWorkDate(user.getId(), attendance.getClinicId(), workDate);
 
@@ -545,7 +547,7 @@ public class AttendanceReportService {
         item.setRemarks(attendance.getNote() != null ? attendance.getNote() : "Fixed Attendance");
     }
 
-    // Tính phần trăm theo kiểu BigDecimal
+    // Tính phần trăm số lượng nhân viên/thống kê
     private BigDecimal calculatePercent(int value, int total) {
         if (total == 0) {
             return BigDecimal.ZERO;
@@ -556,7 +558,7 @@ public class AttendanceReportService {
                 .setScale(2, java.math.RoundingMode.HALF_UP);
     }
 
-    // Định dạng hiển thị thời gian theo giờ/phút và am/pm
+    // Định dạng giờ/phút am pm phục vụ hiển thị ca làm việc
     private String formatTime(LocalTime time) {
         int hour = time.getHour();
         int minute = time.getMinute();
@@ -565,4 +567,3 @@ public class AttendanceReportService {
         return String.format("%d.%02d%s", displayHour, minute, period);
     }
 }
-

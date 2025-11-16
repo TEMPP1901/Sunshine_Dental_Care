@@ -71,6 +71,31 @@ public class Attendance {
     @Column(name = "note", length = 400)
     private String note;
 
+    /**
+     * Loại ca làm việc: MORNING (sáng), AFTERNOON (chiều), FULL_DAY (cả ngày)
+     * - MORNING: Ca sáng (8:00-11:00)
+     * - AFTERNOON: Ca chiều (13:00-18:00)
+     * - FULL_DAY: Cả ngày (cho nhân viên không phân ca)
+     */
+    @Nationalized
+    @Column(name = "shiftType", length = 20)
+    private String shiftType; // MORNING, AFTERNOON, FULL_DAY
+
+    /**
+     * Số giờ làm việc thực tế (tính từ check-in đến check-out)
+     * Dùng để tính lương
+     */
+    @Column(name = "actualWorkHours", precision = 5, scale = 2)
+    private BigDecimal actualWorkHours; // Ví dụ: 3.5 giờ
+
+    /**
+     * Số giờ làm việc theo lịch (expected hours)
+     * - Ca sáng: 3 giờ (8:00-11:00)
+     * - Ca chiều: 5 giờ (13:00-18:00)
+     */
+    @Column(name = "expectedWorkHours", precision = 5, scale = 2)
+    private BigDecimal expectedWorkHours; // Ví dụ: 3.0 giờ
+
     // Face Recognition fields
     @Column(name = "faceMatchScore", precision = 5, scale = 4)
     private BigDecimal faceMatchScore; // Similarity score 0.0 - 1.0
@@ -277,6 +302,30 @@ public class Attendance {
 
     public void setAttendanceStatus(String attendanceStatus) {
         this.attendanceStatus = attendanceStatus;
+    }
+
+    public String getShiftType() {
+        return shiftType;
+    }
+
+    public void setShiftType(String shiftType) {
+        this.shiftType = shiftType;
+    }
+
+    public BigDecimal getActualWorkHours() {
+        return actualWorkHours;
+    }
+
+    public void setActualWorkHours(BigDecimal actualWorkHours) {
+        this.actualWorkHours = actualWorkHours;
+    }
+
+    public BigDecimal getExpectedWorkHours() {
+        return expectedWorkHours;
+    }
+
+    public void setExpectedWorkHours(BigDecimal expectedWorkHours) {
+        this.expectedWorkHours = expectedWorkHours;
     }
 
 }
