@@ -22,4 +22,11 @@ public interface UserRoleRepo extends JpaRepository<UserRole, Integer> {
   """)
     List<String> findRoleNamesByUserId(Integer userId);
 
+    @Query("""
+      select ur from UserRole ur
+      join fetch ur.role
+      where ur.user.id IN :userIds and ur.isActive = true
+    """)
+    List<UserRole> findActiveByUserIdIn(List<Integer> userIds);
+
 }

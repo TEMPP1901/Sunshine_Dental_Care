@@ -1,7 +1,9 @@
 package sunshine_dental_care.services.impl.hr;
 
 import java.time.LocalDate;
+import java.time.LocalTime;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -12,7 +14,6 @@ import java.util.stream.Collectors;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import jakarta.persistence.EntityManager;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import sunshine_dental_care.dto.hrDTO.ClinicResponse;
@@ -20,19 +21,25 @@ import sunshine_dental_care.dto.hrDTO.CreateWeeklyScheduleRequest;
 import sunshine_dental_care.dto.hrDTO.DoctorScheduleDto;
 import sunshine_dental_care.dto.hrDTO.HrDocDto;
 import sunshine_dental_care.dto.hrDTO.RoomResponse;
+import sunshine_dental_care.dto.hrDTO.RuleBasedScheduleData;
+import sunshine_dental_care.dto.hrDTO.ScheduleRequirements;
 import sunshine_dental_care.dto.hrDTO.ValidationResultDto;
 import sunshine_dental_care.entities.Clinic;
-import sunshine_dental_care.entities.Department;
 import sunshine_dental_care.entities.DoctorSchedule;
+import sunshine_dental_care.entities.DoctorSpecialty;
 import sunshine_dental_care.entities.Room;
 import sunshine_dental_care.entities.User;
+import sunshine_dental_care.entities.UserRole;
 import sunshine_dental_care.exceptions.hr.ScheduleValidationException;
 import sunshine_dental_care.repositories.auth.ClinicRepo;
 import sunshine_dental_care.repositories.auth.UserRepo;
-import sunshine_dental_care.repositories.hr.DepartmentRepo;
+import sunshine_dental_care.repositories.auth.UserRoleRepo;
 import sunshine_dental_care.repositories.hr.DoctorScheduleRepo;
+import sunshine_dental_care.repositories.hr.DoctorSpecialtyRepo;
 import sunshine_dental_care.repositories.hr.RoomRepo;
+import sunshine_dental_care.services.interfaces.hr.AiScheduleGenerationService;
 import sunshine_dental_care.services.interfaces.hr.HrService;
+import sunshine_dental_care.services.interfaces.hr.ScheduleValidationService;
 
 @Service
 @RequiredArgsConstructor
@@ -40,11 +47,13 @@ import sunshine_dental_care.services.interfaces.hr.HrService;
 public class HrServiceImpl implements HrService {
 
     private final DoctorScheduleRepo doctorScheduleRepo;
-    private final EntityManager entityManager;
+    private final DoctorSpecialtyRepo doctorSpecialtyRepo;
     private final UserRepo userRepo;
-    private final DepartmentRepo departmentRepo;
     private final ClinicRepo clinicRepo;
     private final RoomRepo roomRepo;
+    private final UserRoleRepo userRoleRepo;
+    private final AiScheduleGenerationService aiScheduleGenerationService;
+    private final ScheduleValidationService scheduleValidationService;
 
     @Override
     @Transactional
@@ -53,28 +62,26 @@ public class HrServiceImpl implements HrService {
         log.info("Creating weekly schedule for week starting: {}", request.getWeekStart());
 
         // Xác thực request trước khi tạo lịch
-        ValidationResultDto validation = validateSchedule(request);
+        ValidationResultDto validation = scheduleValidationService.validateSchedule(request);
         if (!validation.isValid()) {
             log.warn("Schedule validation failed: {}", validation.getErrors());
             throw new ScheduleValidationException(String.join(", ", validation.getErrors()));
         }
 
         List<DoctorSchedule> schedules = new ArrayList<>();
-
         String[] days = {"monday", "tuesday", "wednesday", "thursday", "friday", "saturday"};
 
         for (int dayIndex = 0; dayIndex < 6; dayIndex++) {
             String dayName = days[dayIndex];
             LocalDate workDate = request.getWeekStart().plusDays(dayIndex);
 
-            List<CreateWeeklyScheduleRequest.DoctorAssignmentRequest> dayAssignments =
-                    request.getDailyAssignments().get(dayName);
+            List<CreateWeeklyScheduleRequest.DoctorAssignmentRequest> dayAssignments = request.getDailyAssignments().get(dayName);
 
             if (dayAssignments != null) {
                 for (CreateWeeklyScheduleRequest.DoctorAssignmentRequest assignment : dayAssignments) {
                     DoctorSchedule schedule = new DoctorSchedule();
 
-                    // ÁNH XẠ THÔNG TIN CƠ BẢN, tạo entity với id để tránh lỗi serialize proxy
+                    // ÁNH XẠ THÔNG TIN CƠ BẢN: tạo entity với id để tránh lỗi serialize proxy
                     User doctor = new User();
                     doctor.setId(assignment.getDoctorId());
                     schedule.setDoctor(doctor);
@@ -90,9 +97,6 @@ public class HrServiceImpl implements HrService {
                     } else {
                         schedule.setRoom(null);
                     }
-
-                    // Chair luôn null, sẽ chọn sau khi đặt lịch hẹn
-                    schedule.setChair(null);
 
                     schedule.setWorkDate(workDate);
                     schedule.setStartTime(assignment.getStartTime());
@@ -165,222 +169,11 @@ public class HrServiceImpl implements HrService {
 
     @Override
     @Transactional(readOnly = true)
-    // PHƯƠNG THỨC QUAN TRỌNG: Xác thực phân công tuần (luật phức tạp, đảm bảo hợp lệ)
     public ValidationResultDto validateSchedule(CreateWeeklyScheduleRequest request) {
-        ValidationResultDto result = new ValidationResultDto();
-
-        LocalDate today = LocalDate.now();
-        LocalDate weekStart = request.getWeekStart();
-        LocalDate weekEnd = request.getWeekStart().plusDays(5);
-
-        int dayOfWeek = today.getDayOfWeek().getValue();
-        int daysFromMonday = (dayOfWeek == 1) ? 0 : (dayOfWeek == 7) ? 6 : dayOfWeek - 1;
-        LocalDate currentWeekMonday = today.minusDays(daysFromMonday);
-        LocalDate nextWeekMonday = currentWeekMonday.plusWeeks(1);
-
-        // Không cho phép tạo lịch cho tuần đã qua
-        if (weekEnd.isBefore(today)) {
-            result.addError("Cannot create schedule for past week. Week end date (" + weekEnd + ") is before today (" + today + ")");
-        }
-
-        // Chỉ cho phép tạo cho tuần tiếp theo trở đi
-        if (weekStart.equals(currentWeekMonday) || weekStart.isBefore(nextWeekMonday)) {
-            result.addError("Cannot create schedule for current week. Only next week and future weeks are allowed. Current week Monday: " + currentWeekMonday + ", Selected: " + weekStart);
-        }
-
-        // Ngày bắt đầu phải là thứ Hai
-        if (weekStart.getDayOfWeek().getValue() != 1) {
-            result.addError("Week start date must be a Monday. Selected date: " + weekStart + " (day: " + weekStart.getDayOfWeek() + ")");
-        }
-
-        if (request.getDailyAssignments() == null || request.getDailyAssignments().isEmpty()) {
-            result.addError("No daily assignments provided for the week");
-        }
-
-        String[] days = {"monday", "tuesday", "wednesday", "thursday", "friday", "saturday"};
-
-        for (int dayIndex = 0; dayIndex < 6; dayIndex++) {
-            String dayName = days[dayIndex];
-            LocalDate workDate = request.getWeekStart().plusDays(dayIndex);
-
-            List<CreateWeeklyScheduleRequest.DoctorAssignmentRequest> dayAssignments =
-                    request.getDailyAssignments().get(dayName);
-
-            // Nếu ngày nghỉ thì bỏ qua không cần validate
-            if (dayAssignments == null || dayAssignments.isEmpty()) {
-                continue;
-            }
-
-            Map<Integer, List<CreateWeeklyScheduleRequest.DoctorAssignmentRequest>> doctorAssignments = new HashMap<>();
-
-            for (CreateWeeklyScheduleRequest.DoctorAssignmentRequest assignment : dayAssignments) {
-                doctorAssignments.putIfAbsent(assignment.getDoctorId(), new ArrayList<>());
-                doctorAssignments.get(assignment.getDoctorId()).add(assignment);
-            }
-
-            for (Map.Entry<Integer, List<CreateWeeklyScheduleRequest.DoctorAssignmentRequest>> entry : doctorAssignments.entrySet()) {
-                Integer doctorId = entry.getKey();
-                List<CreateWeeklyScheduleRequest.DoctorAssignmentRequest> assignments = entry.getValue();
-
-                // Cho phép một bác sĩ có nhiều ca trong một ngày, nhưng không được overlap
-                for (int i = 0; i < assignments.size(); i++) {
-                    CreateWeeklyScheduleRequest.DoctorAssignmentRequest assignment1 = assignments.get(i);
-                    if (assignment1.getStartTime().isAfter(assignment1.getEndTime())) {
-                        result.addError("Start time must be before end time for doctor ID " + doctorId + " on " + dayName);
-                    }
-                    // Kiểm tra overlap giữa các ca mới
-                    for (int j = i + 1; j < assignments.size(); j++) {
-                        CreateWeeklyScheduleRequest.DoctorAssignmentRequest assignment2 = assignments.get(j);
-                        boolean overlaps = assignment1.getStartTime().isBefore(assignment2.getEndTime())
-                                && assignment2.getStartTime().isBefore(assignment1.getEndTime());
-                        if (overlaps) {
-                            result.addError("Doctor ID " + doctorId + " has overlapping time slots on " + dayName
-                                    + " (" + assignment1.getStartTime() + "-" + assignment1.getEndTime()
-                                    + " and " + assignment2.getStartTime() + "-" + assignment2.getEndTime() + ")");
-                        }
-                    }
-                }
-                // Kiểm tra xem bác sĩ đã có lịch trong ngày này chưa (kiểm tra overlap với lịch hiện có)
-                List<DoctorSchedule> existingSchedules = doctorScheduleRepo.findByDoctorIdAndWorkDate(doctorId, workDate);
-                for (CreateWeeklyScheduleRequest.DoctorAssignmentRequest newAssignment : assignments) {
-                    for (DoctorSchedule existing : existingSchedules) {
-                        // Kiểm tra overlap: startTime < existing.endTime && existing.startTime < endTime
-                        boolean overlaps = newAssignment.getStartTime().isBefore(existing.getEndTime())
-                                && existing.getStartTime().isBefore(newAssignment.getEndTime());
-                        if (overlaps) {
-                            String errorMsg = "Doctor ID " + doctorId + " already has an overlapping schedule on " + workDate
-                                    + " (" + existing.getStartTime() + "-" + existing.getEndTime() + ")";
-                            result.addError(errorMsg);
-                            break;
-                        }
-                    }
-                }
-                
-                
-            }
-
-            Set<Integer> clinicIdsInDay = new HashSet<>();
-            for (CreateWeeklyScheduleRequest.DoctorAssignmentRequest assignment : dayAssignments) {
-                clinicIdsInDay.add(assignment.getClinicId());
-            }
-
-            if (clinicIdsInDay.size() > 2) {
-                result.addError("Each day can have at most 2 clinics. Found " + clinicIdsInDay.size() + " clinics on " + dayName);
-            } else if (clinicIdsInDay.size() == 2) {
-                // LUẬT QUAN TRỌNG: Mỗi department phải có bác sĩ ở cả hai cơ sở nếu 2 clinic hoạt động
-                Map<Integer, Map<Integer, Set<Integer>>> deptClinicDoctors = new HashMap<>();
-
-                for (CreateWeeklyScheduleRequest.DoctorAssignmentRequest assignment : dayAssignments) {
-                    User doctor = userRepo.findById(assignment.getDoctorId()).orElse(null);
-                    if (doctor == null) {
-                        result.addError("Doctor ID " + assignment.getDoctorId() + " not found");
-                        continue;
-                    }
-
-                    if (!Boolean.TRUE.equals(doctor.getIsActive())) {
-                        result.addError("Doctor ID " + assignment.getDoctorId() + " (" + doctor.getFullName() + ") is inactive and cannot be assigned to schedule");
-                        continue;
-                    }
-
-                    Department dept = doctor.getDepartment();
-                    if (dept == null) {
-                        result.addError("Doctor ID " + assignment.getDoctorId() + " does not have a department assigned");
-                        continue;
-                    }
-
-                    Integer deptId = dept.getId();
-                    Integer clinicId = assignment.getClinicId();
-                    deptClinicDoctors.putIfAbsent(deptId, new HashMap<>());
-                    deptClinicDoctors.get(deptId).putIfAbsent(clinicId, new HashSet<>());
-                    deptClinicDoctors.get(deptId).get(clinicId).add(assignment.getDoctorId());
-                }
-
-                for (Map.Entry<Integer, Map<Integer, Set<Integer>>> deptEntry : deptClinicDoctors.entrySet()) {
-                    Integer deptId = deptEntry.getKey();
-                    Map<Integer, Set<Integer>> clinicDoctors = deptEntry.getValue();
-
-                    Department dept = departmentRepo.findById(deptId).orElse(null);
-                    String deptName = (dept != null) ? dept.getDepartmentName() : "Department ID " + deptId;
-
-                    if (clinicDoctors.size() != 2) {
-                        result.addError("Department \"" + deptName + "\" must have doctors assigned to both clinics on " + dayName + ". Found in " + clinicDoctors.size() + " clinic(s)");
-                    } else {
-                        for (Integer clinicId : clinicIdsInDay) {
-                            if (!clinicDoctors.containsKey(clinicId) || clinicDoctors.get(clinicId).isEmpty()) {
-                                result.addError("Department \"" + deptName + "\" must have at least one doctor assigned to clinic ID " + clinicId + " on " + dayName);
-                            }
-                        }
-
-                        int totalDoctors = 0;
-                        int clinic1Count = 0;
-                        int clinic2Count = 0;
-                        // LUẬT QUAN TRỌNG: Phân bổ đều giữa các clinic nếu nhiều bác sĩ
-                        for (Map.Entry<Integer, Set<Integer>> clinicEntry : clinicDoctors.entrySet()) {
-                            int count = clinicEntry.getValue().size();
-                            totalDoctors += count;
-                            if (clinic1Count == 0) {
-                                clinic1Count = count;
-                            } else {
-                                clinic2Count = count;
-                            }
-                        }
-
-                        if (totalDoctors >= 3) {
-                            int diff = Math.abs(clinic1Count - clinic2Count);
-
-                            if (totalDoctors == 3 && diff > 1) {
-                                result.addError("Department \"" + deptName + "\" has " + totalDoctors + " doctors but uneven distribution (" + clinic1Count + " vs " + clinic2Count + ") on " + dayName + ". Recommended: 2-1 or 1-2 distribution");
-                            } else if (totalDoctors == 4 && diff > 2) {
-                                result.addError("Department \"" + deptName + "\" has " + totalDoctors + " doctors but uneven distribution (" + clinic1Count + " vs " + clinic2Count + ") on " + dayName + ". Recommended: 2-2 distribution");
-                            } else if (totalDoctors > 4 && diff > (totalDoctors / 2)) {
-                                result.addError("Department \"" + deptName + "\" has " + totalDoctors + " doctors but uneven distribution (" + clinic1Count + " vs " + clinic2Count + ") on " + dayName + ". Recommended: more balanced distribution");
-                            }
-                        }
-                    }
-                }
-            } else if (clinicIdsInDay.size() == 1) {
-                // LUẬT QUAN TRỌNG: Nếu chỉ 1 clinic/week, phòng ban có bác sĩ phải có bác sĩ ở clinic đang hoạt động
-                Integer workingClinicId = clinicIdsInDay.iterator().next();
-                Map<Integer, Set<Integer>> deptDoctors = new HashMap<>();
-
-                for (CreateWeeklyScheduleRequest.DoctorAssignmentRequest assignment : dayAssignments) {
-                    User doctor = userRepo.findById(assignment.getDoctorId()).orElse(null);
-                    if (doctor == null) {
-                        result.addError("Doctor ID " + assignment.getDoctorId() + " not found");
-                        continue;
-                    }
-                    if (!Boolean.TRUE.equals(doctor.getIsActive())) {
-                        result.addError("Doctor ID " + assignment.getDoctorId() + " (" + doctor.getFullName() + ") is inactive and cannot be assigned to schedule");
-                        continue;
-                    }
-                    Department dept = doctor.getDepartment();
-                    if (dept == null) {
-                        result.addError("Doctor ID " + assignment.getDoctorId() + " does not have a department assigned");
-                        continue;
-                    }
-                    Integer deptId = dept.getId();
-                    deptDoctors.putIfAbsent(deptId, new HashSet<>());
-                    deptDoctors.get(deptId).add(assignment.getDoctorId());
-                }
-
-                Set<Integer> departmentsWithDoctors = new HashSet<>(deptDoctors.keySet());
-                for (Integer deptId : departmentsWithDoctors) {
-                    Department dept = departmentRepo.findById(deptId).orElse(null);
-                    if (dept == null) {
-                        continue;
-                    }
-                    Set<Integer> doctorsInDept = deptDoctors.get(deptId);
-                    if (doctorsInDept == null || doctorsInDept.isEmpty()) {
-                        Clinic clinic = clinicRepo.findById(workingClinicId).orElse(null);
-                        String clinicName = clinic != null ? clinic.getClinicName() : "Clinic ID " + workingClinicId;
-                        result.addError("Department \"" + dept.getDepartmentName() + "\" must have at least one doctor assigned to " + clinicName + " on " + dayName + " (departments with doctors must have doctors when clinic is working)");
-                    }
-                }
-            }
-        }
-
-        return result;
+        return scheduleValidationService.validateSchedule(request);
     }
+
+    // validateSchedule và validateAssignment đã được chuyển sang ScheduleValidationServiceImpl
 
     // CHUYỂN ĐỔI ENTITY SANG DTO, LẤY ĐẦY ĐỦ THÔNG TIN LIÊN QUAN
     private DoctorScheduleDto convertToDto(DoctorSchedule schedule) {
@@ -429,8 +222,6 @@ public class HrServiceImpl implements HrService {
             }
         }
 
-        dto.setChair(null);
-
         dto.setWorkDate(schedule.getWorkDate());
         dto.setStartTime(schedule.getStartTime());
         dto.setEndTime(schedule.getEndTime());
@@ -445,5 +236,352 @@ public class HrServiceImpl implements HrService {
         }
 
         return dto;
+    }
+
+    @Override
+    @Deprecated
+    @Transactional(readOnly = true)
+    public CreateWeeklyScheduleRequest generateScheduleFromDescription(LocalDate weekStart, String description) {
+        // PHƯƠNG THỨC QUAN TRỌNG: sinh lịch AI từ description
+        return aiScheduleGenerationService.generateScheduleFromDescription(weekStart, description);
+    }
+
+    @Override
+    // PHƯƠNG THỨC QUAN TRỌNG: sinh lịch tuần dựa theo mô tả văn bản bằng rule-based
+    public CreateWeeklyScheduleRequest generateScheduleFromDescriptionRuleBased(LocalDate weekStart, String description) {
+        log.info("Using rule-based logic to generate schedule from description: {}", description);
+
+        RuleBasedScheduleData data = loadDataForRuleBased();
+        ScheduleRequirements requirements = parseDescription(description, data);
+
+        return generateDayAssignments(weekStart, data, requirements);
+    }
+
+    // PHƯƠNG THỨC QUAN TRỌNG: tải dữ liệu phục vụ sinh lịch rule-based
+    private RuleBasedScheduleData loadDataForRuleBased() {
+        List<User> allUsers = userRepo.findAll();
+
+        Map<Integer, List<UserRole>> userRolesMap = new HashMap<>();
+        List<UserRole> allUserRoles = userRoleRepo.findAll().stream()
+            .filter(ur -> Boolean.TRUE.equals(ur.getIsActive()))
+            .collect(Collectors.toList());
+        for (UserRole ur : allUserRoles) {
+            if (ur.getUser() != null && ur.getUser().getId() != null) {
+                Integer userId = ur.getUser().getId();
+                userRolesMap.putIfAbsent(userId, new ArrayList<>());
+                userRolesMap.get(userId).add(ur);
+            }
+        }
+
+        List<User> allDoctors = allUsers.stream()
+            .filter(user -> {
+                if (!Boolean.TRUE.equals(user.getIsActive())) return false;
+                List<UserRole> roles = userRolesMap.getOrDefault(user.getId(), new ArrayList<>());
+                return roles.stream().anyMatch(ur -> {
+                    if (ur == null || ur.getRole() == null) return false;
+                    String roleName = ur.getRole().getRoleName();
+                    return roleName != null &&
+                            (roleName.equalsIgnoreCase("DOCTOR") || roleName.equalsIgnoreCase("BÁC SĨ"));
+                });
+            })
+            .collect(Collectors.toList());
+
+        List<Clinic> allClinics = clinicRepo.findAll().stream()
+            .filter(c -> c.getIsActive() != null && c.getIsActive())
+            .collect(Collectors.toList());
+
+        List<Room> allRooms = roomRepo.findByIsActiveTrueOrderByRoomNameAsc();
+
+        Set<Integer> doctorIds = allDoctors.stream().map(User::getId).collect(Collectors.toSet());
+        Map<Integer, List<String>> doctorSpecialtiesMap = new HashMap<>();
+        if (!doctorIds.isEmpty()) {
+            List<DoctorSpecialty> allDoctorSpecialties = doctorSpecialtyRepo.findByDoctorIdInAndIsActiveTrue(new ArrayList<>(doctorIds));
+            for (DoctorSpecialty ds : allDoctorSpecialties) {
+                Integer doctorId = ds.getDoctor().getId();
+                doctorSpecialtiesMap.putIfAbsent(doctorId, new ArrayList<>());
+                doctorSpecialtiesMap.get(doctorId).add(ds.getSpecialtyName().trim());
+            }
+        }
+
+        Map<String, List<User>> doctorsBySpecialty = new HashMap<>();
+        for (User doctor : allDoctors) {
+            List<String> doctorSpecialties = doctorSpecialtiesMap.getOrDefault(doctor.getId(), new ArrayList<>());
+            if (doctorSpecialties.isEmpty()) {
+                String oldSpecialty = (doctor.getSpecialty() != null && !doctor.getSpecialty().trim().isEmpty())
+                        ? doctor.getSpecialty().trim()
+                        : "No Specialty";
+                doctorSpecialties = Collections.singletonList(oldSpecialty);
+                doctorSpecialtiesMap.put(doctor.getId(), doctorSpecialties);
+            }
+            for (String specialty : doctorSpecialties) {
+                doctorsBySpecialty.putIfAbsent(specialty, new ArrayList<>());
+                if (!doctorsBySpecialty.get(specialty).contains(doctor)) {
+                    doctorsBySpecialty.get(specialty).add(doctor);
+                }
+            }
+        }
+
+        return new RuleBasedScheduleData(allDoctors, allClinics, allRooms, doctorsBySpecialty);
+    }
+
+    // PHƯƠNG THỨC QUAN TRỌNG: phân tích description để lấy các yêu cầu về lịch
+    private ScheduleRequirements parseDescription(String description, RuleBasedScheduleData data) {
+        String descLower = description.toLowerCase();
+
+        boolean bothClinicsActive = descLower.contains("cả hai cơ sở") || descLower.contains("both clinics")
+                || descLower.contains("hai cơ sở") || descLower.contains("cả hai");
+        boolean allSpecialties = descLower.contains("tất cả chuyên khoa") || descLower.contains("all specialties")
+                || descLower.contains("tất cả chuyên") || descLower.contains("all specialty");
+
+        Set<String> mentionedSpecialties = new HashSet<>();
+        if (!allSpecialties) {
+            for (String specialty : data.getDoctorsBySpecialty().keySet()) {
+                if (descLower.contains(specialty.toLowerCase())) {
+                    mentionedSpecialties.add(specialty);
+                }
+            }
+        }
+
+        Set<Integer> mentionedClinicIds = new HashSet<>();
+        for (Clinic clinic : data.getAllClinics()) {
+            String clinicName = clinic.getClinicName().toLowerCase();
+            if (descLower.contains(clinicName.toLowerCase()) ||
+                    descLower.contains("clinic " + clinic.getId()) ||
+                    descLower.contains("q" + clinic.getId())) {
+                mentionedClinicIds.add(clinic.getId());
+            }
+        }
+
+        if (bothClinicsActive || mentionedClinicIds.isEmpty()) {
+            mentionedClinicIds.addAll(data.getAllClinics().stream().map(Clinic::getId).collect(Collectors.toSet()));
+        }
+
+        if (bothClinicsActive && mentionedClinicIds.size() < 2 && data.getAllClinics().size() >= 2) {
+            mentionedClinicIds.clear();
+            mentionedClinicIds.addAll(data.getAllClinics().stream()
+                    .limit(2)
+                    .map(Clinic::getId)
+                    .collect(Collectors.toSet()));
+        }
+
+        Map<String, String> dayMapping = new HashMap<>();
+        dayMapping.put("monday", "monday");
+        dayMapping.put("thứ 2", "monday");
+        dayMapping.put("thứ hai", "monday");
+        dayMapping.put("tuesday", "tuesday");
+        dayMapping.put("thứ 3", "tuesday");
+        dayMapping.put("thứ ba", "tuesday");
+        dayMapping.put("wednesday", "wednesday");
+        dayMapping.put("thứ 4", "wednesday");
+        dayMapping.put("thứ tư", "wednesday");
+        dayMapping.put("thursday", "thursday");
+        dayMapping.put("thứ 5", "thursday");
+        dayMapping.put("thứ năm", "thursday");
+        dayMapping.put("friday", "friday");
+        dayMapping.put("thứ 6", "friday");
+        dayMapping.put("thứ sáu", "friday");
+        dayMapping.put("saturday", "saturday");
+        dayMapping.put("thứ 7", "saturday");
+        dayMapping.put("thứ bảy", "saturday");
+
+        Set<String> mentionedDays = new HashSet<>();
+        for (Map.Entry<String, String> entry : dayMapping.entrySet()) {
+            if (descLower.contains(entry.getKey())) {
+                mentionedDays.add(entry.getValue());
+            }
+        }
+
+        if (mentionedDays.isEmpty()) {
+            mentionedDays.addAll(Set.of("monday", "tuesday", "wednesday", "thursday", "friday", "saturday"));
+        }
+
+        boolean hasMorning = descLower.contains("sáng") || descLower.contains("morning");
+        boolean hasAfternoon = descLower.contains("chiều") || descLower.contains("afternoon");
+
+        if (!hasMorning && !hasAfternoon) {
+            hasMorning = true;
+            hasAfternoon = true;
+        }
+
+        Set<String> specialtiesToCover = allSpecialties
+                ? new HashSet<>(data.getDoctorsBySpecialty().keySet())
+                : (mentionedSpecialties.isEmpty() ? new HashSet<>(data.getDoctorsBySpecialty().keySet()) : mentionedSpecialties);
+
+        // Parse doctors to exclude (ví dụ: "doc5 nghỉ cả tuần")
+        Set<Integer> doctorsToExclude = new HashSet<>();
+        // Note: Rule-based logic không parse doctors to exclude, để trống
+        // AI service sẽ xử lý việc này
+
+        return new ScheduleRequirements(
+                mentionedClinicIds,
+                mentionedDays,
+                specialtiesToCover,
+                hasMorning,
+                hasAfternoon,
+                bothClinicsActive,
+                doctorsToExclude
+        );
+    }
+
+    // PHƯƠNG THỨC QUAN TRỌNG: Sinh dayAssignments dựa trên requirements phân tích được
+    private CreateWeeklyScheduleRequest generateDayAssignments(
+            LocalDate weekStart,
+            RuleBasedScheduleData data,
+            ScheduleRequirements requirements
+    ) {
+        Map<String, List<CreateWeeklyScheduleRequest.DoctorAssignmentRequest>> dailyAssignments = new HashMap<>();
+        String[] days = {"monday", "tuesday", "wednesday", "thursday", "friday", "saturday"};
+        LocalTime morningStart = LocalTime.of(8, 0);
+        LocalTime morningEnd = LocalTime.of(11, 0);
+        LocalTime afternoonStart = LocalTime.of(13, 0);
+        LocalTime afternoonEnd = LocalTime.of(18, 0);
+
+        Map<String, Integer> specialtyRotationIndex = new HashMap<>();
+        Map<Integer, Integer> doctorAssignmentCount = new HashMap<>();
+
+        for (int dayIndex = 0; dayIndex < 6; dayIndex++) {
+            String dayName = days[dayIndex];
+            if (!requirements.getDays().contains(dayName)) {
+                continue;
+            }
+
+            List<CreateWeeklyScheduleRequest.DoctorAssignmentRequest> dayAssignments = new ArrayList<>();
+
+            List<Integer> clinicIds = new ArrayList<>(requirements.getClinicIds());
+            if (requirements.isBothClinicsActive() && clinicIds.size() >= 2) {
+                clinicIds = clinicIds.subList(0, Math.min(2, clinicIds.size()));
+            }
+
+            Map<Integer, Map<String, Boolean>> clinicShiftCoverage = new HashMap<>();
+            for (Integer clinicId : clinicIds) {
+                Map<String, Boolean> shifts = new HashMap<>();
+                shifts.put("morning", false);
+                shifts.put("afternoon", false);
+                clinicShiftCoverage.put(clinicId, shifts);
+            }
+
+            // Lấy danh sách bác sĩ nghỉ (không được assign)
+            Set<Integer> doctorsToExclude = requirements.getDoctorsToExclude();
+            
+            for (String specialty : requirements.getSpecialtiesToCover()) {
+                List<User> specialtyDoctors = data.getDoctorsBySpecialty().get(specialty);
+                if (specialtyDoctors == null || specialtyDoctors.isEmpty()) {
+                    continue;
+                }
+                
+                // Loại trừ bác sĩ nghỉ
+                specialtyDoctors = specialtyDoctors.stream()
+                    .filter(doc -> !doctorsToExclude.contains(doc.getId()))
+                    .collect(Collectors.toList());
+                
+                if (specialtyDoctors.isEmpty()) {
+                    log.warn("No available doctors for specialty {} after excluding doctors on {}", specialty, dayName);
+                    continue;
+                }
+
+                int rotationIdx = specialtyRotationIndex.getOrDefault(specialty, 0);
+
+                for (Integer clinicId : clinicIds) {
+                    // Chọn room theo clinic (không cần filter theo specialty nữa)
+                    Room suitableRoom = data.getAllRooms().stream()
+                            .filter(r -> r.getClinic() != null && r.getClinic().getId().equals(clinicId))
+                            .findFirst()
+                            .orElse(null);
+
+                    if (suitableRoom == null) {
+                        continue;
+                    }
+
+                    User selectedDoctor = specialtyDoctors.get(rotationIdx % specialtyDoctors.size());
+
+                    if (requirements.hasMorning() && !clinicShiftCoverage.get(clinicId).get("morning")) {
+                        CreateWeeklyScheduleRequest.DoctorAssignmentRequest morningAssignment =
+                                new CreateWeeklyScheduleRequest.DoctorAssignmentRequest();
+                        morningAssignment.setDoctorId(selectedDoctor.getId());
+                        morningAssignment.setClinicId(clinicId);
+                        morningAssignment.setRoomId(suitableRoom.getId());
+                        morningAssignment.setStartTime(morningStart);
+                        morningAssignment.setEndTime(morningEnd);
+                        dayAssignments.add(morningAssignment);
+                        clinicShiftCoverage.get(clinicId).put("morning", true);
+                        doctorAssignmentCount.put(selectedDoctor.getId(),
+                                doctorAssignmentCount.getOrDefault(selectedDoctor.getId(), 0) + 1);
+                    }
+
+                    if (requirements.hasAfternoon() && !clinicShiftCoverage.get(clinicId).get("afternoon")) {
+                        CreateWeeklyScheduleRequest.DoctorAssignmentRequest afternoonAssignment =
+                                new CreateWeeklyScheduleRequest.DoctorAssignmentRequest();
+                        afternoonAssignment.setDoctorId(selectedDoctor.getId());
+                        afternoonAssignment.setClinicId(clinicId);
+                        afternoonAssignment.setRoomId(suitableRoom.getId());
+                        afternoonAssignment.setStartTime(afternoonStart);
+                        afternoonAssignment.setEndTime(afternoonEnd);
+                        dayAssignments.add(afternoonAssignment);
+                        clinicShiftCoverage.get(clinicId).put("afternoon", true);
+                        doctorAssignmentCount.put(selectedDoctor.getId(),
+                                doctorAssignmentCount.getOrDefault(selectedDoctor.getId(), 0) + 1);
+                    }
+                }
+
+                specialtyRotationIndex.put(specialty, rotationIdx + 1);
+            }
+
+            for (Integer clinicId : clinicIds) {
+                Map<String, Boolean> shifts = clinicShiftCoverage.get(clinicId);
+
+                if (!shifts.get("morning") || !shifts.get("afternoon")) {
+                    User fillDoctor = data.getAllDoctors().stream()
+                            .min((d1, d2) -> Integer.compare(
+                                    doctorAssignmentCount.getOrDefault(d1.getId(), 0),
+                                    doctorAssignmentCount.getOrDefault(d2.getId(), 0)
+                            ))
+                            .orElse(null);
+
+                    if (fillDoctor != null) {
+                        Room fillRoom = data.getAllRooms().stream()
+                                .filter(r -> r.getClinic() != null && r.getClinic().getId().equals(clinicId))
+                                .findFirst()
+                                .orElse(null);
+
+                        if (fillRoom != null) {
+                            if (!shifts.get("morning") && requirements.hasMorning()) {
+                                CreateWeeklyScheduleRequest.DoctorAssignmentRequest morningAssignment =
+                                        new CreateWeeklyScheduleRequest.DoctorAssignmentRequest();
+                                morningAssignment.setDoctorId(fillDoctor.getId());
+                                morningAssignment.setClinicId(clinicId);
+                                morningAssignment.setRoomId(fillRoom.getId());
+                                morningAssignment.setStartTime(morningStart);
+                                morningAssignment.setEndTime(morningEnd);
+                                dayAssignments.add(morningAssignment);
+                                clinicShiftCoverage.get(clinicId).put("morning", true);
+                            }
+
+                            if (!shifts.get("afternoon") && requirements.hasAfternoon()) {
+                                CreateWeeklyScheduleRequest.DoctorAssignmentRequest afternoonAssignment =
+                                        new CreateWeeklyScheduleRequest.DoctorAssignmentRequest();
+                                afternoonAssignment.setDoctorId(fillDoctor.getId());
+                                afternoonAssignment.setClinicId(clinicId);
+                                afternoonAssignment.setRoomId(fillRoom.getId());
+                                afternoonAssignment.setStartTime(afternoonStart);
+                                afternoonAssignment.setEndTime(afternoonEnd);
+                                dayAssignments.add(afternoonAssignment);
+                                clinicShiftCoverage.get(clinicId).put("afternoon", true);
+                            }
+                        }
+                    }
+                }
+            }
+
+            if (!dayAssignments.isEmpty()) {
+                dailyAssignments.put(dayName, dayAssignments);
+            }
+        }
+
+        CreateWeeklyScheduleRequest request = new CreateWeeklyScheduleRequest();
+        request.setWeekStart(weekStart);
+        request.setDailyAssignments(dailyAssignments);
+        request.setNote("Auto-generated by rule-based logic from description");
+
+        return request;
     }
 }

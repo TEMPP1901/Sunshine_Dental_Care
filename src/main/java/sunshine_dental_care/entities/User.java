@@ -1,12 +1,14 @@
 package sunshine_dental_care.entities;
 
 import java.time.Instant;
+import java.util.List;
 
 import org.hibernate.annotations.ColumnDefault;
 import org.hibernate.annotations.Nationalized;
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 
+import jakarta.persistence.CascadeType;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.FetchType;
@@ -15,6 +17,7 @@ import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
+import jakarta.persistence.OneToMany;
 import jakarta.persistence.PrePersist;
 import jakarta.persistence.PreUpdate;
 import jakarta.persistence.Table;
@@ -86,6 +89,13 @@ public class User {
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "departmentId")
     private Department department;
+
+    @Nationalized
+    @Column(name = "specialty", length = 100)
+    private String specialty; // Giữ lại để backward compatibility
+
+    @OneToMany(mappedBy = "doctor", cascade = CascadeType.ALL, fetch = FetchType.LAZY, orphanRemoval = true)
+    private List<DoctorSpecialty> doctorSpecialties;
 
     public Integer getId() {
         return id;
@@ -209,6 +219,23 @@ public class User {
     public void setDepartment(Department department) {
         this.department = department;
     }
+
+    public String getSpecialty() {
+        return specialty;
+    }
+
+    public void setSpecialty(String specialty) {
+        this.specialty = specialty;
+    }
+
+    public List<DoctorSpecialty> getDoctorSpecialties() {
+        return doctorSpecialties;
+    }
+
+    public void setDoctorSpecialties(List<DoctorSpecialty> doctorSpecialties) {
+        this.doctorSpecialties = doctorSpecialties;
+    }
+
     @PrePersist
     void prePersist() {
         if (createdAt == null) createdAt = Instant.now();

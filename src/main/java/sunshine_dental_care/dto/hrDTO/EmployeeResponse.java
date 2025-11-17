@@ -1,6 +1,7 @@
 package sunshine_dental_care.dto.hrDTO;
 
 import java.time.LocalDateTime;
+import java.util.List;
 
 public class EmployeeResponse {
     private Integer id;
@@ -17,6 +18,8 @@ public class EmployeeResponse {
     private Object role;              
     private Object clinic;            
     private String roleAtClinic;
+    private String specialty;         // Specialty for doctors (backward compatibility)
+    private List<String> specialties;  // Multiple specialties for doctors
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
     private LocalDateTime lastLoginAt;
@@ -183,5 +186,21 @@ public class EmployeeResponse {
     
     public void setLastLoginAt(LocalDateTime lastLoginAt) {
         this.lastLoginAt = lastLoginAt;
+    }
+    
+    public String getSpecialty() {
+        return specialty;
+    }
+    
+    public void setSpecialty(String specialty) {
+        this.specialty = specialty;
+    }
+
+    public List<String> getSpecialties() {
+        return specialties;
+    }
+
+    public void setSpecialties(List<String> specialties) {
+        this.specialties = specialties;
     }
 }

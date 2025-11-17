@@ -32,6 +32,7 @@ import sunshine_dental_care.dto.hrDTO.helper.EmployeeStatisticsHelper;
 import sunshine_dental_care.dto.hrDTO.mapper.EmployeeMapper;
 import sunshine_dental_care.entities.Clinic;
 import sunshine_dental_care.entities.Department;
+import sunshine_dental_care.entities.DoctorSpecialty;
 import sunshine_dental_care.entities.EmployeeFaceProfile;
 import sunshine_dental_care.entities.Role;
 import sunshine_dental_care.entities.User;
@@ -44,6 +45,7 @@ import sunshine_dental_care.repositories.auth.RoleRepo;
 import sunshine_dental_care.repositories.auth.UserRepo;
 import sunshine_dental_care.repositories.auth.UserRoleRepo;
 import sunshine_dental_care.repositories.hr.DepartmentRepo;
+import sunshine_dental_care.repositories.hr.DoctorSpecialtyRepo;
 import sunshine_dental_care.repositories.hr.EmployeeFaceProfileRepo;
 import sunshine_dental_care.repositories.hr.RoomRepo;
 import sunshine_dental_care.repositories.hr.UserClinicAssignmentRepo;
@@ -62,6 +64,7 @@ public class HrEmployeeServiceImpl implements HrEmployeeService {
     private final DepartmentRepo departmentRepo;
     private final RoomRepo roomRepo;
     private final UserClinicAssignmentRepo userClinicAssignmentRepo;
+    private final DoctorSpecialtyRepo doctorSpecialtyRepo;
     private final PasswordEncoder passwordEncoder;
     private final EmployeeMapper employeeMapper;
     private final EmployeeFilterHelper filterHelper;
@@ -104,9 +107,18 @@ public class HrEmployeeServiceImpl implements HrEmployeeService {
             if (request.getCode() != null && !request.getCode().trim().isEmpty()) {
                 user.setCode(request.getCode().trim());
             }
-            user.setAvatarUrl(request.getAvatarUrl());
+            // Avatar URL được upload riêng qua endpoint /avatar, không cần set ở đây
+            if (request.getAvatarUrl() != null && !request.getAvatarUrl().trim().isEmpty()) {
+                user.setAvatarUrl(request.getAvatarUrl().trim());
+            }
             user.setProvider("local");
             user.setIsActive(true);
+            
+            // Lưu specialty cũ vào field User.specialty (deprecated, chỉ để backward compatibility)
+            // Frontend hiện tại không gửi field này, nhưng giữ lại để tương thích với các client khác
+            if (request.getSpecialty() != null && !request.getSpecialty().trim().isEmpty()) {
+                user.setSpecialty(request.getSpecialty().trim());
+            }
 
             Department department = null;
             if (request.getDepartmentId() != null) {
@@ -122,6 +134,28 @@ public class HrEmployeeServiceImpl implements HrEmployeeService {
                 throw new EmployeeValidationException(ex);
             }
 
+            // Lưu nhiều chuyên khoa vào bảng DoctorSpecialties
+            if (request.getSpecialties() != null && !request.getSpecialties().isEmpty()) {
+                for (String specialtyName : request.getSpecialties()) {
+                    if (specialtyName != null && !specialtyName.trim().isEmpty()) {
+                        DoctorSpecialty doctorSpecialty = new DoctorSpecialty();
+                        doctorSpecialty.setDoctor(user);
+                        doctorSpecialty.setSpecialtyName(specialtyName.trim());
+                        doctorSpecialty.setIsActive(true);
+                        doctorSpecialtyRepo.save(doctorSpecialty);
+                    }
+                }
+                log.info("Saved {} specialties for doctor {}", request.getSpecialties().size(), user.getId());
+            } else if (request.getSpecialty() != null && !request.getSpecialty().trim().isEmpty()) {
+                // Nếu chỉ có specialty cũ (backward compatibility), lưu vào bảng mới
+                DoctorSpecialty doctorSpecialty = new DoctorSpecialty();
+                doctorSpecialty.setDoctor(user);
+                doctorSpecialty.setSpecialtyName(request.getSpecialty().trim());
+                doctorSpecialty.setIsActive(true);
+                doctorSpecialtyRepo.save(doctorSpecialty);
+                log.info("Saved single specialty for doctor {} (backward compatibility)", user.getId());
+            }
+
             // Lấy role, nếu không tồn tại thì báo lỗi
             Role role = roleRepo.findById(request.getRoleId())
                     .orElseThrow(() -> new EmployeeValidationException("Role not found"));
@@ -133,13 +167,16 @@ public class HrEmployeeServiceImpl implements HrEmployeeService {
                         .orElseThrow(() -> new EmployeeValidationException("Clinic not found"));
             }
 
+            // Room assignment - hiện tại không được sử dụng trong frontend form
+            // Giữ lại để tương thích với các client khác hoặc tương lai
             if (request.getRoomId() != null) {
                 // Kiểm tra tồn tại phòng
                 roomRepo.findById(request.getRoomId())
                         .orElseThrow(() -> new EmployeeValidationException("Room not found"));
             }
 
-            // Bổ sung mô tả liên quan đến phòng nếu có
+            // Description - hiện tại không được sử dụng trong frontend form
+            // Giữ lại để tương thích với các client khác hoặc tương lai
             String description = request.getDescription();
             if (request.getRoomId() != null && description == null) {
                 description = "Room ID: " + request.getRoomId();

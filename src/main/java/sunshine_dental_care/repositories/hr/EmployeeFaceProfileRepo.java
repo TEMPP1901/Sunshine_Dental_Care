@@ -10,14 +10,9 @@ import sunshine_dental_care.entities.EmployeeFaceProfile;
 @Repository
 public interface EmployeeFaceProfileRepo extends JpaRepository<EmployeeFaceProfile, Integer> {
     
-    /**
-     * Tìm face profile theo userId
-     */
+    // Tìm face profile bằng userId
     Optional<EmployeeFaceProfile> findByUserId(Integer userId);
     
-    /**
-     * Kiểm tra employee đã đăng ký face chưa
-     */
+    // Kiểm tra user đã đăng ký kênh nhận diện khuôn mặt chưa
     boolean existsByUserId(Integer userId);
 }
-

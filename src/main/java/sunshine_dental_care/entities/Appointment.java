@@ -1,10 +1,19 @@
 package sunshine_dental_care.entities;
 
-import jakarta.persistence.*;
+import java.time.Instant;
+
 import org.hibernate.annotations.ColumnDefault;
 import org.hibernate.annotations.Nationalized;
 
-import java.time.Instant;
+import jakarta.persistence.Column;
+import jakarta.persistence.Entity;
+import jakarta.persistence.FetchType;
+import jakarta.persistence.GeneratedValue;
+import jakarta.persistence.GenerationType;
+import jakarta.persistence.Id;
+import jakarta.persistence.JoinColumn;
+import jakarta.persistence.ManyToOne;
+import jakarta.persistence.Table;
 
 @Entity
 @Table(name = "Appointments")
@@ -29,10 +38,6 @@ public class Appointment {
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "roomId")
     private Room room;
-
-    @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "chairId")
-    private Chair chair;
 
     @Column(name = "startDateTime", nullable = false)
     private Instant startDateTime;
@@ -102,14 +107,6 @@ public class Appointment {
 
     public void setRoom(Room room) {
         this.room = room;
-    }
-
-    public Chair getChair() {
-        return chair;
-    }
-
-    public void setChair(Chair chair) {
-        this.chair = chair;
     }
 
     public Instant getStartDateTime() {

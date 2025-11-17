@@ -33,6 +33,7 @@ public class AdminAttendanceController {
 
     private final AttendanceService attendanceService;
 
+    // Lấy danh sách chấm công theo bộ lọc: ngày, phòng khám, trạng thái
     @GetMapping
     public ResponseEntity<List<AttendanceResponse>> getAttendanceList(
             @RequestParam(value = "date", required = false)
@@ -44,6 +45,7 @@ public class AdminAttendanceController {
         return ResponseEntity.ok(responses);
     }
 
+    // Admin cập nhật trạng thái chấm công cho nhân viên
     @PatchMapping("/{id}")
     public ResponseEntity<AttendanceResponse> updateAttendanceStatus(
             @PathVariable Integer id,
@@ -60,10 +62,7 @@ public class AdminAttendanceController {
         return ResponseEntity.ok(response);
     }
     
-    /**
-     * Admin xem danh sách giải trình đang chờ xử lý
-     * GET /api/admin/attendance/explanations/pending?clinicId=1
-     */
+    // Admin lấy danh sách giải trình đang chờ xử lý (pending explanations)
     @GetMapping("/explanations/pending")
     public ResponseEntity<List<AttendanceExplanationResponse>> getPendingExplanations(
             @RequestParam(required = false) Integer clinicId) {
@@ -72,16 +71,7 @@ public class AdminAttendanceController {
         return ResponseEntity.ok(explanations);
     }
     
-    /**
-     * Admin approve/reject giải trình và tự động cập nhật attendance status
-     * POST /api/admin/attendance/explanations/process
-     * Body: { "attendanceId": 123, "action": "APPROVE" hoặc "REJECT", "adminNote": "..." }
-     * 
-     * Khi APPROVE:
-     * - LATE → APPROVED_LATE (tính cả ngày)
-     * - ABSENT/MISSING_CHECK_IN → APPROVED_ABSENCE (tính cả ngày)
-     * - MISSING_CHECK_OUT → Giữ nguyên status (tính cả ngày)
-     */
+    // Admin xử lý (approve/reject) giải trình và cập nhật trạng thái chấm công tương ứng
     @PostMapping("/explanations/process")
     public ResponseEntity<AttendanceResponse> processExplanation(
             @Validated @RequestBody AdminExplanationActionRequest request,
@@ -92,4 +82,3 @@ public class AdminAttendanceController {
         return ResponseEntity.ok(response);
     }
 }
-

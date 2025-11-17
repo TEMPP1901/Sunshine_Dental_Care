@@ -26,11 +26,13 @@ public class AdminClinicController {
 
     private final AdminClinicService adminClinicService;
 
+    // Lấy danh sách tất cả phòng khám (dành cho ADMIN)
     @GetMapping
     public ResponseEntity<List<AdminClinicDto>> getClinics() {
         return ResponseEntity.ok(adminClinicService.getAllClinics());
     }
 
+    // Cập nhật trạng thái hoạt động của phòng khám (dành cho ADMIN)
     @PatchMapping("/{id}/activation")
     public ResponseEntity<Void> updateActivation(
             @PathVariable Integer id,
@@ -39,4 +41,3 @@ public class AdminClinicController {
         return ResponseEntity.status(HttpStatus.NO_CONTENT).build();
     }
 }
-

@@ -62,9 +62,6 @@ public class CreateWeeklyScheduleRequest {
         @NotNull(message = "Room ID is required")
         private Integer roomId;
         
-        @NotNull(message = "Chair ID is required")
-        private Integer chairId;
-        
         @NotNull(message = "Start time is required")
         private LocalTime startTime;
         
@@ -77,12 +74,11 @@ public class CreateWeeklyScheduleRequest {
         public DoctorAssignmentRequest() {}
         
         public DoctorAssignmentRequest(Integer doctorId, Integer clinicId, 
-                                     Integer roomId, Integer chairId, 
+                                     Integer roomId, 
                                      LocalTime startTime, LocalTime endTime, String note) {
             this.doctorId = doctorId;
             this.clinicId = clinicId;
             this.roomId = roomId;
-            this.chairId = chairId;
             this.startTime = startTime;
             this.endTime = endTime;
             this.note = note;
@@ -111,14 +107,6 @@ public class CreateWeeklyScheduleRequest {
         
         public void setRoomId(Integer roomId) {
             this.roomId = roomId;
-        }
-        
-        public Integer getChairId() {
-            return chairId;
-        }
-        
-        public void setChairId(Integer chairId) {
-            this.chairId = chairId;
         }
         
         public LocalTime getStartTime() {

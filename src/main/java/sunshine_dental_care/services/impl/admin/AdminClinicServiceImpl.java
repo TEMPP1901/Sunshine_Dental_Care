@@ -19,6 +19,7 @@ public class AdminClinicServiceImpl implements AdminClinicService {
 
     private final ClinicRepo clinicRepo;
 
+    // Lấy tất cả phòng khám (Clinic)
     @Override
     @Transactional(readOnly = true)
     public List<AdminClinicDto> getAllClinics() {
@@ -28,6 +29,7 @@ public class AdminClinicServiceImpl implements AdminClinicService {
                 .collect(Collectors.toList());
     }
 
+    // Cập nhật trạng thái kích hoạt phòng khám
     @Override
     @Transactional
     public void updateActivation(Integer clinicId, boolean active) {
@@ -37,6 +39,7 @@ public class AdminClinicServiceImpl implements AdminClinicService {
         clinicRepo.save(clinic);
     }
 
+    // Chuyển Clinic sang DTO
     private AdminClinicDto convertToDto(Clinic clinic) {
         AdminClinicDto dto = new AdminClinicDto();
         dto.setId(clinic.getId());
@@ -52,4 +55,3 @@ public class AdminClinicServiceImpl implements AdminClinicService {
         return dto;
     }
 }
-

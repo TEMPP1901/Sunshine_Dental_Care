@@ -9,7 +9,6 @@ public class DoctorScheduleDto {
     private HrDocDto doctor;           // DTO cho doctor
     private ClinicResponse clinic;     // DTO cho clinic
     private RoomResponse room;         // DTO cho room
-    private Object chair;              // Chair không cần trong phân công
     private LocalDate workDate;
     private LocalTime startTime;
     private LocalTime endTime;
@@ -22,14 +21,13 @@ public class DoctorScheduleDto {
     public DoctorScheduleDto() {}
     
     public DoctorScheduleDto(Integer id, HrDocDto doctor, ClinicResponse clinic, 
-                           RoomResponse room, Object chair, LocalDate workDate, 
+                           RoomResponse room, LocalDate workDate, 
                            LocalTime startTime, LocalTime endTime, String status, 
                            String note, LocalDateTime createdAt, LocalDateTime updatedAt) {
         this.id = id;
         this.doctor = doctor;
         this.clinic = clinic;
         this.room = room;
-        this.chair = chair;
         this.workDate = workDate;
         this.startTime = startTime;
         this.endTime = endTime;
@@ -71,15 +69,7 @@ public class DoctorScheduleDto {
     public void setRoom(RoomResponse room) {
         this.room = room;
     }
-    
-    public Object getChair() {
-        return chair;
-    }
-    
-    public void setChair(Object chair) {
-        this.chair = chair;
-    }
-    
+
     public LocalDate getWorkDate() {
         return workDate;
     }
