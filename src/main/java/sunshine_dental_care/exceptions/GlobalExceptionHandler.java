@@ -4,18 +4,22 @@ import java.time.LocalDateTime;
 import java.util.HashMap;
 import java.util.Map;
 
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.security.core.AuthenticationException;
+import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.validation.FieldError;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 
 import lombok.extern.slf4j.Slf4j;
+import sunshine_dental_care.exceptions.auth.DuplicateEmailException;
+import sunshine_dental_care.exceptions.auth.DuplicateUsernameException;
 import sunshine_dental_care.exceptions.hr.AttendanceExceptions.AlreadyCheckedInException;
 import sunshine_dental_care.exceptions.hr.AttendanceExceptions.AttendanceException;
 import sunshine_dental_care.exceptions.hr.AttendanceExceptions.AttendanceNotFoundException;
@@ -238,7 +242,7 @@ public class GlobalExceptionHandler {
     }
 
     // ========== ATTENDANCE EXCEPTIONS ==========
-    
+
     // Lỗi không tìm thấy attendance
     @ExceptionHandler(AttendanceNotFoundException.class)
     public ResponseEntity<Map<String, Object>> handleAttendanceNotFoundException(AttendanceNotFoundException ex) {
@@ -251,7 +255,7 @@ public class GlobalExceptionHandler {
         log.warn("Attendance not found: {}", ex.getMessage());
         return ResponseEntity.status(HttpStatus.NOT_FOUND).body(response);
     }
-    
+
     // Lỗi validation attendance (face, WiFi, ...)
     @ExceptionHandler(AttendanceValidationException.class)
     public ResponseEntity<Map<String, Object>> handleAttendanceValidationException(AttendanceValidationException ex) {
@@ -264,7 +268,7 @@ public class GlobalExceptionHandler {
         log.warn("Attendance validation failed: {}", ex.getMessage());
         return ResponseEntity.badRequest().body(response);
     }
-    
+
     // Lỗi đã check-in rồi
     @ExceptionHandler(AlreadyCheckedInException.class)
     public ResponseEntity<Map<String, Object>> handleAlreadyCheckedInException(AlreadyCheckedInException ex) {
@@ -277,7 +281,7 @@ public class GlobalExceptionHandler {
         log.warn("Already checked in: {}", ex.getMessage());
         return ResponseEntity.status(HttpStatus.CONFLICT).body(response);
     }
-    
+
     // Lỗi face verification failed
     @ExceptionHandler(FaceVerificationFailedException.class)
     public ResponseEntity<Map<String, Object>> handleFaceVerificationFailedException(FaceVerificationFailedException ex) {
@@ -290,7 +294,7 @@ public class GlobalExceptionHandler {
         log.warn("Face verification failed: {}", ex.getMessage());
         return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(response);
     }
-    
+
     // Lỗi WiFi validation failed
     @ExceptionHandler(WiFiValidationFailedException.class)
     public ResponseEntity<Map<String, Object>> handleWiFiValidationFailedException(WiFiValidationFailedException ex) {
@@ -303,7 +307,7 @@ public class GlobalExceptionHandler {
         log.warn("WiFi validation failed: {}", ex.getMessage());
         return ResponseEntity.status(HttpStatus.FORBIDDEN).body(response);
     }
-    
+
     // Lỗi logic khác của Attendance
     @ExceptionHandler(AttendanceException.class)
     public ResponseEntity<Map<String, Object>> handleAttendanceException(AttendanceException ex) {
@@ -330,5 +334,82 @@ public class GlobalExceptionHandler {
         return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
                 .contentType(MediaType.APPLICATION_JSON)
                 .body(response);
+    }
+
+    //Handle xử lí lỗi ném ra từ SQL:
+    @ExceptionHandler(DataIntegrityViolationException.class)
+    public ResponseEntity<Map<String, Object>> handleUniqueConstraint(DataIntegrityViolationException ex) {
+        String message = ex.getMostSpecificCause() != null
+                ? ex.getMostSpecificCause().getMessage()
+                : ex.getMessage();
+
+        Map<String, String> errors = new HashMap<>();
+
+        // Check constraint trong thông báo SQL để xác định field trùng
+        if (message != null) {
+            String msgLower = message.toLowerCase();
+
+            // Check trùng phone trong DB
+            if (msgLower.contains("uq_users_phone") || msgLower.contains("uq__users__phone")) {
+                errors.put("phone", "Phone number is already registered");
+            } else {
+                errors.put("general", "Duplicate data in unique field");
+            }
+        }
+
+        Map<String, Object> body = new HashMap<>();
+        body.put("timestamp", LocalDateTime.now());
+        body.put("status", HttpStatus.CONFLICT.value());
+        body.put("error", "Conflict");
+        body.put("message", "Duplicate field value");
+        body.put("errors", errors);
+
+        log.warn("Unique constraint violation: {}", message);
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(body);
+    }
+
+    // Helper nội bộ trả response 409 conflict
+    private ResponseEntity<Map<String, Object>> buildConflictResponse(String field, String message) {
+        Map<String, String> errors = new HashMap<>();
+        errors.put(field, message);
+
+        Map<String, Object> body = new HashMap<>();
+        body.put("timestamp", LocalDateTime.now());
+        body.put("status", HttpStatus.CONFLICT.value());
+        body.put("error", "Conflict");
+        body.put("message", message);
+        body.put("errors", errors);
+
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(body);
+    }
+
+    // Xử lí validation BadCredentialsException cho phương thức login bên ServiceImp
+    @ExceptionHandler(BadCredentialsException.class)
+    public ResponseEntity<Map<String, Object>> handleBadCredentials(BadCredentialsException ex) {
+        Map<String, Object> body = new HashMap<>();
+        body.put("timestamp", LocalDateTime.now());
+        body.put("status", HttpStatus.UNAUTHORIZED.value());
+        body.put("error", "Unauthorized");
+        body.put("message", ex.getMessage()); // "Invalid email or password" | "Account is disabled"
+
+        Map<String, String> errors = new HashMap<>();
+        String m = ex.getMessage() != null ? ex.getMessage() : "Invalid email or password";
+        errors.put("email", m);
+        errors.put("password", m);
+        body.put("errors", errors);
+
+        return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(body);
+    }
+
+    // Xử lí validation trùng email
+    @ExceptionHandler(DuplicateEmailException.class)
+    public ResponseEntity<Map<String, Object>> handleDuplicateEmail(DuplicateEmailException ex) {
+        return buildConflictResponse("email", ex.getMessage());
+    }
+
+    // Xử lí validate trùng username
+    @ExceptionHandler(DuplicateUsernameException.class)
+    public ResponseEntity<Map<String, Object>> handleDuplicateUsername(DuplicateUsernameException ex) {
+        return buildConflictResponse("username", ex.getMessage());
     }
 }
