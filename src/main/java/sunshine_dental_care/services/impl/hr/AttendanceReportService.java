@@ -43,7 +43,7 @@ public class AttendanceReportService {
     private final DoctorScheduleRepo doctorScheduleRepo;
     private final AttendanceStatusCalculator attendanceStatusCalculator;
 
-    // Lấy tổng kết chấm công theo ngày
+    // Lấy tổng kết chấm công theo ngày (very important: calculates daily summary report)
     public List<DailySummaryResponse> getDailySummary(LocalDate workDate) {
         log.info("Getting daily summary for date: {}", workDate);
 
@@ -136,7 +136,7 @@ public class AttendanceReportService {
         return summaries;
     }
 
-    // Lấy danh sách chấm công theo ngày
+    // Lấy danh sách chấm công theo ngày (very important: paginated daily attendance list)
     public Page<DailyAttendanceListItemResponse> getDailyAttendanceList(LocalDate workDate,
                                                                         Integer departmentId,
                                                                         Integer clinicId,
@@ -203,7 +203,7 @@ public class AttendanceReportService {
         return new PageImpl<>(pagedItems, PageRequest.of(page, size), items.size());
     }
 
-    // Lấy tổng kết chấm công theo tháng
+    // Lấy tổng kết chấm công theo tháng (very important: calculates monthly summary report)
     public List<MonthlySummaryResponse> getMonthlySummary(Integer year, Integer month) {
         log.info("Getting monthly summary for year: {}, month: {}", year, month);
 
@@ -309,7 +309,7 @@ public class AttendanceReportService {
         return summaries;
     }
 
-    // Lấy danh sách chấm công theo tháng
+    // Lấy danh sách chấm công theo tháng (very important: paginated monthly attendance list)
     public Page<MonthlyAttendanceListItemResponse> getMonthlyAttendanceList(Integer year,
                                                                             Integer month,
                                                                             Integer departmentId,
@@ -427,7 +427,7 @@ public class AttendanceReportService {
         return new PageImpl<>(pagedItems, PageRequest.of(page, size), items.size());
     }
 
-    // Lọc các nhân viên đủ điều kiện áp dụng chấm công
+    // Lọc các nhân viên đủ điều kiện áp dụng chấm công (very important: filter active users eligible for attendance)
     private List<User> getEligibleUsersForAttendance(Integer departmentId) {
         Stream<User> stream = userRepo.findAll().stream()
                 .filter(u -> Boolean.TRUE.equals(u.getIsActive()));
@@ -447,7 +447,7 @@ public class AttendanceReportService {
                 .toList();
     }
 
-    // Điền thông tin chấm công chi tiết cho DailyAttendanceListItemResponse
+    // Điền thông tin chấm công chi tiết cho DailyAttendanceListItemResponse (very important: fill detailed attendance info)
     private void fillAttendanceItemWithData(DailyAttendanceListItemResponse item,
                                             Attendance attendance,
                                             User user,
@@ -460,7 +460,7 @@ public class AttendanceReportService {
         boolean hasCheckIn = attendance.getCheckInTime() != null;
         boolean hasCheckOut = attendance.getCheckOutTime() != null;
         
-        // Phân loại trạng thái chấm công (rất quan trọng, xử lý nghiệp vụ phần hiển thị chấm công)
+        // Phân loại trạng thái chấm công (very important: handle attendance status for display)
         if (status == null) {
             if (hasCheckIn || hasCheckOut) {
                 // Nếu có check-in hoặc check-out thì được xem là có mặt
@@ -547,7 +547,7 @@ public class AttendanceReportService {
         item.setRemarks(attendance.getNote() != null ? attendance.getNote() : "Fixed Attendance");
     }
 
-    // Tính phần trăm số lượng nhân viên/thống kê
+    // Tính phần trăm số lượng nhân viên/thống kê (very important: calculate percentage)
     private BigDecimal calculatePercent(int value, int total) {
         if (total == 0) {
             return BigDecimal.ZERO;
@@ -558,7 +558,7 @@ public class AttendanceReportService {
                 .setScale(2, java.math.RoundingMode.HALF_UP);
     }
 
-    // Định dạng giờ/phút am pm phục vụ hiển thị ca làm việc
+    // Định dạng giờ/phút am pm phục vụ hiển thị ca làm việc (format time, for display)
     private String formatTime(LocalTime time) {
         int hour = time.getHour();
         int minute = time.getMinute();

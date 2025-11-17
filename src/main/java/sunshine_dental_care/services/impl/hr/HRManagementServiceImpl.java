@@ -33,39 +33,39 @@ public class HRManagementServiceImpl implements HRManagementService {
     private final ClinicRepo clinicRepo;
     private final RoleRepo roleRepo;
     private final RoomRepo roomRepo;
-    
+
     @Override
     @Transactional(readOnly = true)
-    // Lấy danh sách tất cả phòng ban theo thứ tự tên (chỉ comment quan trọng, dùng tiếng Việt với //)
+    // Lấy danh sách tất cả phòng ban theo thứ tự tên
     public List<DepartmentResponse> getAllDepartments() {
-        log.info("Fetching all departments");
+        log.info("Get all departments (ordered by name)");
         try {
             List<Department> departments = departmentRepo.findAllByOrderByDepartmentNameAsc();
             if (departments == null || departments.isEmpty()) {
-                log.warn("No departments found in database");
+                log.warn("No departments found");
                 return List.of();
             }
             return departments.stream()
                 .map(d -> new DepartmentResponse(d.getId(), d.getDepartmentName()))
                 .collect(Collectors.toList());
         } catch (DataAccessException ex) {
-            log.error("Database error while fetching departments: {}", ex.getMessage(), ex);
+            log.error("Error while fetching departments: {}", ex.getMessage(), ex);
             throw new DataLoadException("departments", ex);
         } catch (Exception ex) {
             log.error("Unexpected error while fetching departments: {}", ex.getMessage(), ex);
             throw new DataLoadException("Failed to fetch departments: " + ex.getMessage(), ex);
         }
     }
-    
+
     @Override
     @Transactional(readOnly = true)
     // Lấy danh sách tất cả clinic đang active
     public List<ClinicResponse> getAllClinics() {
-        log.info("Fetching all active clinics");
+        log.info("Get all active clinics");
         try {
             List<Clinic> clinics = clinicRepo.findAll();
             if (clinics == null || clinics.isEmpty()) {
-                log.warn("No clinics found in database");
+                log.warn("No clinics found");
                 return List.of();
             }
             return clinics.stream()
@@ -73,23 +73,23 @@ public class HRManagementServiceImpl implements HRManagementService {
                 .map(c -> new ClinicResponse(c.getId(), c.getClinicName()))
                 .collect(Collectors.toList());
         } catch (DataAccessException ex) {
-            log.error("Database error while fetching clinics: {}", ex.getMessage(), ex);
+            log.error("Error while fetching clinics: {}", ex.getMessage(), ex);
             throw new DataLoadException("clinics", ex);
         } catch (Exception ex) {
             log.error("Unexpected error while fetching clinics: {}", ex.getMessage(), ex);
             throw new DataLoadException("Failed to fetch clinics: " + ex.getMessage(), ex);
         }
     }
-    
+
     @Override
     @Transactional(readOnly = true)
     // Lấy tất cả role (trừ ADMIN và USER)
     public List<RoleResponse> getAllRoles() {
-        log.info("Fetching all roles (excluding ADMIN and USER)");
+        log.info("Get all roles (excluding ADMIN and USER)");
         try {
             List<Role> roles = roleRepo.findAll();
             if (roles == null || roles.isEmpty()) {
-                log.warn("No roles found in database");
+                log.warn("No roles found");
                 return List.of();
             }
             return roles.stream()
@@ -103,23 +103,23 @@ public class HRManagementServiceImpl implements HRManagementService {
                 .map(r -> new RoleResponse(r.getId(), r.getRoleName(), r.getDescription()))
                 .collect(Collectors.toList());
         } catch (DataAccessException ex) {
-            log.error("Database error while fetching roles: {}", ex.getMessage(), ex);
+            log.error("Error while fetching roles: {}", ex.getMessage(), ex);
             throw new DataLoadException("roles", ex);
         } catch (Exception ex) {
             log.error("Unexpected error while fetching roles: {}", ex.getMessage(), ex);
             throw new DataLoadException("Failed to fetch roles: " + ex.getMessage(), ex);
         }
     }
-    
+
     @Override
     @Transactional(readOnly = true)
     // Lấy tất cả phòng khám đang active, trả cả tên và thông tin clinic liên kết với phòng 
     public List<RoomResponse> getAllRooms() {
-        log.info("Fetching all active rooms");
+        log.info("Get all active rooms, include related clinic info");
         try {
             List<Room> rooms = roomRepo.findByIsActiveTrueOrderByRoomNameAsc();
             if (rooms == null || rooms.isEmpty()) {
-                log.warn("No active rooms found in database");
+                log.warn("No active rooms found");
                 return List.of();
             }
             return rooms.stream()
@@ -133,13 +133,13 @@ public class HRManagementServiceImpl implements HRManagementService {
                             clinicId = clinic.getId();
                         }
                     } catch (Exception ex) {
-                        log.warn("Error loading clinic for room {}: {}", r.getId(), ex.getMessage());
+                        log.warn("Lỗi khi lấy clinic của phòng {}: {}", r.getId(), ex.getMessage());
                     }
                     return new RoomResponse(r.getId(), r.getRoomName(), clinicId, clinicName);
                 })
                 .collect(Collectors.toList());
         } catch (DataAccessException ex) {
-            log.error("Database error while fetching rooms: {}", ex.getMessage(), ex);
+            log.error("Error while fetching rooms: {}", ex.getMessage(), ex);
             throw new DataLoadException("rooms", ex);
         } catch (Exception ex) {
             log.error("Unexpected error while fetching rooms: {}", ex.getMessage(), ex);

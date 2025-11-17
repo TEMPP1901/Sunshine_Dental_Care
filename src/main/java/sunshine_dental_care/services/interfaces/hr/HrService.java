@@ -8,23 +8,29 @@ import sunshine_dental_care.dto.hrDTO.DoctorScheduleDto;
 import sunshine_dental_care.dto.hrDTO.ValidationResultDto;
 
 public interface HrService {
-    
-    // 1. TẠO LỊCH MỚI cho tuần
+
+    // Tạo lịch làm việc mới cho tuần
     List<DoctorScheduleDto> createWeeklySchedule(CreateWeeklyScheduleRequest request);
-    
-    // 2. XEM LỊCH
+
+    // Lấy lịch làm việc tuần hiện tại
     List<DoctorScheduleDto> getCurrentWeekSchedule();
+
+    // Lấy lịch làm việc theo tuần chỉ định (theo ngày bắt đầu tuần)
     List<DoctorScheduleDto> getScheduleByWeek(LocalDate weekStart);
+
+    // Lấy lịch làm việc cho tuần tiếp theo
     List<DoctorScheduleDto> getNextWeekSchedule();
+
+    // Lấy lịch làm việc theo ngày
     List<DoctorScheduleDto> getScheduleByDate(LocalDate date);
-    
-    // 3. VALIDATION
+
+    // Kiểm tra hợp lệ của lịch làm việc tạo mới
     ValidationResultDto validateSchedule(CreateWeeklyScheduleRequest request);
-    
-    // 4. AI GENERATE SCHEDULE (deprecated - use AiScheduleGenerationService instead)
+
+    // Tạo lịch làm việc dựa trên AI sử dụng mô tả (Đã deprecated)
     @Deprecated
     CreateWeeklyScheduleRequest generateScheduleFromDescription(LocalDate weekStart, String description);
-    
-    // 5. RULE-BASED GENERATE SCHEDULE (fallback for AI)
+
+    // Tạo lịch bằng luật (dự phòng nếu AI không tạo được)
     CreateWeeklyScheduleRequest generateScheduleFromDescriptionRuleBased(LocalDate weekStart, String description);
 }

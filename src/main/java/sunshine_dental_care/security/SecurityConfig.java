@@ -85,6 +85,8 @@ public class SecurityConfig {
                         .requestMatchers("/uploads_avatar/**").permitAll()
                         .requestMatchers("/api/auth/sign-up", "/api/auth/login").permitAll()
                         .requestMatchers("/api/auth/google", "/oauth2/**", "/login/oauth2/**").permitAll()
+                        .requestMatchers( "/api/products/**").permitAll() // Public endpoints products *huybro
+
 
 
                         // Authenticated endpoints

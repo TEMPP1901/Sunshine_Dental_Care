@@ -25,7 +25,7 @@ public class AttendanceVerificationService {
     private final WiFiValidationService wifiValidationService;
     private final sunshine_dental_care.config.WiFiConfig wifiConfig;
 
-    // Xác thực khuôn mặt và wifi khi chấm công
+    // Xác thực cả khuôn mặt và WiFi khi thực hiện chấm công
     public VerificationResult verify(Integer userId,
                                      Integer clinicId,
                                      String faceEmbedding,
@@ -33,12 +33,12 @@ public class AttendanceVerificationService {
                                      String bssid) {
         EmployeeFaceProfile faceProfile = faceProfileRepo.findByUserId(userId)
                 .orElseThrow(() -> new FaceVerificationFailedException(
-                        "Employee face profile not found. Please register face first."));
+                        "No face profile registered for employee. Please register face first."));
 
         String storedEmbedding = faceProfile.getFaceEmbedding();
         if (storedEmbedding == null || storedEmbedding.trim().isEmpty()) {
             throw new FaceVerificationFailedException(
-                    "Face embedding not registered for this employee");
+                    "Face embedding not registered for this employee.");
         }
 
         FaceVerificationResult faceResult;
@@ -48,20 +48,20 @@ public class AttendanceVerificationService {
                     userId, faceResult.isVerified(),
                     String.format("%.4f", faceResult.getSimilarityScore()));
 
-            // Chỉ cho check-in khi tương đồng khuôn mặt >= 0.8
+            // Chỉ cho phép chấm công nếu độ tương đồng khuôn mặt >= 0.8
             if (!faceResult.isVerified()) {
                 log.error("Face verification FAILED for user {}: similarity={} < 0.8. Check-in BLOCKED.",
                         userId, String.format("%.4f", faceResult.getSimilarityScore()));
                 throw new FaceVerificationFailedException(
-                        String.format("Face verification failed. Similarity score %.4f is below the required threshold of 0.8 (80%%). Please ensure good lighting and face the camera directly.",
+                        String.format(
+                                "Face verification failed. Similarity score %.4f is below the required threshold of 0.8 (80%%). Please ensure good lighting and face the camera directly.",
                                 faceResult.getSimilarityScore()));
             }
         } catch (FaceVerificationFailedException e) {
-            // Re-throw để chặn chấm công khi xác thực khuôn mặt thất bại
+            // Ném lại lỗi xác thực khuôn mặt để chặn chấm công
             throw e;
         } catch (Exception e) {
             log.error("Face verification error for user {}: {}", userId, e.getMessage(), e);
-            // Lỗi hệ thống khi xác thực khuôn mặt sẽ chặn chấm công
             throw new FaceVerificationFailedException("Face verification failed: " + e.getMessage(), e);
         }
 
@@ -70,17 +70,16 @@ public class AttendanceVerificationService {
         log.info("WiFi validation for user {} at clinic {}: valid={}, SSID={}, BSSID={}, message={}",
                 userId, clinicId, wifiResult.isValid(), ssid, bssid, wifiResult.getMessage());
 
-        // Kiểm tra bắt buộc xác thực wifi hay không
+        // Nếu cấu hình yêu cầu xác thực wifi mà kiểm tra wifi không hợp lệ thì không cho chấm công
         if (!wifiResult.isValid()) {
             if (wifiConfig.isEnforce()) {
-                // Nếu cấu hình bắt buộc, block check-in nếu wifi không hợp lệ
                 log.error("WiFi validation failed for clinic {}: SSID={}, BSSID={}. Check-in blocked.",
                         clinicId, ssid, bssid);
                 throw new WiFiValidationFailedException(
                         String.format("WiFi validation failed for clinic %d. SSID '%s' or BSSID '%s' not in whitelist. Please connect to an authorized WiFi network.",
                                 clinicId, ssid, bssid));
             } else {
-                // Nếu không bắt buộc, chỉ ghi nhận cảnh báo và cho phép check-in tiếp tục
+                // Nếu không bắt buộc xác thực wifi, cảnh báo và vẫn cho qua
                 log.warn("WiFi validation failed for clinic {}: SSID={}, BSSID={}. Check-in will proceed but verification status may be affected (enforcement disabled).",
                         clinicId, ssid, bssid);
             }
@@ -89,7 +88,7 @@ public class AttendanceVerificationService {
         return new VerificationResult(faceProfile, faceResult, wifiResult);
     }
 
-    // Kết quả xác thực chấm công: trả về thông tin khuôn mặt, xác thực khuôn mặt, và xác thực wifi
+    // Kết quả xác thực: Bao gồm thông tin khuôn mặt, kết quả xác thực khuôn mặt, kết quả xác thực wifi
     @Getter
     @AllArgsConstructor
     public static class VerificationResult {
@@ -98,4 +97,3 @@ public class AttendanceVerificationService {
         private WiFiValidationResult wifiResult;
     }
 }
-

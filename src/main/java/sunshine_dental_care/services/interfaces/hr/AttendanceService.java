@@ -17,112 +17,64 @@ import sunshine_dental_care.dto.hrDTO.DailySummaryResponse;
 import sunshine_dental_care.dto.hrDTO.MonthlyAttendanceListItemResponse;
 import sunshine_dental_care.dto.hrDTO.MonthlySummaryResponse;
 
-/**
- * Service interface cho Attendance management
- */
+// Service interface for Attendance Management
 public interface AttendanceService {
-    
-    /**
-     * Chấm công vào (check-in)
-     * Validate face, WiFi, và tạo Attendance record
-     */
+
+    // Chấm công vào, validate khuôn mặt, WiFi và tạo bản ghi chấm công
     AttendanceResponse checkIn(AttendanceCheckInRequest request);
-    
-    /**
-     * Chấm công ra (check-out)
-     */
+
+    // Chấm công ra
     AttendanceResponse checkOut(AttendanceCheckOutRequest request);
-    
-    /**
-     * Lấy attendance của user trong ngày hôm nay
-     */
+
+    // Lấy thông tin chấm công của user trong ngày hiện tại
     AttendanceResponse getTodayAttendance(Integer userId);
-    
-    /**
-     * Lấy lịch sử attendance của user (có phân trang)
-     */
+
     Page<AttendanceResponse> getAttendanceHistory(
-        Integer userId, 
+        Integer userId,
         Integer clinicId,
-        LocalDate startDate, 
+        LocalDate startDate,
         LocalDate endDate,
-        int page, 
+        int page,
         int size
     );
-    
-    /**
-     * Lấy thống kê attendance
-     */
+
     Map<String, Object> getAttendanceStatistics(
         Integer userId,
         Integer clinicId,
         LocalDate startDate,
         LocalDate endDate
     );
-    
-    /**
-     * Lấy chi tiết attendance theo ID
-     */
+
+    // Lấy chi tiết attendance theo id
     AttendanceResponse getAttendanceById(Integer attendanceId);
-    
-    /**
-     * Lấy Daily Summary - Tổng hợp attendance theo department trong ngày
-     */
+
+    // Lấy tổng hợp attendance theo phòng ban trong ngày
     List<DailySummaryResponse> getDailySummary(LocalDate workDate);
-    
-    /**
-     * Lấy Daily Attendance List - Danh sách chi tiết từng nhân viên trong ngày
-     */
+
     Page<DailyAttendanceListItemResponse> getDailyAttendanceList(
         LocalDate workDate, Integer departmentId, Integer clinicId, int page, int size);
-    
-    /**
-     * Lấy Monthly Summary - Tổng hợp attendance theo department trong tháng
-     * @param year Năm (ví dụ: 2025)
-     * @param month Tháng (1-12)
-     */
+
+    // Lấy tổng hợp attendance theo phòng ban trong tháng
     List<MonthlySummaryResponse> getMonthlySummary(Integer year, Integer month);
-    
-    /**
-     * Lấy Monthly Attendance List - Danh sách chi tiết từng nhân viên trong tháng
-     * @param year Năm (ví dụ: 2025)
-     * @param month Tháng (1-12)
-     * @param departmentId ID phòng ban (optional)
-     * @param clinicId ID phòng khám (optional)
-     * @param page Số trang (bắt đầu từ 0)
-     * @param size Số lượng items mỗi trang
-     */
+
     Page<MonthlyAttendanceListItemResponse> getMonthlyAttendanceList(
         Integer year, Integer month, Integer departmentId, Integer clinicId, int page, int size);
 
-    /**
-     * Admin view - lấy danh sách attendance theo ngày/clinic/status
-     */
+    // Admin lấy danh sách chấm công theo ngày/phòng khám/trạng thái
     List<AttendanceResponse> getAttendanceForAdmin(LocalDate workDate, Integer clinicId, String status);
 
-    /**
-     * Admin cập nhật trạng thái và ghi chú phê duyệt
-     */
+    // Admin cập nhật trạng thái và ghi chú của chấm công
     AttendanceResponse updateAttendanceStatus(Integer attendanceId, String newStatus, String adminNote, Integer adminUserId);
-    
-    /**
-     * Nhân viên xem danh sách attendance cần giải trình (LATE, ABSENT, missing check-in/out)
-     */
+
+    // Nhân viên xem danh sách chấm công cần giải trình
     List<AttendanceExplanationResponse> getAttendanceNeedingExplanation(Integer userId);
-    
-    /**
-     * Nhân viên gửi giải trình (update note với format [EXPLANATION_REQUEST:type] reason)
-     */
+
+    // Nhân viên gửi giải trình
     AttendanceResponse submitExplanation(AttendanceExplanationRequest request);
-    
-    /**
-     * Admin xem danh sách tất cả giải trình đang chờ xử lý
-     */
+
+    // Admin xem danh sách các giải trình đang chờ duyệt
     List<AttendanceExplanationResponse> getPendingExplanations(Integer clinicId);
-    
-    /**
-     * Admin approve/reject giải trình và cập nhật attendance status
-     */
+
+    // Admin duyệt hoặc từ chối giải trình và cập nhật trạng thái attendance
     AttendanceResponse processExplanation(AdminExplanationActionRequest request, Integer adminUserId);
 }
-

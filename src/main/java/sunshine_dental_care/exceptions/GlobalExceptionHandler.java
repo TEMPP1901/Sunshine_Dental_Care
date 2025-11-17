@@ -105,19 +105,19 @@ public class GlobalExceptionHandler {
         return ResponseEntity.badRequest().body(response);
     }
 
-    @ExceptionHandler(BadCredentialsException.class)
-    public ResponseEntity<Map<String, Object>> handleBadCredentialsException(BadCredentialsException ex) {
-        Map<String, Object> response = new HashMap<>();
-        response.put("timestamp", LocalDateTime.now());
-        response.put("status", HttpStatus.UNAUTHORIZED.value());
-        response.put("error", "Authentication Failed");
-        response.put("message", ex.getMessage());
-
-        log.warn("Bad credentials: {}", ex.getMessage());
-        return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
-                .contentType(MediaType.APPLICATION_JSON)
-                .body(response);
-    }
+//    @ExceptionHandler(BadCredentialsException.class)
+//    public ResponseEntity<Map<String, Object>> handleBadCredentialsException(BadCredentialsException ex) {
+//        Map<String, Object> response = new HashMap<>();
+//        response.put("timestamp", LocalDateTime.now());
+//        response.put("status", HttpStatus.UNAUTHORIZED.value());
+//        response.put("error", "Authentication Failed");
+//        response.put("message", ex.getMessage());
+//
+//        log.warn("Bad credentials: {}", ex.getMessage());
+//        return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+//                .contentType(MediaType.APPLICATION_JSON)
+//                .body(response);
+//    }
 
     // Xử lý trường hợp không có quyền
     @ExceptionHandler(AccessDeniedException.class)
