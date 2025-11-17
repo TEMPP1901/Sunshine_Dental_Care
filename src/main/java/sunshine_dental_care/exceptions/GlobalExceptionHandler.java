@@ -383,24 +383,6 @@ public class GlobalExceptionHandler {
         return ResponseEntity.status(HttpStatus.CONFLICT).body(body);
     }
 
-    // Xử lí validation BadCredentialsException cho phương thức login bên ServiceImp
-    @ExceptionHandler(BadCredentialsException.class)
-    public ResponseEntity<Map<String, Object>> handleBadCredentials(BadCredentialsException ex) {
-        Map<String, Object> body = new HashMap<>();
-        body.put("timestamp", LocalDateTime.now());
-        body.put("status", HttpStatus.UNAUTHORIZED.value());
-        body.put("error", "Unauthorized");
-        body.put("message", ex.getMessage()); // "Invalid email or password" | "Account is disabled"
-
-        Map<String, String> errors = new HashMap<>();
-        String m = ex.getMessage() != null ? ex.getMessage() : "Invalid email or password";
-        errors.put("email", m);
-        errors.put("password", m);
-        body.put("errors", errors);
-
-        return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(body);
-    }
-
     // Xử lí validation trùng email
     @ExceptionHandler(DuplicateEmailException.class)
     public ResponseEntity<Map<String, Object>> handleDuplicateEmail(DuplicateEmailException ex) {

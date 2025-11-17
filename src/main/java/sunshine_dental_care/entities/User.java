@@ -97,6 +97,7 @@ public class User {
     @OneToMany(mappedBy = "doctor", cascade = CascadeType.ALL, fetch = FetchType.LAZY, orphanRemoval = true)
     private List<DoctorSpecialty> doctorSpecialties;
 
+
     public Integer getId() {
         return id;
     }
