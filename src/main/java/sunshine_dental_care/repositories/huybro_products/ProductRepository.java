@@ -49,4 +49,7 @@ public interface ProductRepository extends JpaRepository<Product, Integer> {
             @Param("active") Boolean active,
             Pageable pageable
     );
+
+    @Query("SELECT COALESCE(MAX(p.id), 0) FROM Product p")
+    Integer findMaxId();
 }

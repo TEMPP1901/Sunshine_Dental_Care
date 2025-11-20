@@ -68,13 +68,16 @@ public class SecurityConfig {
                         .requestMatchers("/locale").permitAll()
                         .requestMatchers("/api/auth/sign-up", "/api/auth/login").permitAll()
                         .requestMatchers("/api/auth/google", "/oauth2/**", "/login/oauth2/**").permitAll()
+                        .requestMatchers("/auth/sign-up").permitAll()  // Cho phép đăng ký PATIENT * đổi vị trí vì đây là public
+                        //.requestMatchers( "/api/products/**").permitAll() // Public endpoints products *huybro
 
 
                         // Authenticated endpoints
                         .requestMatchers(HttpMethod.POST, "/api/auth/change-password").authenticated()
 
                         // Additional auth endpoints
-                        .requestMatchers("/auth/sign-up").permitAll()  // Cho phép đăng ký PATIENT
+
+                        //.requestMatchers("/api/products/accountant/**").hasRole("ACCOUNTANT") // Cấp phép cho accountant *huybro
                         .requestMatchers("/api/hr/employees/**").hasRole("HR")  // Chỉ HR được phép
                         .anyRequest().authenticated()
                 )
