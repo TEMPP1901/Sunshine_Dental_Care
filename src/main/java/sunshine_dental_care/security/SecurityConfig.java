@@ -1,7 +1,5 @@
 package sunshine_dental_care.security;
 
-import jakarta.servlet.http.HttpServletResponse;
-import lombok.RequiredArgsConstructor;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpMethod;
@@ -17,9 +15,13 @@ import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.AuthenticationSuccessHandler;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
 
+import jakarta.servlet.http.HttpServletResponse;
+import lombok.RequiredArgsConstructor;
+
 @Configuration
 @RequiredArgsConstructor
 @EnableMethodSecurity(prePostEnabled = true)
+
 public class SecurityConfig {
 
     private final JwtAuthFilter jwtAuthFilter;
@@ -36,6 +38,21 @@ public class SecurityConfig {
                 // Stateless (JWT)
                 .sessionManagement(sm -> sm.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
 
+                // Disable default error pages (trả về HTML) - để GlobalExceptionHandler xử lý JSON
+                .exceptionHandling(ex -> ex
+                        .authenticationEntryPoint((request, response, authException) -> {
+                            response.setStatus(401);
+                            response.setContentType("application/json;charset=UTF-8");
+                            response.getWriter().write("{\"error\":\"Unauthorized\",\"message\":\"Authentication required\"}");
+                        })
+                        .accessDeniedHandler((request, response, accessDeniedException) -> {
+                            response.setStatus(403);
+                            response.setContentType("application/json;charset=UTF-8");
+                            response.getWriter().write("{\"error\":\"Forbidden\",\"message\":\"Access denied\"}");
+                        })
+                )
+
+                // Authorize
                 // Trả JSON cho 401 & 403 để FE dễ xử lý
                 .exceptionHandling(e -> e
                         .authenticationEntryPoint((req, res, ex) -> {
@@ -66,8 +83,12 @@ public class SecurityConfig {
 
                         // Public endpoints
                         .requestMatchers("/locale").permitAll()
+                        .requestMatchers("/uploads_avatar/**").permitAll()
                         .requestMatchers("/api/auth/sign-up", "/api/auth/login").permitAll()
                         .requestMatchers("/api/auth/google", "/oauth2/**", "/login/oauth2/**").permitAll()
+                        .requestMatchers( "/api/products/**").permitAll() // Public endpoints products *huybro
+
+                        .requestMatchers("/api/doctor/**","/api/patients/{patientId}/records/**").hasRole("DOCTOR") // Chỉ bác sĩ được phép,
 
 
                         // Authenticated endpoints
@@ -76,6 +97,8 @@ public class SecurityConfig {
                         // Additional auth endpoints
                         .requestMatchers("/auth/sign-up").permitAll()  // Cho phép đăng ký PATIENT
                         .requestMatchers("/api/hr/employees/**").hasRole("HR")  // Chỉ HR được phép
+                        .requestMatchers("/api/admin/**").hasRole("ADMIN")
+                        .requestMatchers("/api/hr/management/**").hasRole("HR")  // HR Management endpoints
                         .anyRequest().authenticated()
                 )
 

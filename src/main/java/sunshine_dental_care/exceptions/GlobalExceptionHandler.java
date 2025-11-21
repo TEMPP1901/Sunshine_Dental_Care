@@ -12,6 +12,7 @@ import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.security.authentication.BadCredentialsException;
 import sunshine_dental_care.exceptions.hr.DoctorNotAvailableException;
 import sunshine_dental_care.exceptions.hr.EmployeeExceptions.EmployeeException;
 import sunshine_dental_care.exceptions.hr.EmployeeExceptions.EmployeeNotFoundException;
@@ -100,7 +101,7 @@ public class GlobalExceptionHandler {
     }
 
     /*
-      Xử lý IllegalArgumentException
+     Xử lý IllegalArgumentException
      Tác dụng: Xử lý các lỗi argument không hợp lệ
      */
     @ExceptionHandler(IllegalArgumentException.class)
@@ -113,6 +114,22 @@ public class GlobalExceptionHandler {
         
         log.warn("Illegal argument: {}", ex.getMessage());
         return ResponseEntity.badRequest().body(response);
+    }
+
+    /*
+     Xử lý IllegalStateException
+     Tác dụng: Xử lý các lỗi state không hợp lệ (ví dụ: missing role, missing patient sequence)
+     */
+    @ExceptionHandler(IllegalStateException.class)
+    public ResponseEntity<Map<String, Object>> handleIllegalStateException(IllegalStateException ex) {
+        Map<String, Object> response = new HashMap<>();
+        response.put("timestamp", LocalDateTime.now());
+        response.put("status", HttpStatus.INTERNAL_SERVER_ERROR.value());
+        response.put("error", "Configuration Error");
+        response.put("message", ex.getMessage());
+        
+        log.error("Illegal state: {}", ex.getMessage(), ex);
+        return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(response);
     }
 
     /*
@@ -161,6 +178,22 @@ public class GlobalExceptionHandler {
         
         log.error("Employee error: {}", ex.getMessage(), ex);
         return ResponseEntity.badRequest().body(response);
+    }
+
+    /*
+     Xử lý BadCredentialsException (Spring Security)
+     Tác dụng: Xử lý lỗi authentication
+     */
+    @ExceptionHandler(BadCredentialsException.class)
+    public ResponseEntity<Map<String, Object>> handleBadCredentialsException(BadCredentialsException ex) {
+        Map<String, Object> response = new HashMap<>();
+        response.put("timestamp", LocalDateTime.now());
+        response.put("status", HttpStatus.UNAUTHORIZED.value());
+        response.put("error", "Authentication Failed");
+        response.put("message", ex.getMessage());
+        
+        log.warn("Bad credentials: {}", ex.getMessage());
+        return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(response);
     }
 
     /*
