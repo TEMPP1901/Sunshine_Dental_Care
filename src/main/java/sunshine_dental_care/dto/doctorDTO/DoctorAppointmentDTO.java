@@ -7,7 +7,6 @@ import lombok.NoArgsConstructor;
 import lombok.Setter;
 
 import java.time.Instant;
-import java.util.List;
 
 @Getter
 @Setter
@@ -35,5 +34,5 @@ public class DoctorAppointmentDTO {
     private Instant createdAt;
     private Instant updatedAt;
 
-    private List<AppointmentServiceDTO> services;
+    private ServiceDTO service;
 }

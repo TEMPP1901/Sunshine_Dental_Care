@@ -8,6 +8,10 @@ import lombok.Setter;
 
 import java.math.BigDecimal;
 
+/**
+ * DTO cho AppointmentService (Dịch vụ được gán cho lịch hẹn)
+ * Chứa thông tin dịch vụ và số lượng, giá, giảm giá
+ */
 @Getter
 @Setter
 @NoArgsConstructor
@@ -15,9 +19,8 @@ import java.math.BigDecimal;
 @Builder
 public class AppointmentServiceDTO {
     private Integer id;
-    private Integer serviceId;
-    private String serviceName;
-    private String serviceCategory;
+    
+    private ServiceDTO service;
 
     private Integer quantity;
     private BigDecimal unitPrice;

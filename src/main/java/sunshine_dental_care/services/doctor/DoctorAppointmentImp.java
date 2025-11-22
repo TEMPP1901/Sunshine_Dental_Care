@@ -1,15 +1,13 @@
 package sunshine_dental_care.services.doctor;
 
 import org.springframework.stereotype.Service;
-import sunshine_dental_care.dto.doctorDTO.AppointmentServiceDTO;
 import sunshine_dental_care.dto.doctorDTO.ClinicDTO;
 import sunshine_dental_care.dto.doctorDTO.DoctorAppointmentDTO;
 import sunshine_dental_care.dto.doctorDTO.DoctorDTO;
 import sunshine_dental_care.dto.doctorDTO.PatientDTO;
 import sunshine_dental_care.dto.doctorDTO.RoomDTO;
+import sunshine_dental_care.dto.doctorDTO.ServiceDTO;
 import sunshine_dental_care.entities.Appointment;
-import sunshine_dental_care.entities.AppointmentService;
-import sunshine_dental_care.repositories.doctor.AppointmentServiceRepository;
 import sunshine_dental_care.repositories.doctor.DoctorAppointmentRepo;
 import sunshine_dental_care.repositories.doctor.DoctorRepo;
 
@@ -23,29 +21,21 @@ public class DoctorAppointmentImp implements DoctorAppointmentService{
 
     private DoctorRepo _doctorRepo;
     private DoctorAppointmentRepo _doctorAppointmentRepo;
-    private AppointmentServiceRepository appointmentServiceRepository;
 
-    public DoctorAppointmentImp(DoctorRepo doctorRepo,
-                                DoctorAppointmentRepo doctorAppointmentRepo,
-                                AppointmentServiceRepository appointmentServiceRepository) {
+    public DoctorAppointmentImp(DoctorRepo doctorRepo, DoctorAppointmentRepo doctorAppointmentRepo) {
         _doctorRepo = doctorRepo;
         _doctorAppointmentRepo = doctorAppointmentRepo;
-        this.appointmentServiceRepository = appointmentServiceRepository;
     }
 
     // Hàm chuyển đổi từ entity Appointment sang DTO DoctorAppointmentDTO
     private DoctorAppointmentDTO mapToDTO(Appointment appointment) {
-        List<AppointmentServiceDTO> services = appointmentServiceRepository.findByAppointmentId(appointment.getId())
-                .stream()
-                .map(this::toAppointmentServiceDTO)
-                .collect(Collectors.toList());
-
         return DoctorAppointmentDTO.builder()
                 .appointmentId(appointment.getId())
                 .clinic(toClinicSummary(appointment.getClinic())) // Thông tin phòng khám
                 .patient(toPatientSummary(appointment.getPatient())) // Thông tin bệnh nhân
                 .doctor(toDoctorSummary(appointment.getDoctor())) // Thông tin bác sĩ
                 .room(toRoomSummary(appointment.getRoom())) // Thông tin phòng khám chữa trị
+                .service(toServiceDTO(appointment.getService())) // Service object - load trực tiếp từ appointment.service
                 .startDateTime(appointment.getStartDateTime()) // Thời gian bắt đầu
                 .endDateTime(appointment.getEndDateTime()) // Thời gian kết thúc
                 .status(appointment.getStatus()) // Trạng thái lịch hẹn
@@ -56,24 +46,23 @@ public class DoctorAppointmentImp implements DoctorAppointmentService{
                 .createdByName(appointment.getCreatedBy() != null ? appointment.getCreatedBy().getFullName() : null)
                 .createdAt(appointment.getCreatedAt()) // Ngày tạo
                 .updatedAt(appointment.getUpdatedAt()) // Ngày cập nhật
-                .services(services)
                 .build();
     }
 
-    private AppointmentServiceDTO toAppointmentServiceDTO(AppointmentService appointmentService) {
-        if (appointmentService == null) {
+    // Chuyển entity Service sang ServiceDTO
+    private ServiceDTO toServiceDTO(sunshine_dental_care.entities.Service service) {
+        if (service == null) {
             return null;
         }
-        var service = appointmentService.getService();
-        return AppointmentServiceDTO.builder()
-                .id(appointmentService.getId())
-                .serviceId(service != null ? service.getId() : null)
-                .serviceName(service != null ? service.getServiceName() : null)
-                .serviceCategory(service != null ? service.getCategory() : null)
-                .quantity(appointmentService.getQuantity())
-                .unitPrice(appointmentService.getUnitPrice())
-                .discountPct(appointmentService.getDiscountPct())
-                .note(appointmentService.getNote())
+        return ServiceDTO.builder()
+                .id(service.getId())
+                .serviceName(service.getServiceName())
+                .category(service.getCategory())
+                .description(service.getDescription())
+                .defaultDuration(service.getDefaultDuration())
+                .isActive(service.getIsActive())
+                .createdAt(service.getCreatedAt())
+                .updatedAt(service.getUpdatedAt())
                 .build();
     }
 

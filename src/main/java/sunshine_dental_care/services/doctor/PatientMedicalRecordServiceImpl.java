@@ -10,6 +10,7 @@ import sunshine_dental_care.dto.doctorDTO.PatientDTO;
 import sunshine_dental_care.dto.doctorDTO.MedicalRecordDTO;
 import sunshine_dental_care.dto.doctorDTO.MedicalRecordRequest;
 import sunshine_dental_care.dto.doctorDTO.MedicalRecordImageDTO;
+import sunshine_dental_care.dto.doctorDTO.ServiceDTO;
 import sunshine_dental_care.entities.Appointment;
 import sunshine_dental_care.entities.Clinic;
 import sunshine_dental_care.entities.MedicalRecord;
@@ -244,8 +245,7 @@ public class PatientMedicalRecordServiceImpl implements PatientMedicalRecordServ
                 .patient(toPatientDTO(record.getPatient()))
                 .doctor(toDoctorDTO(record.getDoctor()))
                 .appointmentId(record.getAppointment() != null ? record.getAppointment().getId() : null)
-                .serviceId(record.getService() != null ? record.getService().getId() : null)
-                .serviceName(record.getService() != null ? record.getService().getServiceName() : null)
+                .service(toServiceDTO(record.getService())) // Map service thành ServiceDTO object
                 .diagnosis(record.getDiagnosis())
                 .treatmentPlan(record.getTreatmentPlan())
                 .prescriptionNote(record.getPrescriptionNote())
@@ -321,6 +321,23 @@ public class PatientMedicalRecordServiceImpl implements PatientMedicalRecordServ
                 .fullName(doctor.getFullName())
                 .email(doctor.getEmail())
                 .phone(doctor.getPhone())
+                .build();
+    }
+
+    // Chuyển entity Service sang ServiceDTO
+    private ServiceDTO toServiceDTO(sunshine_dental_care.entities.Service service) {
+        if (service == null) {
+            return null;
+        }
+        return ServiceDTO.builder()
+                .id(service.getId())
+                .serviceName(service.getServiceName())
+                .category(service.getCategory())
+                .description(service.getDescription())
+                .defaultDuration(service.getDefaultDuration())
+                .isActive(service.getIsActive())
+                .createdAt(service.getCreatedAt())
+                .updatedAt(service.getUpdatedAt())
                 .build();
     }
 

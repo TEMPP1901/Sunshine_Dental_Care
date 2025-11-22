@@ -22,8 +22,8 @@ public class MedicalRecordDTO {
     private DoctorDTO doctor;
 
     private Integer appointmentId;
-    private Integer serviceId;
-    private String serviceName;
+    
+    private ServiceDTO service;
 
     private String diagnosis;
     private String treatmentPlan;
