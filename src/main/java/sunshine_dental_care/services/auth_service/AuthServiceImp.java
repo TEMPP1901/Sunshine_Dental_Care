@@ -56,7 +56,7 @@ public class AuthServiceImp implements AuthService {
     }
 
     private void ensureDefaultUserRole(User u) {
-        // Đảm bảo tìm đúng Role USER (ID 6 trong DB của bạn)
+        // Role mặc định là USER (ID 6)
         var roleUser = roleRepo.findByRoleNameIgnoreCase("USER")
                 .orElseThrow(() -> new IllegalStateException("Missing role USER in Roles table"));
         UserRole ur = new UserRole();
@@ -69,7 +69,6 @@ public class AuthServiceImp implements AuthService {
     @Override
     @Transactional
     public SignUpResponse signUp(SignUpRequest req) {
-        // 1. Validate
         userRepo.findByEmailIgnoreCase(req.email()).ifPresent(u -> {
             throw new DuplicateEmailException(req.email());
         });
@@ -79,7 +78,7 @@ public class AuthServiceImp implements AuthService {
             throw new DuplicateUsernameException(req.username());
         }
 
-        // 2. Tạo User
+        // 1) Tạo User
         User u = new User();
         u.setFullName(req.fullName());
         u.setUsername(resolveUsername(req.username(), req.email()));
@@ -89,62 +88,85 @@ public class AuthServiceImp implements AuthService {
         u.setAvatarUrl(req.avatarUrl());
         u.setProvider("local");
         u.setIsActive(true);
+        u.setFailedLoginAttempts(0); // Khởi tạo số lần sai = 0
 
-        // Save User lần 1 để sinh ID
+        // Lưu User lần 1 để lấy ID
         u = userRepo.save(u);
 
-        // 3. Gán quyền
         ensureDefaultUserRole(u);
 
-        // 4. Sinh Patient Code & Update User
+        // 2) Sinh Patient Code và cập nhật User
         String patientCode = patientCodeService.nextPatientCode();
-
-        // Cập nhật code vào bảng User (cho đồng bộ với bảng Patient)
         u.setCode(patientCode);
         userRepo.save(u);
 
-        // 5. Tạo Patient (Liên kết 1-1)
+        // 3) Tạo Patient và liên kết User
         Patient p = new Patient();
-        p.setUser(u); // <--- KEY: Liên kết User ID vào bảng Patient
-
-        // Đồng bộ thông tin từ User sang Patient
+        p.setUser(u); // Liên kết khóa ngoại
         p.setFullName(u.getFullName());
         p.setEmail(u.getEmail());
         p.setPhone(u.getPhone());
         p.setPatientCode(patientCode);
         p.setIsActive(true);
 
-        // Save Patient
         patientRepo.save(p);
 
-        // 6. Gửi Mail
-        // CẢI TIẾN: Truyền thẳng đối tượng Patient 'p' vào
-        // Vì 'p' đã có đủ thông tin và không bị null, MailService không cần query lại DB
+        // 4) Gửi mail Welcome (Dùng object Patient)
         String locale = (req.locale() == null || req.locale().isBlank()) ? "en" : req.locale();
         try {
             mailService.sendPatientCodeEmail(p, locale);
         } catch (Exception e) {
-            System.err.println("Failed to send email: " + e.getMessage());
+            System.err.println("Failed to send welcome email: " + e.getMessage());
         }
 
         return new SignUpResponse(u.getId(), p.getId(), patientCode, u.getAvatarUrl());
     }
 
     @Override
-    @Transactional
+    // KHẮC PHỤC LỖI: Không rollback khi sai password để lưu được số lần sai
+    @Transactional(noRollbackFor = BadCredentialsException.class)
     public LoginResponse login(LoginRequest req) {
+        // 1. Tìm User
         User u = userRepo.findByEmailIgnoreCase(req.email())
                 .orElseThrow(() -> new BadCredentialsException("Invalid email or password"));
 
+        // 2. Kiểm tra khóa
         if (Boolean.FALSE.equals(u.getIsActive())) {
-            throw new BadCredentialsException("Account is disabled");
+            throw new BadCredentialsException("Account is locked or disabled. Please contact admin.");
         }
 
+        // 3. Kiểm tra mật khẩu
         if (u.getPasswordHash() == null || !encoder.matches(req.password(), u.getPasswordHash())) {
-            throw new BadCredentialsException("Invalid email or password");
+
+            // --- TĂNG BIẾN ĐẾM ---
+            int currentFails = u.getFailedLoginAttempts() == null ? 0 : u.getFailedLoginAttempts();
+            int newFails = currentFails + 1;
+            u.setFailedLoginAttempts(newFails);
+
+            // Lưu ngay lập tức (Quan trọng: Nhờ noRollbackFor nên lệnh này sẽ được Commit)
+            userRepo.save(u);
+
+            if (newFails >= 5) {
+                u.setIsActive(false);
+                userRepo.save(u);
+
+                try {
+                    mailService.sendAccountLockedEmail(u);
+                } catch (Exception e) {
+                    System.err.println("Failed to send lock alert email: " + e.getMessage());
+                }
+                throw new BadCredentialsException("Account has been locked due to 5 failed login attempts.");
+            } else {
+                int remaining = 5 - newFails;
+                throw new BadCredentialsException("Invalid email or password. You have " + remaining + " attempt(s) left.");
+            }
         }
 
-        // Lấy roles
+        // 4. Đăng nhập thành công -> Reset
+        if (u.getFailedLoginAttempts() != null && u.getFailedLoginAttempts() > 0) {
+            u.setFailedLoginAttempts(0);
+        }
+
         List<String> roles = userRoleRepo.findRoleNamesByUserId(u.getId());
         if (roles.isEmpty()) {
             ensureDefaultUserRole(u);
@@ -154,7 +176,6 @@ public class AuthServiceImp implements AuthService {
         u.setLastLoginAt(Instant.now());
         userRepo.save(u);
 
-        // Phát token JWT
         String token = jwtService.generateToken(u.getId(), u.getEmail(), u.getFullName(), roles);
 
         return new LoginResponse(

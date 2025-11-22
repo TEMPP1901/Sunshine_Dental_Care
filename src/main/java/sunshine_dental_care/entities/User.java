@@ -75,6 +75,11 @@ public class User {
     @Column(name = "isActive", nullable = false)
     private Boolean isActive = false;
 
+    // --- THÊM CỘT ĐẾM SỐ LẦN SAI ---
+    @ColumnDefault("0")
+    @Column(name = "failedLoginAttempts")
+    private Integer failedLoginAttempts = 0;
+
     @ColumnDefault("sysutcdatetime()")
     @Column(name = "createdAt", nullable = false)
     private Instant createdAt;
@@ -92,155 +97,76 @@ public class User {
 
     @Nationalized
     @Column(name = "specialty", length = 100)
-    private String specialty; // Giữ lại để backward compatibility
+    private String specialty;
 
     @OneToMany(mappedBy = "doctor", cascade = CascadeType.ALL, fetch = FetchType.LAZY, orphanRemoval = true)
     private List<DoctorSpecialty> doctorSpecialties;
 
+    // --- GETTERS & SETTERS ---
 
-    public Integer getId() {
-        return id;
-    }
+    public Integer getId() { return id; }
+    public void setId(Integer id) { this.id = id; }
 
-    public void setId(Integer id) {
-        this.id = id;
-    }
+    public String getCode() { return code; }
+    public void setCode(String code) { this.code = code; }
 
-    public String getCode() {
-        return code;
-    }
+    public String getFullName() { return fullName; }
+    public void setFullName(String fullName) { this.fullName = fullName; }
 
-    public void setCode(String code) {
-        this.code = code;
-    }
+    public String getUsername() { return username; }
+    public void setUsername(String username) { this.username = username; }
 
-    public String getFullName() {
-        return fullName;
-    }
+    public String getPasswordHash() { return passwordHash; }
+    public void setPasswordHash(String passwordHash) { this.passwordHash = passwordHash; }
 
-    public void setFullName(String fullName) {
-        this.fullName = fullName;
-    }
+    public String getAvatarUrl() { return avatarUrl; }
+    public void setAvatarUrl(String avatarUrl) { this.avatarUrl = avatarUrl; }
 
-    public String getUsername() {
-        return username;
-    }
+    public String getEmail() { return email; }
+    public void setEmail(String email) { this.email = email; }
 
-    public void setUsername(String username) {
-        this.username = username;
-    }
+    public String getPhone() { return phone; }
+    public void setPhone(String phone) { this.phone = phone; }
 
-    public String getPasswordHash() {
-        return passwordHash;
-    }
+    public String getProvider() { return provider; }
+    public void setProvider(String provider) { this.provider = provider; }
 
-    public void setPasswordHash(String passwordHash) {
-        this.passwordHash = passwordHash;
-    }
-
-    public String getAvatarUrl() {
-        return avatarUrl;
-    }
-
-    public void setAvatarUrl(String avatarUrl) {
-        this.avatarUrl = avatarUrl;
-    }
-
-    public String getEmail() {
-        return email;
-    }
-
-    public void setEmail(String email) {
-        this.email = email;
-    }
-
-    public String getPhone() {
-        return phone;
-    }
-
-    public void setPhone(String phone) {
-        this.phone = phone;
-    }
-
-    public String getProvider() {
-        return provider;
-    }
-
-    public void setProvider(String provider) {
-        this.provider = provider;
-    }
-
-    public String getProviderId() {
-        return providerId;
-    }
+    public String getProviderId() { return providerId; }
+    public void setProviderId(String providerId) { this.providerId = providerId; }
 
     public String getAvatarPublicId() { return avatarPublicId; }
     public void setAvatarPublicId(String avatarPublicId) { this.avatarPublicId = avatarPublicId; }
 
-    public void setProviderId(String providerId) {
-        this.providerId = providerId;
-    }
+    public Boolean getIsActive() { return isActive; }
+    public void setIsActive(Boolean isActive) { this.isActive = isActive; }
 
-    public Boolean getIsActive() {
-        return isActive;
-    }
+    // Getter/Setter cho failedLoginAttempts
+    public Integer getFailedLoginAttempts() { return failedLoginAttempts == null ? 0 : failedLoginAttempts; }
+    public void setFailedLoginAttempts(Integer failedLoginAttempts) { this.failedLoginAttempts = failedLoginAttempts; }
 
-    public void setIsActive(Boolean isActive) {
-        this.isActive = isActive;
-    }
+    public Instant getCreatedAt() { return createdAt; }
+    public void setCreatedAt(Instant createdAt) { this.createdAt = createdAt; }
 
-    public Instant getCreatedAt() {
-        return createdAt;
-    }
+    public Instant getUpdatedAt() { return updatedAt; }
+    public void setUpdatedAt(Instant updatedAt) { this.updatedAt = updatedAt; }
 
-    public void setCreatedAt(Instant createdAt) {
-        this.createdAt = createdAt;
-    }
+    public Instant getLastLoginAt() { return lastLoginAt; }
+    public void setLastLoginAt(Instant lastLoginAt) { this.lastLoginAt = lastLoginAt; }
 
-    public Instant getUpdatedAt() {
-        return updatedAt;
-    }
+    public Department getDepartment() { return department; }
+    public void setDepartment(Department department) { this.department = department; }
 
-    public void setUpdatedAt(Instant updatedAt) {
-        this.updatedAt = updatedAt;
-    }
+    public String getSpecialty() { return specialty; }
+    public void setSpecialty(String specialty) { this.specialty = specialty; }
 
-    public Instant getLastLoginAt() {
-        return lastLoginAt;
-    }
-
-    public void setLastLoginAt(Instant lastLoginAt) {
-        this.lastLoginAt = lastLoginAt;
-    }
-
-    public Department getDepartment() {
-        return department;
-    }
-
-    public void setDepartment(Department department) {
-        this.department = department;
-    }
-
-    public String getSpecialty() {
-        return specialty;
-    }
-
-    public void setSpecialty(String specialty) {
-        this.specialty = specialty;
-    }
-
-    public List<DoctorSpecialty> getDoctorSpecialties() {
-        return doctorSpecialties;
-    }
-
-    public void setDoctorSpecialties(List<DoctorSpecialty> doctorSpecialties) {
-        this.doctorSpecialties = doctorSpecialties;
-    }
+    public List<DoctorSpecialty> getDoctorSpecialties() { return doctorSpecialties; }
+    public void setDoctorSpecialties(List<DoctorSpecialty> doctorSpecialties) { this.doctorSpecialties = doctorSpecialties; }
 
     @PrePersist
     void prePersist() {
         if (createdAt == null) createdAt = Instant.now();
         if (updatedAt == null) updatedAt = createdAt;
+        if (failedLoginAttempts == null) failedLoginAttempts = 0; // Đảm bảo không null
     }
 
     @PreUpdate
