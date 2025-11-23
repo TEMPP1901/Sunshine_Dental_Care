@@ -36,6 +36,9 @@ public class AttendanceResponse {
     // Attendance status
     private String attendanceStatus;  // ON_TIME, LATE, ABSENT
     
+    // Shift type (for doctors: MORNING, AFTERNOON, FULL_DAY)
+    private String shiftType;  // MORNING, AFTERNOON, FULL_DAY
+    
     // WiFi validation results
     private Boolean wifiValid;
     private String wifiValidationMessage;
@@ -218,6 +221,14 @@ public class AttendanceResponse {
     
     public void setAttendanceStatus(String attendanceStatus) {
         this.attendanceStatus = attendanceStatus;
+    }
+    
+    public String getShiftType() {
+        return shiftType;
+    }
+    
+    public void setShiftType(String shiftType) {
+        this.shiftType = shiftType;
     }
     
     public Boolean getWifiValid() {

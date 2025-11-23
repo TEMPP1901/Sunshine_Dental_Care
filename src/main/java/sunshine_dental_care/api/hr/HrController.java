@@ -98,6 +98,8 @@ public class HrController {
     }
     
     // 6. MOCK AI GENERATE (FOR TESTING UI WITHOUT GEMINI API)
+    // CHỈ DÙNG TRONG MÔI TRƯỜNG DEVELOPMENT - KHÔNG DÙNG TRONG PRODUCTION
+    @org.springframework.context.annotation.Profile("dev")
     @PostMapping("/ai/generate-mock")
     public ResponseEntity<CreateWeeklyScheduleRequest> generateScheduleMock(
             @RequestBody Map<String, Object> request) {

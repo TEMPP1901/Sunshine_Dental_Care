@@ -40,7 +40,7 @@ public class AttendanceStatusCalculator {
     @Value("${app.attendance.default-start-time:08:00}")
     private String defaultStartTime;
 
-    // Kiểm tra quyền của user cho phép chấm công hay không
+    // Kiểm tra quyền role người dùng cho phép chấm công hay không
     public void validateUserRoleForAttendance(Integer userId) {
         List<UserRole> userRoles = userRoleRepo.findActiveByUserId(userId);
 
@@ -57,38 +57,17 @@ public class AttendanceStatusCalculator {
                     "Users with ADMIN or PATIENT role are not allowed to check in/out.");
         }
 
-        log.debug("User {} role validated for attendance", userId);
+        log.debug("User {} has been validated for attendance", userId);
     }
 
-    // Đánh giá trạng thái chấm công dựa vào thời gian check-in
+    // Đánh giá trạng thái chấm công dựa vào giờ check-in và so với giờ ca mặc định
     public String determineAttendanceStatus(Integer userId,
                                             Integer clinicId,
                                             LocalDate workDate,
                                             Instant checkInTime) {
+        LocalTime expectedStartTime = LocalTime.of(8, 0);
+
         LocalTime checkInLocalTime = checkInTime.atZone(ZoneId.systemDefault()).toLocalTime();
-        LocalTime expectedStartTime = LocalTime.of(8, 0); // Mặc định 8:00
-        
-        // Kiểm tra xem user có phải bác sĩ không
-        List<UserRole> userRoles = userRoleRepo.findActiveByUserId(userId);
-        boolean isDoctor = userRoles.stream().anyMatch(this::isDoctorRole);
-        
-        if (isDoctor) {
-            // Bác sĩ: Lấy giờ bắt đầu từ lịch phân công
-            var schedules = doctorScheduleRepo.findByUserIdAndClinicIdAndWorkDate(userId, clinicId, workDate);
-            if (!schedules.isEmpty()) {
-                // Lấy ca đầu tiên trong ngày
-                var firstSchedule = schedules.stream()
-                        .min((s1, s2) -> s1.getStartTime().compareTo(s2.getStartTime()))
-                        .orElse(null);
-                if (firstSchedule != null) {
-                    expectedStartTime = firstSchedule.getStartTime();
-                    log.debug("Doctor {} expected start time from schedule: {}", userId, expectedStartTime);
-                }
-            } else {
-                log.warn("Doctor {} has no schedule on {} at clinic {}. Using default 8:00 for status calculation.",
-                        userId, workDate, clinicId);
-            }
-        }
 
         if (checkInLocalTime.isBefore(expectedStartTime) || checkInLocalTime.equals(expectedStartTime)) {
             log.info("User {} checked in ON_TIME: {} (expected: {})",
@@ -102,7 +81,7 @@ public class AttendanceStatusCalculator {
         }
     }
 
-    // Đánh dấu vắng mặt nếu không có check-in
+    // Đánh dấu vắng mặt nếu ngày đó không có check-in
     public void markAbsentIfNeeded(Integer userId, Integer clinicId, LocalDate workDate) {
         Optional<Attendance> attendance = attendanceRepository
                 .findByUserIdAndClinicIdAndWorkDate(userId, clinicId, workDate);
@@ -128,7 +107,7 @@ public class AttendanceStatusCalculator {
         }
     }
 
-    // Kiểm tra role bị cấm chấm công
+    // Kiểm tra role người dùng có thuộc nhóm cấm chấm công không
     public boolean isForbiddenRole(UserRole userRole) {
         if (userRole == null || userRole.getRole() == null) {
             return false;
@@ -138,7 +117,7 @@ public class AttendanceStatusCalculator {
                 .anyMatch(forbidden -> roleName.equalsIgnoreCase(forbidden));
     }
 
-    // Kiểm tra role có phải bác sĩ không
+    // Kiểm tra role người dùng có phải là bác sĩ không
     public boolean isDoctorRole(UserRole userRole) {
         if (userRole == null || userRole.getRole() == null) {
             return false;
@@ -152,7 +131,7 @@ public class AttendanceStatusCalculator {
         return roles != null && roles.stream().anyMatch(this::isForbiddenRole);
     }
 
-    // Lấy giờ bắt đầu ca làm mặc định
+    // Lấy giờ bắt đầu ca làm việc mặc định (đọc từ config, nếu lỗi trả về 08:00)
     public LocalTime getDefaultStartTime() {
         try {
             return LocalTime.parse(defaultStartTime);

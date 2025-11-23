@@ -1,6 +1,7 @@
 package sunshine_dental_care.services.impl.hr;
 
 import java.math.BigDecimal;
+import java.time.DayOfWeek;
 import java.time.LocalDate;
 import java.time.LocalTime;
 import java.util.ArrayList;
@@ -335,15 +336,22 @@ public class AttendanceReportService {
             attendances = attendanceRepository.findAll().stream()
                     .filter(a -> {
                         LocalDate workDate = a.getWorkDate();
-                        return a.getClinicId() != null && a.getClinicId().equals(clinicId)
-                                && workDate != null && !workDate.isBefore(startDate) && !workDate.isAfter(endDate);
+                        return a.getClinicId() != null
+                                && a.getClinicId().equals(clinicId)
+                                && workDate != null
+                                && workDate.getDayOfWeek() != DayOfWeek.SUNDAY
+                                && !workDate.isBefore(startDate)
+                                && !workDate.isAfter(endDate);
                     })
                     .toList();
         } else {
             attendances = attendanceRepository.findAll().stream()
                     .filter(a -> {
                         LocalDate workDate = a.getWorkDate();
-                        return workDate != null && !workDate.isBefore(startDate) && !workDate.isAfter(endDate);
+                        return workDate != null
+                                && workDate.getDayOfWeek() != DayOfWeek.SUNDAY
+                                && !workDate.isBefore(startDate)
+                                && !workDate.isAfter(endDate);
                     })
                     .toList();
         }
@@ -372,7 +380,7 @@ public class AttendanceReportService {
             int absentDays = 0;
             int leaveDays = 0;
             int offDays = 0;
-            long totalMinutes = 0;
+            BigDecimal totalWorkHours = BigDecimal.ZERO; // Tổng giờ làm việc (dùng BigDecimal để chính xác)
 
             for (Attendance attendance : userAttendances) {
                 workingDays++;
@@ -391,12 +399,19 @@ public class AttendanceReportService {
                     offDays++;
                 }
 
-                if (attendance.getCheckInTime() != null && attendance.getCheckOutTime() != null) {
+                // Ưu tiên sử dụng actualWorkHours nếu có (đã được tính khi check-out)
+                // Nếu không có, tính từ checkIn/checkOut (fallback)
+                if (attendance.getActualWorkHours() != null) {
+                    totalWorkHours = totalWorkHours.add(attendance.getActualWorkHours());
+                } else if (attendance.getCheckInTime() != null && attendance.getCheckOutTime() != null) {
+                    // Fallback: tính từ checkIn/checkOut nếu actualWorkHours chưa có
                     long minutes = java.time.Duration.between(
                             attendance.getCheckInTime(),
                             attendance.getCheckOutTime()
                     ).toMinutes();
-                    totalMinutes += minutes;
+                    BigDecimal hours = BigDecimal.valueOf(minutes)
+                            .divide(BigDecimal.valueOf(60), 2, java.math.RoundingMode.HALF_UP);
+                    totalWorkHours = totalWorkHours.add(hours);
                 }
             }
 
@@ -407,11 +422,16 @@ public class AttendanceReportService {
             item.setLeaveDays(leaveDays);
             item.setOffDays(offDays);
 
-            long totalHours = totalMinutes / 60;
-            long remainingMinutes = totalMinutes % 60;
-            item.setTotalWorkedHours(totalHours);
+            // Chuyển đổi BigDecimal totalWorkHours sang giờ và phút
+            long totalHoursLong = totalWorkHours.longValue(); // Phần nguyên (giờ)
+            BigDecimal fractionalHours = totalWorkHours.subtract(BigDecimal.valueOf(totalHoursLong)); // Phần thập phân
+            long remainingMinutes = fractionalHours.multiply(BigDecimal.valueOf(60))
+                    .setScale(0, java.math.RoundingMode.HALF_UP)
+                    .longValue(); // Chuyển phần thập phân sang phút
+            
+            item.setTotalWorkedHours(totalHoursLong);
             item.setTotalWorkedMinutes(remainingMinutes);
-            item.setTotalWorkedDisplay(String.format("%d hr %02d min", totalHours, remainingMinutes));
+            item.setTotalWorkedDisplay(String.format("%d hr %02d min", totalHoursLong, remainingMinutes));
 
             items.add(item);
         }

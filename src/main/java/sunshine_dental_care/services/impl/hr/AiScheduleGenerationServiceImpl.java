@@ -6,6 +6,8 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Lazy;
@@ -398,12 +400,92 @@ public class AiScheduleGenerationServiceImpl implements AiScheduleGenerationServ
     private String buildEnhancedPrompt(String userDescription, LocalDate weekStart) {
         StringBuilder prompt = new StringBuilder();
         
-        // Phần 1: User request
-        prompt.append("USER REQUEST:\n");
-        prompt.append(userDescription).append("\n\n");
+        // Phần 1: Introduction
+        prompt.append("You are an AI-powered HR Schedule Generator for Sunshine Dental Care.\n");
+        prompt.append("Your sole output MUST be a perfectly formatted JSON object that adheres to ALL CRITICAL BUSINESS RULES.\n");
+        prompt.append("DO NOT output any text, explanation, or markdown wrappers (no ```json or ```).\n\n");
         
-        // Phần 2: Week info
-        prompt.append("WEEK START DATE: ").append(weekStart).append(" (Monday)\n\n");
+        // Phần 2: User request & Week info
+        prompt.append("═══════════════════════════════════════════════════════════\n");
+        prompt.append("USER REQUEST & WEEK INFO\n");
+        prompt.append("═══════════════════════════════════════════════════════════\n");
+        prompt.append("USER REQUEST: ").append(userDescription).append("\n");
+        prompt.append("WEEK START DATE: ").append(weekStart).append(" (Monday)\n");
+        prompt.append("WEEK END DATE: ").append(weekStart.plusDays(5)).append(" (Saturday)\n\n");
+        
+        // Phần 2.5: AUTO-CALCULATED EXCLUSIONS
+        prompt.append("═══════════════════════════════════════════════════════════\n");
+        prompt.append("🗓️ AUTO-CALCULATED WORK EXCLUSIONS FOR THIS WEEK\n");
+        prompt.append("═══════════════════════════════════════════════════════════\n");
+        
+        // Tính toán ngày nghỉ lễ và ngày nghỉ của bác sĩ
+        LocalDate weekEnd = weekStart.plusDays(5);
+        List<String> exclusionDays = calculateHolidaysInWeek(weekStart);
+        Map<Integer, List<String>> doctorDaysOff = parseDoctorDaysOff(userDescription, weekStart, exclusionDays);
+        
+        // KHÔNG thêm rule cứng về doc6 - để AI tự quyết định dựa trên USER REQUEST
+        // Nếu user yêu cầu "full tuần", doc6 cũng phải làm thứ 7
+        
+        // Query existing schedules để tránh conflict
+        List<sunshine_dental_care.entities.DoctorSchedule> existingSchedules = 
+            doctorScheduleRepo.findByWeekRange(weekStart, weekEnd);
+        
+        // Hiển thị working days
+        prompt.append("👉 WORKING DAYS (MUST be included in JSON keys):\n");
+        String[] dayNames = {"monday", "tuesday", "wednesday", "thursday", "friday", "saturday"};
+        for (int i = 0; i < 6; i++) {
+            if (!exclusionDays.contains(dayNames[i])) {
+                prompt.append(String.format("  - %s (%s)\n", dayNames[i], weekStart.plusDays(i)));
+            }
+        }
+        
+        // Hiển thị excluded days
+        if (!exclusionDays.isEmpty()) {
+            prompt.append("\n❌ EXCLUDED DAYS (DO NOT include in JSON keys):\n");
+            for (int i = 0; i < 6; i++) {
+                if (exclusionDays.contains(dayNames[i])) {
+                    LocalDate date = weekStart.plusDays(i);
+                    String holidayName = getHolidayName(date);
+                    prompt.append(String.format("  - %s (%s): %s\n", dayNames[i], date, holidayName));
+                }
+            }
+        }
+        
+        // Hiển thị doctor days off
+        if (!doctorDaysOff.isEmpty()) {
+            prompt.append("\n⚠️ DOCTOR SPECIFIC DAYS OFF (MUST EXCLUDE DOCTOR):\n");
+            for (Map.Entry<Integer, List<String>> entry : doctorDaysOff.entrySet()) {
+                int docId = entry.getKey();
+                String days = String.join(", ", entry.getValue());
+                prompt.append(String.format("  - Doctor ID %d is OFF on: %s\n", docId, days.toUpperCase()));
+            }
+        }
+        
+        // Hiển thị existing schedules để AI tránh conflict
+        if (!existingSchedules.isEmpty()) {
+            prompt.append("\n⚠️ EXISTING SCHEDULES (DO NOT CREATE DUPLICATES):\n");
+            prompt.append("The following schedules already exist for this week. DO NOT create overlapping assignments:\n");
+            Map<LocalDate, List<sunshine_dental_care.entities.DoctorSchedule>> schedulesByDate = new HashMap<>();
+            for (var schedule : existingSchedules) {
+                schedulesByDate.putIfAbsent(schedule.getWorkDate(), new ArrayList<>());
+                schedulesByDate.get(schedule.getWorkDate()).add(schedule);
+            }
+            for (Map.Entry<LocalDate, List<sunshine_dental_care.entities.DoctorSchedule>> entry : schedulesByDate.entrySet()) {
+                LocalDate date = entry.getKey();
+                String dayName = getDayNameFromDate(weekStart, date);
+                prompt.append(String.format("  - %s (%s):\n", dayName, date));
+                for (var schedule : entry.getValue()) {
+                    prompt.append(String.format("    • Doctor ID %d: %s-%s at Clinic %d\n", 
+                        schedule.getDoctor().getId(), 
+                        schedule.getStartTime(), 
+                        schedule.getEndTime(),
+                        schedule.getClinic().getId()));
+                }
+            }
+            prompt.append("  ⚠️ CRITICAL: DO NOT create any assignments that overlap with existing schedules above!\n");
+        }
+        
+        prompt.append("═══════════════════════════════════════════════════════════\n\n");
         
         // Phần 3: AVAILABLE RESOURCES - Query from database
         prompt.append("═══════════════════════════════════════════════════════════\n");
@@ -488,40 +570,84 @@ public class AiScheduleGenerationServiceImpl implements AiScheduleGenerationServ
         prompt.append("    \"thursday\": [...],\n");
         prompt.append("    \"friday\": [...],\n");
         prompt.append("    \"saturday\": [\n");
-        prompt.append("      // ⚠️ IMPORTANT: Doctor 6 (doc6) MUST NOT appear in Saturday schedule\n");
-        prompt.append("      // Only assign other doctors on Saturday\n");
+        prompt.append("      // ⚠️ IMPORTANT: Saturday is a WORKING DAY - include ALL doctors (unless they have days off)\n");
+        prompt.append("      // If user requests 'full tuần', ALL doctors including Doctor 6 must work on Saturday\n");
         prompt.append("      {\"doctorId\": 21, \"clinicId\": 1, \"roomId\": 1, \"startTime\": \"08:00\", \"endTime\": \"11:00\"},\n");
         prompt.append("      {\"doctorId\": 21, \"clinicId\": 2, \"roomId\": 7, \"startTime\": \"13:00\", \"endTime\": \"18:00\"},\n");
-        prompt.append("      // ... (NO Doctor 6 entries here)\n");
+        prompt.append("      // ... include ALL doctors (each doctor = 2 entries with DIFFERENT clinics)\n");
         prompt.append("    ]\n");
         prompt.append("  }\n");
         prompt.append("}\n\n");
-        prompt.append("BUSINESS RULES (MUST FOLLOW):\n");
-        prompt.append("1. ⚠️ CRITICAL: Each doctor MUST work BOTH morning (08:00-11:00) AND afternoon (13:00-18:00) shifts\n");
+        prompt.append("BUSINESS RULES (MUST FOLLOW - IN ORDER OF PRIORITY):\n");
+        prompt.append("═══════════════════════════════════════════════════════════\n");
+        prompt.append("🎯 CORE REQUIREMENTS (HIGHEST PRIORITY):\n");
+        prompt.append("═══════════════════════════════════════════════════════════\n");
+        prompt.append("1. ⚠️ FULL WEEK COVERAGE: ALL doctors MUST work on ALL working days (Monday through Saturday, excluding holidays and their specific days off)\n");
+        prompt.append("   - FULL WEEK means Monday, Tuesday, Wednesday, Thursday, Friday, AND Saturday (6 days total)\n");
+        prompt.append("   - ⚠️ CRITICAL: If user requests 'full tuần' or 'full week', this means ALL 6 days for ALL doctors\n");
+        prompt.append("   - If a day is NOT a holiday and NOT in a doctor's days off list, that doctor MUST be scheduled\n");
+        prompt.append("   - Example: If Monday is a working day and Doctor 21 is not off, Doctor 21 MUST appear in Monday's schedule\n");
+        prompt.append("   - Example: If Saturday is NOT a holiday and Doctor 21 is not off, Doctor 21 MUST appear in Saturday's schedule\n");
+        prompt.append("   - ⚠️ CRITICAL: Saturday is a WORKING DAY unless it's a holiday. Include ALL doctors on Saturday (except those with days off)\n");
+        prompt.append("   - ⚠️ CRITICAL: If user says 'full tuần', Doctor 6 MUST also work on Saturday (unless Saturday is a holiday or Doctor 6 has Saturday in days off)\n");
+        prompt.append("   - This means: Count working days (excluding holidays). Each doctor must work on ALL of those days (except their days off)\n\n");
+        prompt.append("2. ⚠️ DUAL SHIFT REQUIREMENT: Each doctor MUST work BOTH morning (08:00-11:00) AND afternoon (13:00-18:00) shifts on EVERY working day\n");
         prompt.append("   - This means 2 entries per doctor per working day (one for morning, one for afternoon)\n");
-        prompt.append("   - Example: Doctor 21 on Monday should have 2 entries: 08:00-11:00 and 13:00-18:00\n");
-        prompt.append("2. ⚠️ CRITICAL: Each doctor MUST work at DIFFERENT clinics for morning and afternoon shifts on the SAME day\n");
+        prompt.append("   - Example: Doctor 21 on Monday should have EXACTLY 2 entries: 08:00-11:00 and 13:00-18:00\n");
+        prompt.append("   - NO EXCEPTIONS: Every doctor working on a day MUST have both shifts\n\n");
+        prompt.append("3. ⚠️ CLINIC ROTATION: Each doctor MUST work at DIFFERENT clinics for morning and afternoon shifts on the SAME day\n");
         prompt.append("   - Example: If Doctor 21 works at Clinic 1 in the morning (08:00-11:00), they MUST work at Clinic 2 in the afternoon (13:00-18:00)\n");
         prompt.append("   - Example: If Doctor 22 works at Clinic 2 in the morning, they MUST work at Clinic 1 in the afternoon\n");
         prompt.append("   - This rule applies to EVERY doctor on EVERY working day\n");
-        prompt.append("3. Doctors can rotate clinics across different days of the week\n");
-        prompt.append("   - Example: Doctor 21 works at Clinic 1 (morning) and Clinic 2 (afternoon) on Monday,\n");
-        prompt.append("     but can work at Clinic 2 (morning) and Clinic 1 (afternoon) on Tuesday\n");
-        prompt.append("4. Each clinic must have at least 2 doctors in morning shift (08:00-11:00)\n");
-        prompt.append("5. Each clinic must have at least 2 doctors in afternoon shift (13:00-18:00)\n");
-        prompt.append("6. ⚠️ CRITICAL: Each specialty MUST have doctors assigned to BOTH clinics on each day\n");
+        prompt.append("   - ⚠️ WEEKLY ROTATION: Rotate clinics across different days to ensure fair distribution\n");
+        prompt.append("     * Example: Doctor 21: Mon (C1 AM, C2 PM), Tue (C2 AM, C1 PM), Wed (C1 AM, C2 PM), etc.\n");
+        prompt.append("     * This creates variety and ensures doctors work at both clinics throughout the week\n\n");
+        prompt.append("═══════════════════════════════════════════════════════════\n");
+        prompt.append("📋 STAFFING REQUIREMENTS:\n");
+        prompt.append("═══════════════════════════════════════════════════════════\n");
+        prompt.append("4. Each clinic must have at least 2 doctors in morning shift (08:00-11:00) on EVERY working day\n");
+        prompt.append("5. Each clinic must have at least 2 doctors in afternoon shift (13:00-18:00) on EVERY working day\n");
+        prompt.append("6. ⚠️ SPECIALTY BALANCE: Each specialty MUST have doctors assigned to BOTH clinics on each working day\n");
         prompt.append("   - Example: If you assign a 'Preventive Care' doctor to Clinic 1, you MUST also assign\n");
         prompt.append("     another 'Preventive Care' doctor to Clinic 2 on the same day\n");
-        prompt.append("7. Doctors cannot work more than 8 hours per day (morning + afternoon = 8 hours total)\n");
-        prompt.append("8. ⚠️ SPECIAL RULE: Doctor with ID 6 (doc6) MUST NOT be scheduled on Saturday\n");
-        prompt.append("   - Doctor 6 should only appear in monday, tuesday, wednesday, thursday, friday schedules\n");
-        prompt.append("   - On Saturday, assign other doctors to cover Doctor 6's shifts\n");
-        prompt.append("9. ⚠️ DAYS OFF RULES: If user specifies days off for specific doctors, exclude them from those days\n");
-        prompt.append("   - If user says 'doc5 nghỉ cả tuần' or 'doctor 5 off all week', DO NOT schedule Doctor 5 on ANY day\n");
-        prompt.append("   - If user says 'doc3 nghỉ thứ 2 và thứ 4' or 'doctor 3 off Monday and Wednesday', exclude Doctor 3 from monday and wednesday only\n");
-        prompt.append("   - If user says 'doc7 nghỉ từ thứ 3 đến thứ 5', exclude Doctor 7 from tuesday, wednesday, thursday\n");
+        prompt.append("   - Exception: If only ONE doctor of a specialty is available (due to days off), assign them to both clinics (morning at one, afternoon at the other)\n\n");
+        prompt.append("═══════════════════════════════════════════════════════════\n");
+        prompt.append("🚫 EXCLUSION RULES:\n");
+        prompt.append("═══════════════════════════════════════════════════════════\n");
+        prompt.append("7. ⚠️ PUBLIC HOLIDAYS: DO NOT schedule ANY doctors on public holidays\n");
+        prompt.append("   - If a date is listed in EXCLUDED DAYS section above, that date MUST be EXCLUDED from dailyAssignments\n");
+        prompt.append("   - Example: If Thursday (01/01/2026) is New Year's Day, do NOT include \"thursday\" in dailyAssignments\n");
+        prompt.append("   - Only schedule on working days (non-holiday dates)\n\n");
+        prompt.append("8. ⚠️ DOCTOR DAYS OFF: Follow the USER REQUEST exactly for doctor days off (see DOCTOR SPECIFIC DAYS OFF section above)\n");
+        prompt.append("   - Read the USER REQUEST carefully. If user says 'doc4 và doc5 nghỉ hai ngày không tính ngày lễ', you MUST:\n");
+        prompt.append("     * Count working days (excluding holidays listed in EXCLUDED DAYS section)\n");
+        prompt.append("     * Assign Doctor 4 to be off on exactly 2 working days (you choose which 2 days, but they must be different)\n");
+        prompt.append("     * Assign Doctor 5 to be off on exactly 2 DIFFERENT working days (you choose which 2 days, different from Doctor 4's days off)\n");
+        prompt.append("     * Ensure the 2 days off for each doctor are different from each other\n");
         prompt.append("   - When a doctor is off, redistribute their shifts to other available doctors\n");
-        prompt.append("   - Ensure remaining doctors still follow the 2-shifts-per-day and different-clinics rules\n\n");
+        prompt.append("   - Ensure remaining doctors still follow the 2-shifts-per-day and different-clinics rules\n");
+        prompt.append("   - ⚠️ CRITICAL: Days off are IN ADDITION to holidays. If user says '2 days off excluding holidays', count 2 working days (not including holidays)\n");
+        prompt.append("   - ⚠️ CRITICAL: If user specifies specific days off, follow exactly. If user says 'nghỉ hai ngày không tính ngày lễ', you choose which 2 working days\n\n");
+        prompt.append("9. ⚠️ FOLLOW USER REQUEST: If user requests 'full tuần' or 'full week', ALL doctors (including Doctor 6) MUST work on Saturday (unless it's a holiday or their specific days off)\n");
+        prompt.append("   - FULL WEEK means ALL 6 days (Monday-Saturday) for ALL doctors\n");
+        prompt.append("   - Only exclude doctors from Saturday if:\n");
+        prompt.append("     * Saturday is a public holiday, OR\n");
+        prompt.append("     * The doctor has Saturday in their specific days off list (see DOCTOR SPECIFIC DAYS OFF section)\n");
+        prompt.append("   - If user does NOT specify that Doctor 6 should be off on Saturday, Doctor 6 MUST be scheduled on Saturday\n\n");
+        prompt.append("═══════════════════════════════════════════════════════════\n");
+        prompt.append("✅ VALIDATION CHECKLIST:\n");
+        prompt.append("═══════════════════════════════════════════════════════════\n");
+        prompt.append("Before returning the JSON, verify:\n");
+        prompt.append("- [ ] Every working day (Monday-Saturday, excluding holidays) has ALL available doctors scheduled\n");
+        prompt.append("- [ ] Saturday is included as a working day (unless it's a holiday)\n");
+        prompt.append("- [ ] Every doctor on every working day has EXACTLY 2 entries (morning + afternoon)\n");
+        prompt.append("- [ ] Every doctor's morning and afternoon shifts are at DIFFERENT clinics\n");
+        prompt.append("- [ ] Doctors rotate clinics across different days of the week\n");
+        prompt.append("- [ ] Each clinic has at least 2 doctors in both morning and afternoon shifts\n");
+        prompt.append("- [ ] Follow USER REQUEST exactly for Doctor 4 and Doctor 5 days off (if specified)\n");
+        prompt.append("- [ ] If user requests 'full tuần', Doctor 6 MUST be scheduled on Saturday (unless Saturday is a holiday)\n");
+        prompt.append("- [ ] No assignments on public holidays\n");
+        prompt.append("- [ ] All 6 days (Monday-Saturday) are covered, except holidays\n\n");
         
         prompt.append("JSON FORMAT RULES:\n");
         prompt.append("1. Return ONLY the JSON object, NO explanatory text before or after\n");
@@ -532,7 +658,10 @@ public class AiScheduleGenerationServiceImpl implements AiScheduleGenerationServ
         prompt.append("6. All fields (doctorId, clinicId, roomId, startTime, endTime) are required\n");
         prompt.append("7. ⚠️ CRITICAL: Use ONLY the doctor IDs, clinic IDs, and room IDs listed in AVAILABLE RESOURCES above\n");
         prompt.append("8. ⚠️ CRITICAL: Match room IDs with their correct clinic IDs (check the room's clinic in the list)\n");
-        prompt.append("9. If you cannot generate a schedule, return an empty dailyAssignments object: {\"dailyAssignments\": {}}\n");
+        prompt.append("9. ⚠️ CRITICAL: EXCLUDE any day that is a Vietnamese public holiday (see VIETNAM PUBLIC HOLIDAYS section above)\n");
+        prompt.append("   - If a day is a holiday, do NOT include that day key in dailyAssignments\n");
+        prompt.append("   - Only include working days (non-holiday dates) in the schedule\n");
+        prompt.append("10. If you cannot generate a schedule, return an empty dailyAssignments object: {\"dailyAssignments\": {}}\n");
         prompt.append("═══════════════════════════════════════════════════════════\n\n");
         prompt.append("Now generate the schedule based on the USER REQUEST above.\n");
         prompt.append("Remember: ONLY return the JSON object, nothing else.\n");
@@ -587,5 +716,171 @@ public class AiScheduleGenerationServiceImpl implements AiScheduleGenerationServ
 
         // Không tìm thấy JSON
         return null;
+    }
+    
+    // Tính toán ngày nghỉ lễ Việt Nam trong tuần
+    private List<String> calculateHolidaysInWeek(LocalDate weekStart) {
+        List<String> holidays = new ArrayList<>();
+        String[] dayNames = {"monday", "tuesday", "wednesday", "thursday", "friday", "saturday"};
+        
+        for (int i = 0; i < 6; i++) {
+            LocalDate date = weekStart.plusDays(i);
+            if (isVietnameseHoliday(date)) {
+                holidays.add(dayNames[i]);
+            }
+        }
+        
+        return holidays;
+    }
+    
+    // Kiểm tra xem một ngày có phải là ngày nghỉ lễ Việt Nam không
+    private boolean isVietnameseHoliday(LocalDate date) {
+        int month = date.getMonthValue();
+        int day = date.getDayOfMonth();
+        int year = date.getYear();
+        
+        // 1. Tết Dương lịch (1/1)
+        if (month == 1 && day == 1) {
+            return true;
+        }
+        
+        // 2. Ngày Giải phóng miền Nam (30/4)
+        if (month == 4 && day == 30) {
+            return true;
+        }
+        
+        // 3. Ngày Quốc tế Lao động (1/5)
+        if (month == 5 && day == 1) {
+            return true;
+        }
+        
+        // 4. Quốc khánh (2/9)
+        if (month == 9 && day == 2) {
+            return true;
+        }
+        
+        // 5. Giỗ Tổ Hùng Vương (10/3 âm lịch) - xấp xỉ 10/4 dương lịch
+        // Note: Cần tính chính xác theo âm lịch, nhưng tạm thời dùng 10/4
+        if (month == 4 && day == 10) {
+            return true;
+        }
+        
+        // 6. Tết Nguyên Đán - cần tính theo âm lịch
+        // Tạm thời hardcode một số năm gần đây (có thể cải thiện sau)
+        if (isTetNguyenDan(date, year)) {
+            return true;
+        }
+        
+        return false;
+    }
+    
+    // Kiểm tra Tết Nguyên Đán (tạm thời hardcode, nên cải thiện bằng thư viện âm lịch)
+    private boolean isTetNguyenDan(LocalDate date, int year) {
+        // Tết Nguyên Đán thường rơi vào cuối tháng 1 hoặc đầu tháng 2
+        // Hardcode một số năm (có thể cải thiện bằng thư viện âm lịch)
+        Map<Integer, LocalDate[]> tetDates = new HashMap<>();
+        tetDates.put(2024, new LocalDate[]{LocalDate.of(2024, 2, 10), LocalDate.of(2024, 2, 16)}); // 10-16/2/2024
+        tetDates.put(2025, new LocalDate[]{LocalDate.of(2025, 1, 29), LocalDate.of(2025, 2, 4)}); // 29/1-4/2/2025
+        tetDates.put(2026, new LocalDate[]{LocalDate.of(2026, 2, 17), LocalDate.of(2026, 2, 23)}); // 17-23/2/2026
+        
+        if (tetDates.containsKey(year)) {
+            LocalDate[] range = tetDates.get(year);
+            return !date.isBefore(range[0]) && !date.isAfter(range[1]);
+        }
+        
+        return false;
+    }
+    
+    // Lấy tên ngày nghỉ lễ
+    private String getHolidayName(LocalDate date) {
+        int month = date.getMonthValue();
+        int day = date.getDayOfMonth();
+        
+        if (month == 1 && day == 1) return "New Year's Day (Tết Dương lịch)";
+        if (month == 4 && day == 10) return "Hung Kings Festival (Giỗ Tổ Hùng Vương)";
+        if (month == 4 && day == 30) return "Liberation Day (Ngày Giải phóng miền Nam)";
+        if (month == 5 && day == 1) return "Labor Day (Ngày Quốc tế Lao động)";
+        if (month == 9 && day == 2) return "National Day (Quốc khánh)";
+        if (isTetNguyenDan(date, date.getYear())) return "Vietnamese New Year (Tết Nguyên Đán)";
+        
+        return "Public Holiday";
+    }
+    
+    // CHỈ PARSE - KHÔNG TỰ ĐỘNG XỬ LÝ - ĐỂ AI TỰ QUYẾT ĐỊNH DỰA TRÊN PROMPT
+    private Map<Integer, List<String>> parseDoctorDaysOff(String userDescription, @SuppressWarnings("unused") LocalDate weekStart, @SuppressWarnings("unused") List<String> exclusionDays) {
+        Map<Integer, List<String>> doctorDaysOff = new HashMap<>();
+        if (userDescription == null || userDescription.trim().isEmpty()) {
+            return doctorDaysOff;
+        }
+        
+        String descLower = userDescription.toLowerCase();
+        
+        // Map tiếng Việt và tiếng Anh
+        Map<String, String> dayMap = new HashMap<>();
+        dayMap.put("thứ 2", "monday");
+        dayMap.put("thứ hai", "monday");
+        dayMap.put("thứ 3", "tuesday");
+        dayMap.put("thứ ba", "tuesday");
+        dayMap.put("thứ 4", "wednesday");
+        dayMap.put("thứ tư", "wednesday");
+        dayMap.put("thứ 5", "thursday");
+        dayMap.put("thứ năm", "thursday");
+        dayMap.put("thứ 6", "friday");
+        dayMap.put("thứ sáu", "friday");
+        dayMap.put("thứ 7", "saturday");
+        dayMap.put("thứ bảy", "saturday");
+        dayMap.put("monday", "monday");
+        dayMap.put("tuesday", "tuesday");
+        dayMap.put("wednesday", "wednesday");
+        dayMap.put("thursday", "thursday");
+        dayMap.put("friday", "friday");
+        dayMap.put("saturday", "saturday");
+        
+        // Pattern: doc<id> nghỉ <days> hoặc doctor <id> off <days>
+        Pattern pattern = Pattern.compile("(?:doc|doctor)\\s*(\\d+)\\s+(?:nghỉ|off|nghỉ cả tuần|off all week)(?:\\s+(?:vào|on|thứ|ngày)?\\s*([^,\\.]+))?", Pattern.CASE_INSENSITIVE);
+        Matcher matcher = pattern.matcher(descLower);
+        
+        while (matcher.find()) {
+            int doctorId = Integer.parseInt(matcher.group(1));
+            String daysStr = matcher.group(2);
+            
+            List<String> days = new ArrayList<>();
+            
+            if (daysStr != null && !daysStr.trim().isEmpty()) {
+                // Parse các ngày
+                String[] parts = daysStr.split("(?:và|and|,|\\s+)");
+                for (String part : parts) {
+                    part = part.trim();
+                    for (Map.Entry<String, String> entry : dayMap.entrySet()) {
+                        if (part.contains(entry.getKey())) {
+                            days.add(entry.getValue());
+                            break;
+                        }
+                    }
+                }
+            } else {
+                // "nghỉ cả tuần" hoặc "off all week"
+                days.addAll(List.of("monday", "tuesday", "wednesday", "thursday", "friday", "saturday"));
+            }
+            
+            if (!days.isEmpty()) {
+                doctorDaysOff.put(doctorId, days);
+            }
+        }
+        
+        // KHÔNG tự động xử lý - chỉ parse thông tin từ user input
+        // AI sẽ tự quyết định dựa trên yêu cầu trong promp
+        
+        return doctorDaysOff;
+    }
+    
+    // Lấy tên ngày từ date (monday, tuesday, etc.)
+    private String getDayNameFromDate(LocalDate weekStart, LocalDate date) {
+        long daysBetween = java.time.temporal.ChronoUnit.DAYS.between(weekStart, date);
+        String[] dayNames = {"monday", "tuesday", "wednesday", "thursday", "friday", "saturday"};
+        if (daysBetween >= 0 && daysBetween < 6) {
+            return dayNames[(int) daysBetween];
+        }
+        return "unknown";
     }
 }

@@ -94,7 +94,8 @@ public class SecurityConfig {
 
                         // Additional auth endpoints
                         .requestMatchers("/auth/sign-up").permitAll()  // Cho phép đăng ký PATIENT
-                        .requestMatchers("/api/hr/employees/**").hasRole("HR")  // Chỉ HR được phép
+                        .requestMatchers("/api/hr/employees/doctors").authenticated()  // Cho phép authenticated users xem danh sách bác sĩ
+                        .requestMatchers("/api/hr/employees/**").hasRole("HR")  // Chỉ HR được phép các endpoint khác
                         .requestMatchers("/api/admin/**").hasRole("ADMIN")
                         .requestMatchers("/api/hr/management/**").hasRole("HR")  // HR Management endpoints
                         .anyRequest().authenticated()

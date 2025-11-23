@@ -521,4 +521,31 @@ public class HrEmployeeServiceImpl implements HrEmployeeService {
         }
     }
 
+    @Override
+    @Transactional(readOnly = true)
+    // Lấy danh sách tất cả bác sĩ (public - không yêu cầu HR role)
+    public List<EmployeeResponse> getAllDoctors() {
+        log.info("Getting all active doctors");
+        try {
+            // Lấy tất cả UserRole có role DOCTOR và active
+            var allUserRoles = userRoleRepo.findAll();
+            var doctors = allUserRoles.stream()
+                .filter(ur -> Boolean.TRUE.equals(ur.getIsActive()) 
+                    && ur.getRole() != null 
+                    && "DOCTOR".equalsIgnoreCase(ur.getRole().getRoleName()))
+                .map(ur -> ur.getUser())
+                .filter(u -> u != null && Boolean.TRUE.equals(u.getIsActive()))
+                .distinct()
+                .collect(java.util.stream.Collectors.toList());
+            
+            // Chuyển đổi sang EmployeeResponse
+            return doctors.stream()
+                .map(user -> employeeMapper.toEmployeeResponse(user))
+                .collect(java.util.stream.Collectors.toList());
+        } catch (Exception ex) {
+            log.error("Error getting all doctors: {}", ex.getMessage(), ex);
+            throw new EmployeeValidationException("Failed to get doctors: " + ex.getMessage(), ex);
+        }
+    }
+
 }

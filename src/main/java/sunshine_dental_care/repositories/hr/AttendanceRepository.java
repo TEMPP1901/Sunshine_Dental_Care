@@ -22,6 +22,16 @@ public interface AttendanceRepository extends JpaRepository<Attendance, Integer>
     // Tìm bản ghi chấm công của user tại phòng khám trong ngày
     Optional<Attendance> findByUserIdAndClinicIdAndWorkDate(Integer userId, Integer clinicId, LocalDate workDate);
 
+    // Lấy danh sách chấm công của user tại phòng khám trong ngày (cho bác sĩ có nhiều ca)
+    List<Attendance> findAllByUserIdAndClinicIdAndWorkDate(Integer userId, Integer clinicId, LocalDate workDate);
+
+    // Tìm bản ghi chấm công của user theo ca làm việc
+    Optional<Attendance> findByUserIdAndClinicIdAndWorkDateAndShiftType(
+        Integer userId, Integer clinicId, LocalDate workDate, String shiftType);
+
+    // Lấy danh sách chấm công của user trong ngày (tất cả các ca)
+    List<Attendance> findAllByUserIdAndWorkDate(Integer userId, LocalDate workDate);
+
     // Lấy danh sách lịch sử chấm công của user trong khoảng thời gian, sắp xếp mới nhất trước
     List<Attendance> findByUserIdAndWorkDateBetweenOrderByWorkDateDesc(
         Integer userId, LocalDate startDate, LocalDate endDate);
@@ -65,4 +75,37 @@ public interface AttendanceRepository extends JpaRepository<Attendance, Integer>
     // Kiểm tra user đã check-out trong ngày hay chưa
     @Query("SELECT COUNT(a) > 0 FROM Attendance a WHERE a.userId = :userId AND a.workDate = :workDate AND a.checkOutTime IS NOT NULL")
     boolean existsByUserIdAndWorkDateWithCheckOut(@Param("userId") Integer userId, @Param("workDate") LocalDate workDate);
+
+    // ========== QUERY METHODS CHO KẾ TOÁN TÍNH LƯƠNG ==========
+    
+    // Tính tổng giờ làm việc (actualWorkHours) của user trong khoảng thời gian
+    // Dùng để tính lương theo giờ
+    @Query("SELECT COALESCE(SUM(a.actualWorkHours), 0) FROM Attendance a " +
+           "WHERE a.userId = :userId AND a.workDate BETWEEN :startDate AND :endDate " +
+           "AND a.actualWorkHours IS NOT NULL")
+    java.math.BigDecimal sumActualWorkHoursByUserIdAndWorkDateBetween(
+            @Param("userId") Integer userId,
+            @Param("startDate") LocalDate startDate,
+            @Param("endDate") LocalDate endDate);
+
+    // Tính tổng giờ làm việc của user tại một clinic trong khoảng thời gian
+    @Query("SELECT COALESCE(SUM(a.actualWorkHours), 0) FROM Attendance a " +
+           "WHERE a.userId = :userId AND a.clinicId = :clinicId " +
+           "AND a.workDate BETWEEN :startDate AND :endDate " +
+           "AND a.actualWorkHours IS NOT NULL")
+    java.math.BigDecimal sumActualWorkHoursByUserIdAndClinicIdAndWorkDateBetween(
+            @Param("userId") Integer userId,
+            @Param("clinicId") Integer clinicId,
+            @Param("startDate") LocalDate startDate,
+            @Param("endDate") LocalDate endDate);
+
+    // Lấy danh sách attendance có actualWorkHours trong khoảng thời gian (cho kế toán)
+    @Query("SELECT a FROM Attendance a WHERE a.userId = :userId " +
+           "AND a.workDate BETWEEN :startDate AND :endDate " +
+           "AND a.actualWorkHours IS NOT NULL " +
+           "ORDER BY a.workDate ASC")
+    List<Attendance> findWithActualWorkHoursByUserIdAndWorkDateBetween(
+            @Param("userId") Integer userId,
+            @Param("startDate") LocalDate startDate,
+            @Param("endDate") LocalDate endDate);
 }

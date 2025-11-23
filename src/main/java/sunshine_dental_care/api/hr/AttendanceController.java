@@ -98,6 +98,15 @@ public class AttendanceController {
         return ResponseEntity.ok(response);
     }
 
+    // Lấy danh sách tất cả attendance của user ngày hôm nay (cho bác sĩ có nhiều ca)
+    @GetMapping("/today-list")
+    @org.springframework.security.access.prepost.PreAuthorize("hasAnyRole('DOCTOR', 'HR', 'RECEPTIONIST', 'ACCOUNTANT')")
+    public ResponseEntity<java.util.List<AttendanceResponse>> getTodayAttendanceList(
+            @RequestParam Integer userId) {
+        java.util.List<AttendanceResponse> responses = attendanceService.getTodayAttendanceList(userId);
+        return ResponseEntity.ok(responses);
+    }
+
     // Lấy lịch sử attendance (có phân trang, HR xem tất cả, thường chỉ xem bản thân)
     @GetMapping("/history")
     @org.springframework.security.access.prepost.PreAuthorize("hasAnyRole('HR', 'DOCTOR', 'RECEPTIONIST', 'ACCOUNTANT')")
@@ -110,8 +119,7 @@ public class AttendanceController {
             @RequestParam(defaultValue = "10") int size,
             @AuthenticationPrincipal CurrentUser currentUser) {
 
-        // Logic:
-        // Nếu có userId -> luôn filter userId đó (kể cả HR)
+       
         // Nếu không có userId, nếu HR thì xem tất cả, nếu thường thì userId = currentUserId
         if (startDate == null) {
             startDate = LocalDate.now().minusDays(30);

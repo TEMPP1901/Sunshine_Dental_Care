@@ -26,11 +26,4 @@ public interface HrService {
 
     // Kiểm tra hợp lệ của lịch làm việc tạo mới
     ValidationResultDto validateSchedule(CreateWeeklyScheduleRequest request);
-
-    // Tạo lịch làm việc dựa trên AI sử dụng mô tả (Đã deprecated)
-    @Deprecated
-    CreateWeeklyScheduleRequest generateScheduleFromDescription(LocalDate weekStart, String description);
-
-    // Tạo lịch bằng luật (dự phòng nếu AI không tạo được)
-    CreateWeeklyScheduleRequest generateScheduleFromDescriptionRuleBased(LocalDate weekStart, String description);
 }

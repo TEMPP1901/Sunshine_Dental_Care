@@ -29,6 +29,9 @@ public interface AttendanceService {
     // Lấy thông tin chấm công của user trong ngày hiện tại
     AttendanceResponse getTodayAttendance(Integer userId);
 
+    // Lấy danh sách tất cả attendance của user trong ngày hiện tại (cho bác sĩ có nhiều ca)
+    List<AttendanceResponse> getTodayAttendanceList(Integer userId);
+
     Page<AttendanceResponse> getAttendanceHistory(
         Integer userId,
         Integer clinicId,
