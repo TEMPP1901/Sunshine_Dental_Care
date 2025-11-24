@@ -6,6 +6,8 @@ import org.hibernate.annotations.Nationalized;
 
 import java.time.Instant;
 import java.time.LocalDate;
+import java.util.LinkedHashSet;
+import java.util.Set;
 
 @Entity
 @Table(name = "MedicalRecords")
@@ -66,6 +68,9 @@ public class MedicalRecord {
     @ColumnDefault("sysutcdatetime()")
     @Column(name = "updatedAt", nullable = false)
     private Instant updatedAt;
+
+    @OneToMany(mappedBy = "medicalRecord", cascade = CascadeType.ALL, orphanRemoval = true)
+    private Set<MedicalRecordImage> medicalRecordImages = new LinkedHashSet<>();
 
     public Integer getId() {
         return id;
@@ -169,6 +174,14 @@ public class MedicalRecord {
 
     public void setUpdatedAt(Instant updatedAt) {
         this.updatedAt = updatedAt;
+    }
+
+    public Set<MedicalRecordImage> getMedicalRecordImages() {
+        return medicalRecordImages;
+    }
+
+    public void setMedicalRecordImages(Set<MedicalRecordImage> medicalRecordImages) {
+        this.medicalRecordImages = medicalRecordImages;
     }
 
 }

@@ -21,6 +21,7 @@ import lombok.RequiredArgsConstructor;
 @Configuration
 @RequiredArgsConstructor
 @EnableMethodSecurity(prePostEnabled = true)
+
 public class SecurityConfig {
 
     private final JwtAuthFilter jwtAuthFilter;
@@ -87,6 +88,9 @@ public class SecurityConfig {
                         .requestMatchers("/api/auth/google", "/oauth2/**", "/login/oauth2/**").permitAll()
                         .requestMatchers( "/api/products/**").permitAll() // Public endpoints products *huybro
 
+                        .requestMatchers( "/api/products/**").permitAll() // Public endpoints products *huybro
+
+                        .requestMatchers("/api/doctor/**","/api/patients/{patientId}/records/**").hasRole("DOCTOR") // Chỉ bác sĩ được phép,
 
 
                         // Authenticated endpoints
@@ -96,6 +100,9 @@ public class SecurityConfig {
                         .requestMatchers("/auth/sign-up").permitAll()  // Cho phép đăng ký PATIENT
                         .requestMatchers("/api/hr/employees/doctors").authenticated()  // Cho phép authenticated users xem danh sách bác sĩ
                         .requestMatchers("/api/hr/employees/**").hasRole("HR")  // Chỉ HR được phép các endpoint khác
+                        .requestMatchers("/api/admin/**").hasRole("ADMIN")
+                        .requestMatchers("/api/hr/management/**").hasRole("HR")  // HR Management endpoints
+                        .requestMatchers("/api/hr/employees/**").hasRole("HR")  // Chỉ HR được phép
                         .requestMatchers("/api/admin/**").hasRole("ADMIN")
                         .requestMatchers("/api/hr/management/**").hasRole("HR")  // HR Management endpoints
                         .anyRequest().authenticated()

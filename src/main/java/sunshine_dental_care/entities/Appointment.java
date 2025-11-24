@@ -36,6 +36,11 @@ public class Appointment {
     private User doctor;
 
     @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "serviceId")
+    private Service service;
+
+
+    @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "roomId")
     private Room room;
 
@@ -99,6 +104,14 @@ public class Appointment {
 
     public void setDoctor(User doctor) {
         this.doctor = doctor;
+    }
+
+    public Service getService() {
+        return service;
+    }
+
+    public void setService(Service service) {
+        this.service = service;
     }
 
     public Room getRoom() {

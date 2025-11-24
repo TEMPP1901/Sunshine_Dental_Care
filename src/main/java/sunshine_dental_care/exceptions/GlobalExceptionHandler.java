@@ -18,6 +18,7 @@ import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.security.authentication.BadCredentialsException;
 import sunshine_dental_care.exceptions.auth.DuplicateEmailException;
 import sunshine_dental_care.exceptions.auth.DuplicateUsernameException;
 import sunshine_dental_care.exceptions.hr.AttendanceExceptions.AlreadyCheckedInException;
@@ -35,6 +36,7 @@ import sunshine_dental_care.exceptions.hr.HRManagementExceptions.DepartmentNotFo
 import sunshine_dental_care.exceptions.hr.HRManagementExceptions.HRManagementException;
 import sunshine_dental_care.exceptions.hr.ScheduleException;
 import sunshine_dental_care.exceptions.hr.ScheduleValidationException;
+
 
 @RestControllerAdvice
 @Slf4j
@@ -149,6 +151,10 @@ public class GlobalExceptionHandler {
                 .body(response);
     }
 
+    /*
+     Xử lý IllegalArgumentException
+     Tác dụng: Xử lý các lỗi argument không hợp lệ
+     */
     @ExceptionHandler(IllegalArgumentException.class)
     public ResponseEntity<Map<String, Object>> handleIllegalArgumentException(IllegalArgumentException ex) {
         Map<String, Object> response = new HashMap<>();
@@ -161,6 +167,26 @@ public class GlobalExceptionHandler {
         return ResponseEntity.badRequest().body(response);
     }
 
+    /*
+     Xử lý IllegalStateException
+     Tác dụng: Xử lý các lỗi state không hợp lệ (ví dụ: missing role, missing patient sequence)
+     */
+    @ExceptionHandler(IllegalStateException.class)
+    public ResponseEntity<Map<String, Object>> handleIllegalStateException(IllegalStateException ex) {
+        Map<String, Object> response = new HashMap<>();
+        response.put("timestamp", LocalDateTime.now());
+        response.put("status", HttpStatus.INTERNAL_SERVER_ERROR.value());
+        response.put("error", "Configuration Error");
+        response.put("message", ex.getMessage());
+
+        log.error("Illegal state: {}", ex.getMessage(), ex);
+        return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(response);
+    }
+
+    /*
+     Xử lý Employee Not Found Exception
+     Tác dụng: Trả về lỗi 404 khi không tìm thấy nhân viên
+     */
     // Xử lý lỗi không tìm thấy nhân viên
     @ExceptionHandler(EmployeeNotFoundException.class)
     public ResponseEntity<Map<String, Object>> handleEmployeeNotFoundException(EmployeeNotFoundException ex) {
@@ -322,6 +348,26 @@ public class GlobalExceptionHandler {
     }
 
     // Xử lý catch-all mọi exception chưa biết để tránh leak lỗi ra ngoài (trả về JSON cho FE)
+    /*
+     Xử lý BadCredentialsException (Spring Security)
+     Tác dụng: Xử lý lỗi authentication
+     */
+    @ExceptionHandler(BadCredentialsException.class)
+    public ResponseEntity<Map<String, Object>> handleBadCredentialsException(BadCredentialsException ex) {
+        Map<String, Object> response = new HashMap<>();
+        response.put("timestamp", LocalDateTime.now());
+        response.put("status", HttpStatus.UNAUTHORIZED.value());
+        response.put("error", "Authentication Failed");
+        response.put("message", ex.getMessage());
+
+        log.warn("Bad credentials: {}", ex.getMessage());
+        return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(response);
+    }
+
+    /*
+     Xử lý tất cả exceptions khác
+     Tác dụng: Catch-all để đảm bảo không có exception nào bị leak
+     */
     @ExceptionHandler(Exception.class)
     public ResponseEntity<Map<String, Object>> handleGenericException(Exception ex) {
         Map<String, Object> response = new HashMap<>();

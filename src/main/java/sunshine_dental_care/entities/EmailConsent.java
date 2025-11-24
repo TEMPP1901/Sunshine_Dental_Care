@@ -31,7 +31,7 @@ public class EmailConsent {
 
     @Nationalized
     @Column(name = "proofUrl", length = 400)
-    private String proofUrl;
+    private String proofUrl; 
 
     public Integer getId() {
         return id;
