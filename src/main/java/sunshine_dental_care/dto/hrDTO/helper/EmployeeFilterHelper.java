@@ -22,14 +22,14 @@ public class EmployeeFilterHelper {
 
     // Danh sách tên vai trò được phép hiển thị trong danh sách nhân viên (không phân biệt hoa thường)
     private static final List<String> ALLOWED_ROLE_NAMES = List.of(
-        "RECEPTIONIST", "ACCOUNTANT", "DOCTOR", "HR",
-        "Receptionist", "Accountant", "Doctor", "HR",
+        "RECEPTION", "ACCOUNTANT", "DOCTOR", "HR",
+        "Reception", "Accountant", "Doctor", "HR",
         "lễ tân", "kế toán", "bác sĩ", "hr"
     );
 
     // Lọc bắt buộc: chỉ lấy nhân viên có các vai trò thuộc danh sách cho phép
     public Stream<User> applyMandatoryRoleFilter(Stream<User> userStream) {
-        log.debug("Applying mandatory role filter (RECEPTIONIST, ACCOUNTANT, DOCTOR, HR)");
+        log.debug("Applying mandatory role filter (RECEPTION, ACCOUNTANT, DOCTOR, HR)");
         return userStream.filter(u -> {
             if (u == null || u.getId() == null) {
                 return false;

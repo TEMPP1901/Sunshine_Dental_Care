@@ -45,7 +45,7 @@ public class AttendanceController {
 
     // Chấm công vào
     @PostMapping("/check-in")
-    @org.springframework.security.access.prepost.PreAuthorize("hasAnyRole('DOCTOR', 'HR', 'RECEPTIONIST', 'ACCOUNTANT')")
+    @org.springframework.security.access.prepost.PreAuthorize("hasAnyRole('DOCTOR', 'HR', 'RECEPTION', 'ACCOUNTANT')")
     public ResponseEntity<AttendanceResponse> checkIn(@Valid @RequestBody AttendanceCheckInRequest request) {
         log.info("Check-in request from user {} (clinicId: {})",
                 request.getUserId(),
@@ -56,7 +56,7 @@ public class AttendanceController {
 
     // Chấm công ra
     @PostMapping("/check-out")
-    @org.springframework.security.access.prepost.PreAuthorize("hasAnyRole('DOCTOR', 'HR', 'RECEPTIONIST', 'ACCOUNTANT')")
+    @org.springframework.security.access.prepost.PreAuthorize("hasAnyRole('DOCTOR', 'HR', 'RECEPTION', 'ACCOUNTANT')")
     public ResponseEntity<AttendanceResponse> checkOut(@Valid @RequestBody AttendanceCheckOutRequest request) {
         log.info("Check-out request for attendance {}", request.getAttendanceId());
         AttendanceResponse response = attendanceService.checkOut(request);
@@ -65,7 +65,7 @@ public class AttendanceController {
 
     // Nhận embedding khuôn mặt từ ảnh đầu vào
     @PostMapping("/embedding")
-    @org.springframework.security.access.prepost.PreAuthorize("hasAnyRole('DOCTOR', 'HR', 'RECEPTIONIST', 'ACCOUNTANT')")
+    @org.springframework.security.access.prepost.PreAuthorize("hasAnyRole('DOCTOR', 'HR', 'RECEPTION', 'ACCOUNTANT')")
     public ResponseEntity<java.util.Map<String, String>> extractEmbedding(
             @RequestPart("file") MultipartFile file) throws Exception {
         String embedding = faceRecognitionService.extractEmbedding(file);
@@ -74,7 +74,7 @@ public class AttendanceController {
 
     // Lấy thông tin WiFi từ máy chủ
     @GetMapping("/wifi-info")
-    @org.springframework.security.access.prepost.PreAuthorize("hasAnyRole('DOCTOR', 'HR', 'RECEPTIONIST', 'ACCOUNTANT')")
+    @org.springframework.security.access.prepost.PreAuthorize("hasAnyRole('DOCTOR', 'HR', 'RECEPTION', 'ACCOUNTANT')")
     public ResponseEntity<java.util.Map<String, String>> getHostWiFiInfo() {
         sunshine_dental_care.utils.WindowsWiFiUtil.WiFiInfo wifiInfo =
                 sunshine_dental_care.utils.WindowsWiFiUtil.getCurrentWiFiInfo();
@@ -89,7 +89,7 @@ public class AttendanceController {
 
     // Lấy attendance của user ngày hôm nay
     @GetMapping("/today")
-    @org.springframework.security.access.prepost.PreAuthorize("hasAnyRole('DOCTOR', 'HR', 'RECEPTIONIST', 'ACCOUNTANT')")
+    @org.springframework.security.access.prepost.PreAuthorize("hasAnyRole('DOCTOR', 'HR', 'RECEPTION', 'ACCOUNTANT')")
     public ResponseEntity<AttendanceResponse> getTodayAttendance(
             @RequestParam Integer userId) {
         AttendanceResponse response = attendanceService.getTodayAttendance(userId);
@@ -100,7 +100,7 @@ public class AttendanceController {
 
     // Lấy danh sách tất cả attendance của user ngày hôm nay (cho bác sĩ có nhiều ca)
     @GetMapping("/today-list")
-    @org.springframework.security.access.prepost.PreAuthorize("hasAnyRole('DOCTOR', 'HR', 'RECEPTIONIST', 'ACCOUNTANT')")
+    @org.springframework.security.access.prepost.PreAuthorize("hasAnyRole('DOCTOR', 'HR', 'RECEPTION', 'ACCOUNTANT')")
     public ResponseEntity<java.util.List<AttendanceResponse>> getTodayAttendanceList(
             @RequestParam Integer userId) {
         java.util.List<AttendanceResponse> responses = attendanceService.getTodayAttendanceList(userId);
@@ -109,7 +109,7 @@ public class AttendanceController {
 
     // Lấy lịch sử attendance (có phân trang, HR xem tất cả, thường chỉ xem bản thân)
     @GetMapping("/history")
-    @org.springframework.security.access.prepost.PreAuthorize("hasAnyRole('HR', 'DOCTOR', 'RECEPTIONIST', 'ACCOUNTANT')")
+    @org.springframework.security.access.prepost.PreAuthorize("hasAnyRole('HR', 'DOCTOR', 'RECEPTION', 'ACCOUNTANT')")
     public ResponseEntity<Page<AttendanceResponse>> getAttendanceHistory(
             @RequestParam(required = false) Integer userId,
             @RequestParam(required = false) Integer clinicId,
@@ -164,7 +164,7 @@ public class AttendanceController {
 
     // Lấy chi tiết attendance theo id
     @GetMapping("/{id}")
-    @org.springframework.security.access.prepost.PreAuthorize("hasAnyRole('DOCTOR', 'HR', 'RECEPTIONIST', 'ACCOUNTANT')")
+    @org.springframework.security.access.prepost.PreAuthorize("hasAnyRole('DOCTOR', 'HR', 'RECEPTION', 'ACCOUNTANT')")
     public ResponseEntity<AttendanceResponse> getAttendanceById(@PathVariable Integer id) {
         AttendanceResponse response = attendanceService.getAttendanceById(id);
         return ResponseEntity.ok(response);
@@ -186,7 +186,7 @@ public class AttendanceController {
 
     // Lấy danh sách attendance chi tiết theo ngày (có phân trang)
     @GetMapping("/daily-list")
-    @org.springframework.security.access.prepost.PreAuthorize("hasAnyRole('DOCTOR', 'HR', 'RECEPTIONIST', 'ACCOUNTANT')")
+    @org.springframework.security.access.prepost.PreAuthorize("hasAnyRole('DOCTOR', 'HR', 'RECEPTION', 'ACCOUNTANT')")
     public ResponseEntity<Page<DailyAttendanceListItemResponse>> getDailyAttendanceList(
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate workDate,
             @RequestParam(required = false) Integer departmentId,
@@ -223,7 +223,7 @@ public class AttendanceController {
 
     // Lấy danh sách attendance chi tiết theo tháng (có phân trang)
     @GetMapping("/monthly-list")
-    @org.springframework.security.access.prepost.PreAuthorize("hasAnyRole('DOCTOR', 'HR', 'RECEPTIONIST', 'ACCOUNTANT')")
+    @org.springframework.security.access.prepost.PreAuthorize("hasAnyRole('DOCTOR', 'HR', 'RECEPTION', 'ACCOUNTANT')")
     public ResponseEntity<Page<MonthlyAttendanceListItemResponse>> getMonthlyAttendanceList(
             @RequestParam(required = false) Integer year,
             @RequestParam(required = false) Integer month,
@@ -246,7 +246,7 @@ public class AttendanceController {
 
     // Nhân viên lấy danh sách attendance cần giải trình
     @GetMapping("/explanations/needing")
-    @org.springframework.security.access.prepost.PreAuthorize("hasAnyRole('DOCTOR', 'HR', 'RECEPTIONIST', 'ACCOUNTANT')")
+    @org.springframework.security.access.prepost.PreAuthorize("hasAnyRole('DOCTOR', 'HR', 'RECEPTION', 'ACCOUNTANT')")
     public ResponseEntity<java.util.List<AttendanceExplanationResponse>> getAttendanceNeedingExplanation(
             @RequestParam Integer userId) {
         java.util.List<AttendanceExplanationResponse> explanations =
@@ -256,7 +256,7 @@ public class AttendanceController {
 
     // Nhân viên gửi giải trình
     @PostMapping("/explanations/submit")
-    @org.springframework.security.access.prepost.PreAuthorize("hasAnyRole('DOCTOR', 'HR', 'RECEPTIONIST', 'ACCOUNTANT')")
+    @org.springframework.security.access.prepost.PreAuthorize("hasAnyRole('DOCTOR', 'HR', 'RECEPTION', 'ACCOUNTANT')")
     public ResponseEntity<AttendanceResponse> submitExplanation(
             @Valid @RequestBody AttendanceExplanationRequest request) {
         AttendanceResponse response = attendanceService.submitExplanation(request);
