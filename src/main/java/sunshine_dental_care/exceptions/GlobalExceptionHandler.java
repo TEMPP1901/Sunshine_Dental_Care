@@ -11,14 +11,12 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.security.core.AuthenticationException;
-import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.validation.FieldError;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.security.authentication.BadCredentialsException;
 import sunshine_dental_care.exceptions.auth.DuplicateEmailException;
 import sunshine_dental_care.exceptions.auth.DuplicateUsernameException;
 import sunshine_dental_care.exceptions.hr.AttendanceExceptions.AlreadyCheckedInException;
@@ -345,23 +343,6 @@ public class GlobalExceptionHandler {
 
         log.error("Attendance error: {}", ex.getMessage(), ex);
         return ResponseEntity.badRequest().body(response);
-    }
-
-    // Xử lý catch-all mọi exception chưa biết để tránh leak lỗi ra ngoài (trả về JSON cho FE)
-    /*
-     Xử lý BadCredentialsException (Spring Security)
-     Tác dụng: Xử lý lỗi authentication
-     */
-    @ExceptionHandler(BadCredentialsException.class)
-    public ResponseEntity<Map<String, Object>> handleBadCredentialsException(BadCredentialsException ex) {
-        Map<String, Object> response = new HashMap<>();
-        response.put("timestamp", LocalDateTime.now());
-        response.put("status", HttpStatus.UNAUTHORIZED.value());
-        response.put("error", "Authentication Failed");
-        response.put("message", ex.getMessage());
-
-        log.warn("Bad credentials: {}", ex.getMessage());
-        return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(response);
     }
 
     /*
