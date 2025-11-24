@@ -30,38 +30,25 @@ public class SecurityConfig {
     @Bean
     public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
         http
-                // CORS + CSRF
+                // 1. CORS & CSRF
                 .cors(Customizer.withDefaults())
                 .csrf(AbstractHttpConfigurer::disable)
 
-                // Stateless (JWT)
+                // 2. Stateless Session (Vì dùng JWT)
                 .sessionManagement(sm -> sm.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
 
-                // Disable default error pages (trả về HTML) - để GlobalExceptionHandler xử lý JSON
-                .exceptionHandling(ex -> ex
-                        .authenticationEntryPoint((request, response, authException) -> {
-                            response.setStatus(401);
-                            response.setContentType("application/json;charset=UTF-8");
-                            response.getWriter().write("{\"error\":\"Unauthorized\",\"message\":\"Authentication required\"}");
-                        })
-                        .accessDeniedHandler((request, response, accessDeniedException) -> {
-                            response.setStatus(403);
-                            response.setContentType("application/json;charset=UTF-8");
-                            response.getWriter().write("{\"error\":\"Forbidden\",\"message\":\"Access denied\"}");
-                        })
-                )
-
-                // Authorize
-                // Trả JSON cho 401 & 403 để FE dễ xử lý
+                // 3. Xử lý lỗi 401 (Unauthorized) & 403 (Forbidden) trả về JSON
                 .exceptionHandling(e -> e
                         .authenticationEntryPoint((req, res, ex) -> {
+                            // Trả về JSON nếu là API request
                             String uri = req.getRequestURI();
                             if (uri != null && uri.startsWith("/api/")) {
                                 res.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
                                 res.setContentType("application/json;charset=UTF-8");
-                                res.getWriter().write("{\"message\":\"Unauthorized\"}");
+                                res.getWriter().write("{\"error\":\"Unauthorized\",\"message\":\"Authentication required\"}");
                             } else {
-                                res.sendError(HttpServletResponse.SC_UNAUTHORIZED);
+                                // Redirect login nếu là trang thường (hoặc mặc định)
+                                res.sendError(HttpServletResponse.SC_UNAUTHORIZED, ex.getMessage());
                             }
                         })
                         .accessDeniedHandler((req, res, ex) -> {
@@ -69,43 +56,57 @@ public class SecurityConfig {
                             if (uri != null && uri.startsWith("/api/")) {
                                 res.setStatus(HttpServletResponse.SC_FORBIDDEN);
                                 res.setContentType("application/json;charset=UTF-8");
-                                res.getWriter().write("{\"message\":\"Forbidden\"}");
+                                res.getWriter().write("{\"error\":\"Forbidden\",\"message\":\"Access denied\"}");
                             } else {
-                                res.sendError(HttpServletResponse.SC_FORBIDDEN);
+                                res.sendError(HttpServletResponse.SC_FORBIDDEN, ex.getMessage());
                             }
                         })
                 )
 
+                // 4. Phân quyền URL
                 .authorizeHttpRequests(auth -> auth
-                        // Preflight
+                        // Preflight requests
                         .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
 
-                        // Public endpoints
+                        // --- CÁC API CÔNG KHAI (KHÔNG CẦN LOGIN) ---
                         .requestMatchers("/locale").permitAll()
                         .requestMatchers("/uploads_avatar/**").permitAll()
-                        .requestMatchers("/api/auth/sign-up", "/api/auth/login").permitAll()
-                        .requestMatchers("/api/auth/google", "/oauth2/**", "/login/oauth2/**").permitAll()
+
+                        // Auth Endpoints
+                        .requestMatchers(
+                                "/api/auth/sign-up",
+                                "/api/auth/login",
+                                "/api/auth/google",
+                                "/oauth2/**",
+                                "/login/oauth2/**",
+
+                                // === THÊM 2 DÒNG NÀY ĐỂ FIX LỖI 401 ===
+                                "/api/auth/forgot-password",
+                                "/api/auth/reset-password"
+                        ).permitAll()
 
 
-                        // Authenticated endpoints
+                        // --- CÁC API CẦN LOGIN ---
                         .requestMatchers(HttpMethod.POST, "/api/auth/change-password").authenticated()
 
-                        // Additional auth endpoints
-                        .requestMatchers("/auth/sign-up").permitAll()  // Cho phép đăng ký PATIENT
-                        .requestMatchers("/api/hr/employees/**").hasRole("HR")  // Chỉ HR được phép
+                        // Phân quyền theo Role
+                        .requestMatchers("/api/hr/employees/**").hasRole("HR")
+                        .requestMatchers("/api/hr/management/**").hasRole("HR")
                         .requestMatchers("/api/admin/**").hasRole("ADMIN")
-                        .requestMatchers("/api/hr/management/**").hasRole("HR")  // HR Management endpoints
+
+                        // Tất cả request còn lại phải đăng nhập
                         .anyRequest().authenticated()
                 )
 
-                // OAuth2 login
+                // 5. Cấu hình OAuth2 (Google Login)
                 .oauth2Login(oauth -> oauth
                         .userInfoEndpoint(u -> u.userService(oAuth2UserService))
                         .successHandler(oAuth2SuccessHandler)
                 )
 
-                // JWT filter
+                // 6. Thêm Filter JWT
                 .addFilterBefore(jwtAuthFilter, UsernamePasswordAuthenticationFilter.class);
+
         return http.build();
     }
 }

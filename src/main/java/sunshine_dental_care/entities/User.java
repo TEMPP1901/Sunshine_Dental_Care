@@ -75,10 +75,18 @@ public class User {
     @Column(name = "isActive", nullable = false)
     private Boolean isActive = false;
 
-    // --- THÊM CỘT ĐẾM SỐ LẦN SAI ---
+    // --- ĐẾM SỐ LẦN NHẬP SAI PASS ---
     @ColumnDefault("0")
     @Column(name = "failedLoginAttempts")
     private Integer failedLoginAttempts = 0;
+
+    // --- [MỚI] TOKEN RESET PASSWORD ---
+    @Column(name = "resetPasswordToken", length = 64)
+    private String resetPasswordToken;
+
+    // --- [MỚI] THỜI GIAN HẾT HẠN TOKEN ---
+    @Column(name = "resetPasswordTokenExpiry")
+    private Instant resetPasswordTokenExpiry;
 
     @ColumnDefault("sysutcdatetime()")
     @Column(name = "createdAt", nullable = false)
@@ -140,9 +148,15 @@ public class User {
     public Boolean getIsActive() { return isActive; }
     public void setIsActive(Boolean isActive) { this.isActive = isActive; }
 
-    // Getter/Setter cho failedLoginAttempts
     public Integer getFailedLoginAttempts() { return failedLoginAttempts == null ? 0 : failedLoginAttempts; }
     public void setFailedLoginAttempts(Integer failedLoginAttempts) { this.failedLoginAttempts = failedLoginAttempts; }
+
+    // Getter & Setter cho Reset Password
+    public String getResetPasswordToken() { return resetPasswordToken; }
+    public void setResetPasswordToken(String resetPasswordToken) { this.resetPasswordToken = resetPasswordToken; }
+
+    public Instant getResetPasswordTokenExpiry() { return resetPasswordTokenExpiry; }
+    public void setResetPasswordTokenExpiry(Instant resetPasswordTokenExpiry) { this.resetPasswordTokenExpiry = resetPasswordTokenExpiry; }
 
     public Instant getCreatedAt() { return createdAt; }
     public void setCreatedAt(Instant createdAt) { this.createdAt = createdAt; }
@@ -166,7 +180,7 @@ public class User {
     void prePersist() {
         if (createdAt == null) createdAt = Instant.now();
         if (updatedAt == null) updatedAt = createdAt;
-        if (failedLoginAttempts == null) failedLoginAttempts = 0; // Đảm bảo không null
+        if (failedLoginAttempts == null) failedLoginAttempts = 0;
     }
 
     @PreUpdate

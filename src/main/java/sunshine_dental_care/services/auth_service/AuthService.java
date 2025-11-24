@@ -6,4 +6,6 @@ public interface AuthService {
     SignUpResponse signUp(SignUpRequest req);
     LoginResponse login(LoginRequest req);
     void changePassword(Integer currentUserId, ChangePasswordRequest req);
+    void forgotPassword(ForgotPasswordRequest req);
+    void resetPassword(ResetPasswordRequest req);
 }
