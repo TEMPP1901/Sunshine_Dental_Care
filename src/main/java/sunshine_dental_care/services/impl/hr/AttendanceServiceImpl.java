@@ -600,16 +600,22 @@ public class AttendanceServiceImpl implements AttendanceService {
             long minutesLate = 0;
             if (checkInLocalTime.isAfter(expectedStartTime)) {
                 minutesLate = java.time.Duration.between(expectedStartTime, checkInLocalTime).toMinutes();
+                attendance.setLateMinutes((int) minutesLate); // Lưu số phút đi trễ vào DB
                 log.info("User {} checked in LATE: {} minutes late (expected: {}, actual: {})",
                         attendance.getUserId(), minutesLate, expectedStartTime, checkInLocalTime);
+            } else {
+                attendance.setLateMinutes(0); // Không đi trễ
             }
             
             // Trừ giờ ra sớm (nếu check-out trước expectedEndTime)
             long minutesEarly = 0;
             if (checkOutLocalTime.isBefore(expectedEndTime)) {
                 minutesEarly = java.time.Duration.between(checkOutLocalTime, expectedEndTime).toMinutes();
+                attendance.setEarlyMinutes((int) minutesEarly); // Lưu số phút ra sớm vào DB
                 log.info("User {} checked out EARLY: {} minutes early (expected: {}, actual: {})",
                         attendance.getUserId(), minutesEarly, expectedEndTime, checkOutLocalTime);
+            } else {
+                attendance.setEarlyMinutes(0); // Không ra sớm
             }
             
             // Trừ giờ nghỉ trưa cho nhân viên (2 giờ = 120 phút)
@@ -618,9 +624,14 @@ public class AttendanceServiceImpl implements AttendanceService {
             if (!isDoctor) {
                 if (checkInLocalTime.isBefore(LUNCH_BREAK_START) && checkOutLocalTime.isAfter(LUNCH_BREAK_END)) {
                     lunchBreakMinutes = 120; // 2 giờ nghỉ trưa
+                    attendance.setLunchBreakMinutes(120); // Lưu số phút nghỉ trưa vào DB
                     log.info("Employee {} worked through lunch break, subtracting 120 minutes (2 hours)",
                             attendance.getUserId());
+                } else {
+                    attendance.setLunchBreakMinutes(0); // Không có nghỉ trưa
                 }
+            } else {
+                attendance.setLunchBreakMinutes(0); // Bác sĩ không có nghỉ trưa
             }
             
             // Tính actualWorkHours = tổng thời gian - giờ đi trễ - giờ ra sớm - giờ nghỉ trưa
@@ -979,18 +990,17 @@ public class AttendanceServiceImpl implements AttendanceService {
         response.setCheckInTime(attendance.getCheckInTime());
         response.setCheckOutTime(attendance.getCheckOutTime());
         response.setCheckInMethod(attendance.getCheckInMethod());
-        response.setDeviceId(attendance.getDeviceId());
-        response.setIpAddr(attendance.getIpAddr());
-        response.setSsid(attendance.getSsid());
-        response.setBssid(attendance.getBssid());
-        response.setLat(attendance.getLat());
-        response.setLng(attendance.getLng());
         response.setIsOvertime(attendance.getIsOvertime());
         response.setNote(attendance.getNote());
         response.setFaceMatchScore(attendance.getFaceMatchScore());
         response.setVerificationStatus(attendance.getVerificationStatus());
         response.setAttendanceStatus(attendance.getAttendanceStatus());
         response.setShiftType(attendance.getShiftType());
+        response.setActualWorkHours(attendance.getActualWorkHours());
+        response.setExpectedWorkHours(attendance.getExpectedWorkHours());
+        response.setLateMinutes(attendance.getLateMinutes());
+        response.setEarlyMinutes(attendance.getEarlyMinutes());
+        response.setLunchBreakMinutes(attendance.getLunchBreakMinutes());
 
         if (wifiResult != null) {
             response.setWifiValid(wifiResult.isValid());

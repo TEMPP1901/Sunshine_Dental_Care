@@ -20,12 +20,6 @@ public class AttendanceResponse {
     private Instant checkInTime;
     private Instant checkOutTime;
     private String checkInMethod;
-    private String deviceId;
-    private String ipAddr;
-    private String ssid;
-    private String bssid;
-    private BigDecimal lat;
-    private BigDecimal lng;
     private Boolean isOvertime;
     private String note;
     
@@ -38,6 +32,15 @@ public class AttendanceResponse {
     
     // Shift type (for doctors: MORNING, AFTERNOON, FULL_DAY)
     private String shiftType;  // MORNING, AFTERNOON, FULL_DAY
+    
+    // Work hours
+    private BigDecimal actualWorkHours;  // Số giờ làm việc thực tế (đã trừ đi trễ, ra sớm, nghỉ trưa)
+    private BigDecimal expectedWorkHours;  // Số giờ làm việc theo lịch
+    
+    // Time tracking details
+    private Integer lateMinutes;  // Số phút đi trễ
+    private Integer earlyMinutes;  // Số phút ra sớm
+    private Integer lunchBreakMinutes;  // Số phút nghỉ trưa
     
     // WiFi validation results
     private Boolean wifiValid;
@@ -134,55 +137,7 @@ public class AttendanceResponse {
     public void setCheckInMethod(String checkInMethod) {
         this.checkInMethod = checkInMethod;
     }
-    
-    public String getDeviceId() {
-        return deviceId;
-    }
-    
-    public void setDeviceId(String deviceId) {
-        this.deviceId = deviceId;
-    }
-    
-    public String getIpAddr() {
-        return ipAddr;
-    }
-    
-    public void setIpAddr(String ipAddr) {
-        this.ipAddr = ipAddr;
-    }
-    
-    public String getSsid() {
-        return ssid;
-    }
-    
-    public void setSsid(String ssid) {
-        this.ssid = ssid;
-    }
-    
-    public String getBssid() {
-        return bssid;
-    }
-    
-    public void setBssid(String bssid) {
-        this.bssid = bssid;
-    }
-    
-    public BigDecimal getLat() {
-        return lat;
-    }
-    
-    public void setLat(BigDecimal lat) {
-        this.lat = lat;
-    }
-    
-    public BigDecimal getLng() {
-        return lng;
-    }
-    
-    public void setLng(BigDecimal lng) {
-        this.lng = lng;
-    }
-    
+
     public Boolean getIsOvertime() {
         return isOvertime;
     }
@@ -229,6 +184,46 @@ public class AttendanceResponse {
     
     public void setShiftType(String shiftType) {
         this.shiftType = shiftType;
+    }
+    
+    public BigDecimal getActualWorkHours() {
+        return actualWorkHours;
+    }
+    
+    public void setActualWorkHours(BigDecimal actualWorkHours) {
+        this.actualWorkHours = actualWorkHours;
+    }
+    
+    public BigDecimal getExpectedWorkHours() {
+        return expectedWorkHours;
+    }
+    
+    public void setExpectedWorkHours(BigDecimal expectedWorkHours) {
+        this.expectedWorkHours = expectedWorkHours;
+    }
+    
+    public Integer getLateMinutes() {
+        return lateMinutes;
+    }
+    
+    public void setLateMinutes(Integer lateMinutes) {
+        this.lateMinutes = lateMinutes;
+    }
+    
+    public Integer getEarlyMinutes() {
+        return earlyMinutes;
+    }
+    
+    public void setEarlyMinutes(Integer earlyMinutes) {
+        this.earlyMinutes = earlyMinutes;
+    }
+    
+    public Integer getLunchBreakMinutes() {
+        return lunchBreakMinutes;
+    }
+    
+    public void setLunchBreakMinutes(Integer lunchBreakMinutes) {
+        this.lunchBreakMinutes = lunchBreakMinutes;
     }
     
     public Boolean getWifiValid() {

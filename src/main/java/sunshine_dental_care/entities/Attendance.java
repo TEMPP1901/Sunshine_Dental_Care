@@ -41,28 +41,6 @@ public class Attendance {
     @Column(name = "checkInMethod", length = 50)
     private String checkInMethod;
 
-    @Nationalized
-    @Column(name = "deviceId", length = 120)
-    private String deviceId;
-
-    @Nationalized
-    @Column(name = "ipAddr", length = 50)
-    private String ipAddr;
-
-    @Nationalized
-    @Column(name = "ssid", length = 100)
-    private String ssid;
-
-    @Nationalized
-    @Column(name = "bssid", length = 100)
-    private String bssid;
-
-    @Column(name = "lat", precision = 9, scale = 6)
-    private BigDecimal lat;
-
-    @Column(name = "lng", precision = 9, scale = 6)
-    private BigDecimal lng;
-
     @ColumnDefault("0")
     @Column(name = "isOvertime", nullable = false)
     private Boolean isOvertime = false;
@@ -95,6 +73,27 @@ public class Attendance {
      */
     @Column(name = "expectedWorkHours", precision = 5, scale = 2)
     private BigDecimal expectedWorkHours; // Ví dụ: 3.0 giờ
+
+    /**
+     * Số phút đi trễ (nếu check-in sau expectedStartTime)
+     * Dùng để thống kê và báo cáo
+     */
+    @Column(name = "lateMinutes")
+    private Integer lateMinutes;
+
+    /**
+     * Số phút ra sớm (nếu check-out trước expectedEndTime)
+     * Dùng để thống kê và báo cáo
+     */
+    @Column(name = "earlyMinutes")
+    private Integer earlyMinutes;
+
+    /**
+     * Số phút nghỉ trưa (chỉ cho nhân viên FULL_DAY)
+     * Mặc định: 120 phút (2 giờ) nếu check-in trước 11:00 và check-out sau 13:00
+     */
+    @Column(name = "lunchBreakMinutes")
+    private Integer lunchBreakMinutes;
 
     // Face Recognition fields
     @Column(name = "faceMatchScore", precision = 5, scale = 4)
@@ -200,54 +199,6 @@ public class Attendance {
         this.checkInMethod = checkInMethod;
     }
 
-    public String getDeviceId() {
-        return deviceId;
-    }
-
-    public void setDeviceId(String deviceId) {
-        this.deviceId = deviceId;
-    }
-
-    public String getIpAddr() {
-        return ipAddr;
-    }
-
-    public void setIpAddr(String ipAddr) {
-        this.ipAddr = ipAddr;
-    }
-
-    public String getSsid() {
-        return ssid;
-    }
-
-    public void setSsid(String ssid) {
-        this.ssid = ssid;
-    }
-
-    public String getBssid() {
-        return bssid;
-    }
-
-    public void setBssid(String bssid) {
-        this.bssid = bssid;
-    }
-
-    public BigDecimal getLat() {
-        return lat;
-    }
-
-    public void setLat(BigDecimal lat) {
-        this.lat = lat;
-    }
-
-    public BigDecimal getLng() {
-        return lng;
-    }
-
-    public void setLng(BigDecimal lng) {
-        this.lng = lng;
-    }
-
     public Boolean getIsOvertime() {
         return isOvertime;
     }
@@ -326,6 +277,30 @@ public class Attendance {
 
     public void setExpectedWorkHours(BigDecimal expectedWorkHours) {
         this.expectedWorkHours = expectedWorkHours;
+    }
+
+    public Integer getLateMinutes() {
+        return lateMinutes;
+    }
+
+    public void setLateMinutes(Integer lateMinutes) {
+        this.lateMinutes = lateMinutes;
+    }
+
+    public Integer getEarlyMinutes() {
+        return earlyMinutes;
+    }
+
+    public void setEarlyMinutes(Integer earlyMinutes) {
+        this.earlyMinutes = earlyMinutes;
+    }
+
+    public Integer getLunchBreakMinutes() {
+        return lunchBreakMinutes;
+    }
+
+    public void setLunchBreakMinutes(Integer lunchBreakMinutes) {
+        this.lunchBreakMinutes = lunchBreakMinutes;
     }
 
 }
