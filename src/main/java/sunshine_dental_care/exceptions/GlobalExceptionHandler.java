@@ -25,8 +25,6 @@ import sunshine_dental_care.exceptions.hr.AttendanceExceptions.AttendanceNotFoun
 import sunshine_dental_care.exceptions.hr.AttendanceExceptions.AttendanceValidationException;
 import sunshine_dental_care.exceptions.hr.AttendanceExceptions.FaceVerificationFailedException;
 import sunshine_dental_care.exceptions.hr.AttendanceExceptions.WiFiValidationFailedException;
-import sunshine_dental_care.exceptions.auth.DuplicateEmailException;
-import sunshine_dental_care.exceptions.auth.DuplicateUsernameException;
 import sunshine_dental_care.exceptions.hr.DoctorNotAvailableException;
 import sunshine_dental_care.exceptions.hr.EmployeeExceptions.EmployeeException;
 import sunshine_dental_care.exceptions.hr.EmployeeExceptions.EmployeeNotFoundException;
@@ -424,53 +422,6 @@ public class GlobalExceptionHandler {
         return buildConflictResponse("username", ex.getMessage());
     }
 
-    //Handle xử lí lỗi ném ra từ SQL:
-    @ExceptionHandler(DataIntegrityViolationException.class)
-    public ResponseEntity<Map<String, Object>> handleUniqueConstraint(DataIntegrityViolationException ex) {
-        String message = ex.getMostSpecificCause() != null
-                ? ex.getMostSpecificCause().getMessage()
-                : ex.getMessage();
-
-        Map<String, String> errors = new HashMap<>();
-
-        // Check constraint trong thông báo SQL để xác định field trùng
-        if (message != null) {
-            String msgLower = message.toLowerCase();
-
-            // Check trùng phone trong DB
-            if (msgLower.contains("uq_users_phone") || msgLower.contains("uq__users__phone")) {
-                errors.put("phone", "Phone number is already registered");
-            } else {
-                errors.put("general", "Duplicate data in unique field");
-            }
-        }
-
-        Map<String, Object> body = new HashMap<>();
-        body.put("timestamp", LocalDateTime.now());
-        body.put("status", HttpStatus.CONFLICT.value());
-        body.put("error", "Conflict");
-        body.put("message", "Duplicate field value");
-        body.put("errors", errors);
-
-        log.warn("Unique constraint violation: {}", message);
-        return ResponseEntity.status(HttpStatus.CONFLICT).body(body);
-    }
-
-    // Helper nội bộ trả response 409 conflict
-    private ResponseEntity<Map<String, Object>> buildConflictResponse(String field, String message) {
-        Map<String, String> errors = new HashMap<>();
-        errors.put(field, message);
-
-        Map<String, Object> body = new HashMap<>();
-        body.put("timestamp", LocalDateTime.now());
-        body.put("status", HttpStatus.CONFLICT.value());
-        body.put("error", "Conflict");
-        body.put("message", message);
-        body.put("errors", errors);
-
-        return ResponseEntity.status(HttpStatus.CONFLICT).body(body);
-    }
-
     // Xử lí validation BadCredentialsException cho phương thức login bên ServiceImp
     @ExceptionHandler(BadCredentialsException.class)
     public ResponseEntity<Map<String, Object>> handleBadCredentials(BadCredentialsException ex) {
@@ -487,17 +438,5 @@ public class GlobalExceptionHandler {
         body.put("errors", errors);
 
         return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(body);
-    }
-
-    // Xử lí validation trùng email
-    @ExceptionHandler(DuplicateEmailException.class)
-    public ResponseEntity<Map<String, Object>> handleDuplicateEmail(DuplicateEmailException ex) {
-        return buildConflictResponse("email", ex.getMessage());
-    }
-
-    // Xử lí validate trùng username
-    @ExceptionHandler(DuplicateUsernameException.class)
-    public ResponseEntity<Map<String, Object>> handleDuplicateUsername(DuplicateUsernameException ex) {
-        return buildConflictResponse("username", ex.getMessage());
     }
 }
