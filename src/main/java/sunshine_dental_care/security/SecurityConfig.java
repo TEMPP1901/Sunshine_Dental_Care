@@ -96,6 +96,14 @@ public class SecurityConfig {
                         // Authenticated endpoints
                         .requestMatchers(HttpMethod.POST, "/api/auth/change-password").authenticated()
 
+                        .requestMatchers("/api/public/**").permitAll()
+
+                        // Cho phép mọi user đã login (bao gồm Patient) xem slot và đặt lịch
+                        .requestMatchers("/api/booking/**").authenticated()
+
+                        // === only Reception and Admin can access role reception API  ===
+                        .requestMatchers("/api/reception/**").hasAnyRole("RECEPTION", "ADMIN")
+
                         // Additional auth endpoints
                         .requestMatchers("/auth/sign-up").permitAll()  // Cho phép đăng ký PATIENT
                         .requestMatchers("/api/hr/employees/doctors").authenticated()  // Cho phép authenticated users xem danh sách bác sĩ

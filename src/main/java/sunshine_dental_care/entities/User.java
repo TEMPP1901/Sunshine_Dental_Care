@@ -97,6 +97,10 @@ public class User {
     @OneToMany(mappedBy = "doctor", cascade = CascadeType.ALL, fetch = FetchType.LAZY, orphanRemoval = true)
     private List<DoctorSpecialty> doctorSpecialties;
 
+    @OneToMany(mappedBy = "user", fetch = FetchType.LAZY) // mappedBy trỏ đến trường 'user' trong UserRole
+    private List<UserRole> userRoles;
+
+
     public Integer getId() {
         return id;
     }
@@ -234,6 +238,14 @@ public class User {
 
     public void setDoctorSpecialties(List<DoctorSpecialty> doctorSpecialties) {
         this.doctorSpecialties = doctorSpecialties;
+    }
+
+    public List<UserRole> getUserRoles() {
+        return userRoles;
+    }
+
+    public void setUserRoles(List<UserRole> userRoles) {
+        this.userRoles = userRoles;
     }
 
     @PrePersist

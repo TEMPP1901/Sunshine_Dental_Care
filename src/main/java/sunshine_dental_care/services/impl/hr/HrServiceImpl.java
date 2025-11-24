@@ -173,7 +173,10 @@ public class HrServiceImpl implements HrService {
                         doctor.getEmail(),
                         doctor.getPhone(),
                         doctor.getAvatarUrl(),
-                        doctor.getCode()
+                        doctor.getCode(),
+                        doctor.getSpecialty(), // Specialty
+                        null, // DepartmentResponse (Cần phải map nếu muốn truyền)
+                        List.of()
                 );
                 dto.setDoctor(doctorDto);
             }
