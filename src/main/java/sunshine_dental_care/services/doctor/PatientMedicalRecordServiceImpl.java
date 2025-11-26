@@ -31,10 +31,19 @@ import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 
 @Service
 @RequiredArgsConstructor
 public class PatientMedicalRecordServiceImpl implements PatientMedicalRecordService {
+
+    private static final long MAX_IMAGE_BYTES = 5 * 1024 * 1024; // 5MB
+    private static final Set<String> ALLOWED_CONTENT_TYPES = Set.of(
+            "image/jpeg",
+            "image/png",
+            "image/jpg",
+            "image/webp"
+    );
 
     private final MedicalRecordRepository medicalRecordRepository;
     private final PatientRepo patientRepo;
@@ -131,6 +140,8 @@ public class PatientMedicalRecordServiceImpl implements PatientMedicalRecordServ
     @Override
     @Transactional
     public MedicalRecordImageDTO uploadImage(Integer patientId, Integer recordId, MultipartFile file, String description, String aiTag) {
+        validateImage(file);
+
         // Lấy hồ sơ cần đính kèm ảnh, nếu không có thì báo lỗi
         MedicalRecord record = getRecord(patientId, recordId);
 
@@ -192,6 +203,20 @@ public class PatientMedicalRecordServiceImpl implements PatientMedicalRecordServ
             }
             record.setUpdatedAt(Instant.now());
             medicalRecordRepository.save(record);
+        }
+    }
+
+    private void validateImage(MultipartFile file) {
+        if (file == null || file.isEmpty()) {
+            throw new IllegalArgumentException("Image file is required");
+        }
+        if (file.getSize() > MAX_IMAGE_BYTES) {
+            throw new IllegalArgumentException("Image size must be <= 5MB");
+        }
+
+        String contentType = file.getContentType();
+        if (contentType == null || !ALLOWED_CONTENT_TYPES.contains(contentType.toLowerCase())) {
+            throw new IllegalArgumentException("Unsupported image type. Allowed: jpeg, jpg, png, webp");
         }
     }
 
