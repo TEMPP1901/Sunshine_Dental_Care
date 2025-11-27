@@ -22,6 +22,10 @@ public class AppointmentService {
     @JoinColumn(name = "serviceId", nullable = false)
     private Service service;
 
+    @ManyToOne(fetch = FetchType.LAZY, optional = false)
+    @JoinColumn(name = "variantId", nullable = false)
+    private ServiceVariant serviceVariant;
+
     @ColumnDefault("1")
     @Column(name = "quantity", nullable = false)
     private Integer quantity;
@@ -50,6 +54,14 @@ public class AppointmentService {
 
     public void setAppointment(Appointment appointment) {
         this.appointment = appointment;
+    }
+
+
+    public ServiceVariant getServiceVariant() {
+        return serviceVariant;
+    }
+    public void setServiceVariant(ServiceVariant serviceVariant) {
+        this.serviceVariant = serviceVariant;
     }
 
     public Service getService() {

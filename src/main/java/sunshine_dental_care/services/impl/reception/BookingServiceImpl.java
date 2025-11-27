@@ -7,9 +7,10 @@ import sunshine_dental_care.dto.receptionDTO.bookingDto.BookingSlotRequest;
 import sunshine_dental_care.dto.receptionDTO.bookingDto.TimeSlotResponse;
 import sunshine_dental_care.entities.Appointment;
 import sunshine_dental_care.entities.DoctorSchedule;
+import sunshine_dental_care.entities.ServiceVariant;
 import sunshine_dental_care.repositories.hr.DoctorScheduleRepo;
 import sunshine_dental_care.repositories.reception.AppointmentRepo;
-import sunshine_dental_care.repositories.reception.ServiceRepo;
+import sunshine_dental_care.repositories.reception.ServiceVariantRepo;
 import sunshine_dental_care.services.interfaces.reception.BookingService;
 
 import java.time.LocalTime;
@@ -23,7 +24,7 @@ import java.util.List;
 public class BookingServiceImpl implements BookingService {
     private final DoctorScheduleRepo doctorScheduleRepo;
     private final AppointmentRepo appointmentRepo;
-    private final ServiceRepo serviceRepo;
+    private final ServiceVariantRepo serviceVariantRepo;
 
     private static final List<LocalTime> FIXED_SLOTS = List.of(
             LocalTime.of(8, 0), LocalTime.of(9, 0), LocalTime.of(10, 0),
@@ -33,25 +34,25 @@ public class BookingServiceImpl implements BookingService {
             LocalTime.of(16, 0), LocalTime.of(17, 0), LocalTime.of(18, 0)
     );
 
+
     @Override
     public List<TimeSlotResponse> getAvailableSlots(BookingSlotRequest request) {
         List<TimeSlotResponse> responseSlots = new ArrayList<>();
 
-        // 1. TÍNH TỔNG THỜI GIAN TỪ DANH SÁCH SERVICE IDs
-        List<Integer> serviceIds = request.getServiceIds();
-        if (serviceIds == null || serviceIds.isEmpty()) {
-            // Fallback nếu FE gửi sai
+        // 1. TÍNH TỔNG THỜI GIAN TỪ variantsId
+        List<Integer> variantIds = request.getServiceIds();
+        if (variantIds == null || variantIds.isEmpty()) {
             return generateAllBusySlots();
         }
 
-        List<sunshine_dental_care.entities.Service> selectedServices = serviceRepo.findAllById(serviceIds);
+        // Tìm các Variants theo ID gửi lên
+        List<ServiceVariant> selectedVariants = serviceVariantRepo.findAllById(variantIds);
 
-        int totalMinutes = selectedServices.stream()
-                .mapToInt(s -> s.getDefaultDuration() != null ? s.getDefaultDuration() : 60)
+        // Cộng tổng duration từ các Variant
+        int totalMinutes = selectedVariants.stream()
+                .mapToInt(v -> v.getDuration() != null ? v.getDuration() : 60)
                 .sum();
 
-        // Thời lượng booking (ít nhất là 60 phút để khớp slot)
-        // Nếu tổng 30p -> Làm tròn lên 60p. Nếu 90p -> Giữ 90p.
         int durationMinutes = Math.max(60, totalMinutes);
 
         log.info("Calculating Slots for Doctor {}. Total Duration: {} mins", request.getDoctorId(), durationMinutes);
@@ -85,7 +86,11 @@ public class BookingServiceImpl implements BookingService {
 
             // CHECK 1: Nằm trong ca làm việc
             for (DoctorSchedule sch : validSchedules) {
-                // Phải nằm trọn vẹn trong ca
+                /* code dài dòng hơn nếu ko dùng phủ định !
+                (slotStart.isAfter(schStart) || slotStart.equals(schStart))
+                &&
+                (slotEnd.isBefore(schEnd) || slotEnd.equals(schEnd))*/
+
                 if (!slotStart.isBefore(sch.getStartTime()) && !slotEnd.isAfter(sch.getEndTime())) {
                     isAvailable = true;
                     break;
@@ -116,7 +121,7 @@ public class BookingServiceImpl implements BookingService {
      * Helper: Kiểm tra xem khoảng [start, end] có trùng với bất kỳ lịch hẹn nào không
      */
     private boolean isTimeOverlap(LocalTime start, LocalTime end, List<Appointment> existingAppointments) {
-        ZoneId zoneId = ZoneId.of("Asia/Ho_Chi_Minh"); // Fix cứng Zone VN
+        ZoneId zoneId = ZoneId.of("Asia/Ho_Chi_Minh");
 
         for (Appointment app : existingAppointments) {
             LocalTime appStart = app.getStartDateTime().atZone(zoneId).toLocalTime();
