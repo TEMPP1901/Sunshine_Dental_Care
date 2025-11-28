@@ -59,5 +59,14 @@ public interface LeaveRequestRepo extends JpaRepository<LeaveRequest, Integer> {
     
     // Lấy leave request pending với phân trang
     Page<LeaveRequest> findByStatusOrderByCreatedAtDesc(String status, Pageable pageable);
+    
+    // ✅ Batch query: Lấy tất cả approved leave requests cho nhiều doctors trong khoảng thời gian
+    @Query("SELECT lr FROM LeaveRequest lr WHERE lr.user.id IN :userIds " +
+           "AND lr.status = 'APPROVED' " +
+           "AND lr.startDate <= :endDate AND lr.endDate >= :startDate")
+    List<LeaveRequest> findApprovedByUserIdsAndDateRange(
+        @Param("userIds") List<Integer> userIds,
+        @Param("startDate") LocalDate startDate,
+        @Param("endDate") LocalDate endDate);
 }
 

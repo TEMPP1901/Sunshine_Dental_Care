@@ -76,12 +76,30 @@ public class HrController {
     
     // 4. AI GENERATE SCHEDULE
     @PostMapping("/ai/generate")
-    public ResponseEntity<CreateWeeklyScheduleRequest> generateScheduleFromDescription(
+    public ResponseEntity<?> generateScheduleFromDescription(
             @RequestBody Map<String, Object> request) {
-        LocalDate weekStart = LocalDate.parse((String) request.get("weekStart"));
-        String description = (String) request.get("description");
-        CreateWeeklyScheduleRequest generatedRequest = aiScheduleGenerationService.generateScheduleFromDescription(weekStart, description);
-        return ResponseEntity.ok(generatedRequest);
+        try {
+            LocalDate weekStart = LocalDate.parse((String) request.get("weekStart"));
+            String description = (String) request.get("description");
+            CreateWeeklyScheduleRequest generatedRequest = aiScheduleGenerationService.generateScheduleFromDescription(weekStart, description);
+            
+            // ✅ Lớp 3: Trả về warnings nếu có (để frontend hiển thị)
+            // Note: Warnings được log trong service, nhưng có thể thêm vào response nếu cần
+            // Hiện tại trả về schedule, frontend có thể gọi validate endpoint để lấy warnings
+            
+            return ResponseEntity.ok(generatedRequest);
+        } catch (IllegalArgumentException e) {
+            // Validation errors from AI generation
+            return ResponseEntity.badRequest().body(Map.of(
+                "error", "Validation failed",
+                "message", e.getMessage()
+            ));
+        } catch (Exception e) {
+            return ResponseEntity.status(500).body(Map.of(
+                "error", "AI generation failed",
+                "message", e.getMessage()
+            ));
+        }
     }
     
     // 5. AI GENERATE SCHEDULE TỪ PROMPT TÙY CHỈNH

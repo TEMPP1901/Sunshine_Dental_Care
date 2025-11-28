@@ -182,7 +182,7 @@ public class AttendanceReportService {
             boolean isDoctor = roles != null && roles.stream()
                     .anyMatch(ur -> attendanceStatusCalculator.isDoctorRole(ur));
 
-            // QUAN TRỌNG: BÁC SĨ LUÔN ĐƯỢC CHECK VÀ CẬP NHẬT ABSENT THEO CA LỊCH
+            //  BÁC SĨ LUÔN ĐƯỢC CHECK VÀ CẬP NHẬT ABSENT THEO CA LỊCH
             if (isDoctor) {
                 try {
                     // ĐÁNH DẤU VẮNG DỰA THEO LỊCH ĐI LÀM CỦA BÁC SĨ

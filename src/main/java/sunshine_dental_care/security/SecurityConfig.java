@@ -84,10 +84,9 @@ public class SecurityConfig {
                         // Public endpoints
                         .requestMatchers("/locale").permitAll()
                         .requestMatchers("/uploads_avatar/**").permitAll()
+                        .requestMatchers("/uploads/**").permitAll() // Public product images *huybro
                         .requestMatchers("/api/auth/sign-up", "/api/auth/login").permitAll()
                         .requestMatchers("/api/auth/google", "/oauth2/**", "/login/oauth2/**").permitAll()
-                        .requestMatchers( "/api/products/**").permitAll() // Public endpoints products *huybro
-
                         .requestMatchers( "/api/products/**").permitAll() // Public endpoints products *huybro
 
                         .requestMatchers("/api/doctor/**","/api/patients/{patientId}/records/**").hasRole("DOCTOR") // Chỉ bác sĩ được phép,
