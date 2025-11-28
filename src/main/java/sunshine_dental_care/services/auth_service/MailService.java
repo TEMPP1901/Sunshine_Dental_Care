@@ -7,6 +7,7 @@ import org.springframework.mail.javamail.JavaMailSender;
 import org.springframework.mail.javamail.MimeMessageHelper;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 import sunshine_dental_care.entities.EmailLog;
 import sunshine_dental_care.entities.EmailTemplate;
@@ -14,7 +15,7 @@ import sunshine_dental_care.entities.Patient;
 import sunshine_dental_care.entities.User;
 import sunshine_dental_care.repositories.auth.EmailLogRepo;
 import sunshine_dental_care.repositories.auth.EmailTemplateRepo;
-import sunshine_dental_care.repositories.auth.PatientRepo; // <--- Cần import PatientRepo
+import sunshine_dental_care.repositories.auth.PatientRepo;
 
 import java.math.BigDecimal;
 import java.time.Instant;
@@ -28,8 +29,6 @@ public class MailService {
     private final EmailLogRepo emailLogRepo;
     private final EmailTemplateRepo templateRepo;
     private final Environment env;
-
-    // --- INJECT THÊM REPO NÀY ĐỂ TÌM PATIENT TỪ USER ---
     private final PatientRepo patientRepo;
 
     private String resolveFromAddress() {
@@ -47,36 +46,92 @@ public class MailService {
     }
 
     // =================================================================
-    // HÀM 1: Dành cho SignUp (Đã có sẵn object Patient)
+    // 1. GỬI MÃ BỆNH NHÂN (PATIENT CODE)
     // =================================================================
     @Async
-    @Transactional
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void sendPatientCodeEmail(Patient patient, String locale) {
-        // Đã có patient, truyền trực tiếp vào
         sendEmailInternal(patient.getEmail(), patient.getFullName(), patient.getPatientCode(), locale, patient);
     }
 
-    // =================================================================
-    // HÀM 2: Dành cho Login Google (Chỉ có object User)
-    // =================================================================
     @Async
-    @Transactional
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void sendPatientCodeEmail(User user, String locale) {
-        // --- KHẮC PHỤC LỖI NULL PATIENT ID ---
-        // Tìm Patient tương ứng với User này để ghi vào EmailLog
-        Patient foundPatient = patientRepo.findByUserId(user.getId())
-                .orElse(null);
-
-        // Nếu tìm thấy patient thì truyền vào, nếu không thì đành chịu (nhưng thường là sẽ thấy)
+        Patient foundPatient = patientRepo.findByUserId(user.getId()).orElse(null);
         sendEmailInternal(user.getEmail(), user.getFullName(), user.getCode(), locale, foundPatient);
     }
 
     // =================================================================
-    // HÀM XỬ LÝ CHUNG
+    // 2. GỬI CẢNH BÁO KHÓA TÀI KHOẢN (ACCOUNT LOCKED)
+    // =================================================================
+    @Async
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public void sendAccountLockedEmail(User user) {
+        String loc = "vi";
+
+        EmailTemplate t = templateRepo.findActiveByKeyAndLocale("ACCOUNT_LOCKED", loc)
+                .orElseGet(() -> {
+                    EmailTemplate nt = new EmailTemplate();
+                    nt.setKey("ACCOUNT_LOCKED");
+                    nt.setLocale(loc);
+                    nt.setSubject("Cảnh báo bảo mật: Tài khoản của bạn đã bị khóa");
+                    nt.setHtmlBody("<p>Xin chào {{name}},</p>"
+                            + "<p>Hệ thống phát hiện nhập sai mật khẩu quá 5 lần.</p>"
+                            + "<p>Tài khoản của bạn đã bị <b>khóa tạm thời</b>.</p>"
+                            + "<p>Vui lòng liên hệ quản trị viên để mở khóa.</p>");
+                    nt.setIsActive(true);
+                    return templateRepo.save(nt);
+                });
+
+        String subject = t.getSubject();
+        String html = render(t.getHtmlBody(), Map.of("name", user.getFullName()));
+
+        Patient foundPatient = patientRepo.findByUserId(user.getId()).orElse(null);
+        createAndSendLog(user.getEmail(), subject, html, t, foundPatient);
+    }
+
+    // =================================================================
+    // 3. GỬI EMAIL RESET PASSWORD (ĐÂY LÀ PHẦN BẠN ĐANG THIẾU)
+    // =================================================================
+    @Async
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public void sendResetPasswordEmail(User user, String token) {
+        String loc = "vi";
+
+        EmailTemplate t = templateRepo.findActiveByKeyAndLocale("RESET_PASSWORD", loc)
+                .orElseGet(() -> {
+                    EmailTemplate nt = new EmailTemplate();
+                    nt.setKey("RESET_PASSWORD");
+                    nt.setLocale(loc);
+                    nt.setSubject("Yêu cầu đặt lại mật khẩu - Sunshine Dental Care");
+                    nt.setHtmlBody("<p>Xin chào {{name}},</p>"
+                            + "<p>Bạn vừa yêu cầu đặt lại mật khẩu.</p>"
+                            + "<p>Vui lòng nhấp vào link dưới đây (Hết hạn sau 15 phút):</p>"
+                            + "<p><a href='{{link}}' style='font-weight:bold; font-size:16px;'>ĐẶT LẠI MẬT KHẨU</a></p>"
+                            + "<p>Nếu không phải bạn yêu cầu, vui lòng bỏ qua email này.</p>");
+                    nt.setIsActive(true);
+                    return templateRepo.save(nt);
+                });
+
+        String subject = t.getSubject();
+
+        // Link này trỏ về Frontend React (Port 5173)
+        String resetLink = "http://localhost:5173/reset-password?token=" + token;
+
+        String html = render(t.getHtmlBody(), Map.of(
+                "name", user.getFullName(),
+                "link", resetLink
+        ));
+
+        Patient foundPatient = patientRepo.findByUserId(user.getId()).orElse(null);
+        createAndSendLog(user.getEmail(), subject, html, t, foundPatient);
+    }
+
+    // =================================================================
+    // HÀM HELPER CHUNG (LOGIC GỬI MAIL AN TOÀN)
     // =================================================================
     private void sendEmailInternal(String toEmail, String fullName, String patientCode, String locale, Patient patientLink) {
         String loc = (locale == null || locale.isBlank()) ? "en" : locale.toLowerCase();
-
         EmailTemplate t = templateRepo.findActiveByKeyAndLocale("PATIENT_CODE", loc)
                 .orElseGet(() -> createDefaultTemplate(loc));
 
@@ -86,17 +141,14 @@ public class MailService {
                 "patientCode", patientCode == null ? "N/A" : patientCode
         ));
 
+        createAndSendLog(toEmail, subject, html, t, patientLink);
+    }
+
+    private void createAndSendLog(String toEmail, String subject, String htmlBody, EmailTemplate t, Patient patientLink) {
         EmailLog log = new EmailLog();
 
-        // --- QUAN TRỌNG: SET PATIENT ---
-        // Lúc này patientLink đã được tìm thấy (từ hàm trên), nên sẽ không bị null nữa
         if (patientLink != null) {
             log.setPatient(patientLink);
-        } else {
-            // Trường hợp hiếm: Có User nhưng chưa kịp tạo Patient?
-            // Nếu DB bắt buộc NOT NULL -> Sẽ lỗi tại đây.
-            // Bạn nên đảm bảo logic tạo User luôn đi kèm tạo Patient.
-            System.err.println("Warning: Sending email to user " + toEmail + " but no linked Patient found for log.");
         }
 
         log.setTemplate(t);
@@ -104,9 +156,14 @@ public class MailService {
         log.setQueuedAt(Instant.now());
         log.setCost(BigDecimal.ZERO);
 
-        // Lưu log lần 1
-        emailLogRepo.save(log);
+        // 1. Lưu log lần đầu (Ignore lỗi nếu DB bắt buộc not null)
+        try {
+            emailLogRepo.save(log);
+        } catch (Exception e) {
+            System.err.println("Log Error (Step 1): " + e.getMessage());
+        }
 
+        // 2. Gửi Mail
         try {
             MimeMessage msg = mailSender.createMimeMessage();
             MimeMessageHelper h = new MimeMessageHelper(msg, "UTF-8");
@@ -114,7 +171,7 @@ public class MailService {
             h.setFrom(resolveFromAddress());
             h.setTo(toEmail);
             h.setSubject(subject);
-            h.setText(html, true);
+            h.setText(htmlBody, true);
 
             mailSender.send(msg);
 
@@ -123,10 +180,17 @@ public class MailService {
         } catch (Exception ex) {
             log.setStatus("FAILED");
             log.setErrorMessage(ex.getMessage());
+            System.err.println("Mail Send Error: " + ex.getMessage());
         }
 
-        // Lưu log lần 2 (update status)
-        emailLogRepo.save(log);
+        // 3. Update Log
+        try {
+            if (log.getId() != null) {
+                emailLogRepo.save(log);
+            }
+        } catch (Exception e) {
+            System.err.println("Log Error (Step 2): " + e.getMessage());
+        }
     }
 
     private EmailTemplate createDefaultTemplate(String loc) {
@@ -135,10 +199,10 @@ public class MailService {
         nt.setLocale(loc);
         if ("vi".equals(loc)) {
             nt.setSubject("Mã bệnh nhân của bạn – Sunshine Dental Care");
-            nt.setHtmlBody("<p>Xin chào {{name}},</p><p>Mã bệnh nhân của bạn là: <b>{{patientCode}}</b></p>");
+            nt.setHtmlBody("<p>Code: <b>{{patientCode}}</b></p>");
         } else {
-            nt.setSubject("[Sunshine Dental Care] Your Patient Code");
-            nt.setHtmlBody("<p>Hello {{name}},</p><p>Your Patient Code is: <b>{{patientCode}}</b></p>");
+            nt.setSubject("Sunshine Dental Care - Patient Code");
+            nt.setHtmlBody("<p>Code: <b>{{patientCode}}</b></p>");
         }
         nt.setIsActive(true);
         return templateRepo.save(nt);

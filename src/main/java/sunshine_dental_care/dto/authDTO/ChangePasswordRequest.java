@@ -6,7 +6,7 @@ import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
 
 public record ChangePasswordRequest(
-        @NotBlank(message = "Current password is required")
+        // Cho phép null để phục vụ trường hợp chưa có pass
         String currentPassword,
 
         @NotBlank(message = "New password is required")
@@ -27,6 +27,9 @@ public record ChangePasswordRequest(
 
     @AssertTrue(message = "New password must be different from current")
     public boolean isDifferentFromCurrent() {
-        return currentPassword != null && !currentPassword.equals(newPassword);
+        if (currentPassword == null || currentPassword.isBlank()) {
+            return true;
+        }
+        return !currentPassword.equals(newPassword);
     }
 }
