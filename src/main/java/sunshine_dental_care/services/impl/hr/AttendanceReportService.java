@@ -3,7 +3,6 @@ package sunshine_dental_care.services.impl.hr;
 import java.math.BigDecimal;
 import java.time.DayOfWeek;
 import java.time.LocalDate;
-import java.time.LocalTime;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -21,16 +20,15 @@ import sunshine_dental_care.dto.hrDTO.DailyAttendanceListItemResponse;
 import sunshine_dental_care.dto.hrDTO.DailySummaryResponse;
 import sunshine_dental_care.dto.hrDTO.MonthlyAttendanceListItemResponse;
 import sunshine_dental_care.dto.hrDTO.MonthlySummaryResponse;
+import sunshine_dental_care.dto.hrDTO.mapper.AttendanceReportMapper;
 import sunshine_dental_care.entities.Attendance;
 import sunshine_dental_care.entities.Department;
-import sunshine_dental_care.entities.DoctorSchedule;
 import sunshine_dental_care.entities.User;
 import sunshine_dental_care.entities.UserRole;
 import sunshine_dental_care.repositories.auth.UserRepo;
 import sunshine_dental_care.repositories.auth.UserRoleRepo;
 import sunshine_dental_care.repositories.hr.AttendanceRepository;
 import sunshine_dental_care.repositories.hr.DepartmentRepo;
-import sunshine_dental_care.repositories.hr.DoctorScheduleRepo;
 
 @Service
 @RequiredArgsConstructor
@@ -41,10 +39,10 @@ public class AttendanceReportService {
     private final DepartmentRepo departmentRepo;
     private final AttendanceRepository attendanceRepository;
     private final UserRoleRepo userRoleRepo;
-    private final DoctorScheduleRepo doctorScheduleRepo;
     private final AttendanceStatusCalculator attendanceStatusCalculator;
+    private final AttendanceReportMapper attendanceReportMapper;
 
-    // Lấy tổng kết chấm công theo ngày (very important: calculates daily summary report)
+    // LẤY TỔNG KẾT CHẤM CÔNG THEO NGÀY (RẤT QUAN TRỌNG)
     public List<DailySummaryResponse> getDailySummary(LocalDate workDate) {
         log.info("Getting daily summary for date: {}", workDate);
 
@@ -76,7 +74,7 @@ public class AttendanceReportService {
             summary.setMale(0);
             summary.setFemale(0);
 
-            // Kiểm tra số lượng nhân viên hợp lệ, nếu không có thì bỏ qua các tính toán
+            // KIỂM TRA SỐ LƯỢNG NHÂN VIÊN ĐỦ ĐIỀU KIỆN, NẾU KHÔNG CÓ BỎ QUA
             if (totalEmployees == 0) {
                 summary.setPresent(0);
                 summary.setPresentPercent(BigDecimal.ZERO);
@@ -137,7 +135,7 @@ public class AttendanceReportService {
         return summaries;
     }
 
-    // Lấy danh sách chấm công theo ngày (very important: paginated daily attendance list)
+    // LẤY DANH SÁCH CHẤM CÔNG THEO NGÀY (RẤT QUAN TRỌNG - PHÂN TRANG)
     public Page<DailyAttendanceListItemResponse> getDailyAttendanceList(LocalDate workDate,
                                                                         Integer departmentId,
                                                                         Integer clinicId,
@@ -179,15 +177,67 @@ public class AttendanceReportService {
             }
 
             Attendance attendance = attendanceByUserId.get(user.getId());
+
+            // KIỂM TRA USER LÀ BÁC SĨ KHÔNG
+            boolean isDoctor = roles != null && roles.stream()
+                    .anyMatch(ur -> attendanceStatusCalculator.isDoctorRole(ur));
+
+            // QUAN TRỌNG: BÁC SĨ LUÔN ĐƯỢC CHECK VÀ CẬP NHẬT ABSENT THEO CA LỊCH
+            if (isDoctor) {
+                try {
+                    // ĐÁNH DẤU VẮNG DỰA THEO LỊCH ĐI LÀM CỦA BÁC SĨ
+                    attendanceStatusCalculator.markAbsentForDoctorBasedOnSchedule(user.getId(), workDate);
+                } catch (Exception e) {
+                    log.warn("Error marking absent for doctor {} on {}: {}", user.getId(), workDate, e.getMessage(), e);
+                }
+
+                List<Attendance> doctorAttendances = attendanceRepository.findAllByUserIdAndWorkDate(user.getId(), workDate);
+                if (!doctorAttendances.isEmpty()) {
+                    attendance = doctorAttendances.get(0);
+                }
+            }
+
             if (attendance == null) {
-                // Nếu không có dữ liệu chấm công thì mặc định là vắng mặt
-                item.setStatus("Absent");
-                item.setStatusColor("red");
-                item.setCheckInTime(null);
-                item.setCheckOutTime(null);
-                item.setRemarks("Fixed Attendance");
+                // NẾU KHÔNG PHẢI BÁC SĨ, ĐÁNH DẤU ABSENT THEO CLINIC
+                if (!isDoctor) {
+                    Integer userClinicId = null;
+                    if (roles != null && !roles.isEmpty()) {
+                        for (UserRole userRole : roles) {
+                            if (userRole != null) {
+                                try {
+                                    if (userRole.getClinic() != null) {
+                                        userClinicId = userRole.getClinic().getId();
+                                        if (userClinicId != null) {
+                                            break;
+                                        }
+                                    }
+                                } catch (Exception e) {
+                                    log.debug("Could not load clinic from UserRole: {}", e.getMessage());
+                                }
+                            }
+                        }
+                    }
+
+                    if (userClinicId != null) {
+                        attendanceStatusCalculator.markAbsentIfNeeded(user.getId(), userClinicId, workDate);
+                        attendance = attendanceRepository.findByUserIdAndClinicIdAndWorkDate(user.getId(), userClinicId, workDate)
+                                .orElse(null);
+                    }
+                }
+
+                if (attendance == null) {
+                    item.setStatus("Absent");
+                    item.setStatusColor("red");
+                    item.setCheckInTime(null);
+                    item.setCheckOutTime(null);
+                    item.setRemarks("Fixed Attendance");
+                } else {
+                    DailyAttendanceListItemResponse mapped = attendanceReportMapper.mapToDailyListItem(attendance, user, workDate);
+                    copyDailyItemFields(item, mapped);
+                }
             } else {
-                fillAttendanceItemWithData(item, attendance, user, workDate);
+                DailyAttendanceListItemResponse mapped = attendanceReportMapper.mapToDailyListItem(attendance, user, workDate);
+                copyDailyItemFields(item, mapped);
             }
 
             items.add(item);
@@ -204,7 +254,7 @@ public class AttendanceReportService {
         return new PageImpl<>(pagedItems, PageRequest.of(page, size), items.size());
     }
 
-    // Lấy tổng kết chấm công theo tháng (very important: calculates monthly summary report)
+    // LẤY TỔNG KẾT CHẤM CÔNG THEO THÁNG (RẤT QUAN TRỌNG)
     public List<MonthlySummaryResponse> getMonthlySummary(Integer year, Integer month) {
         log.info("Getting monthly summary for year: {}, month: {}", year, month);
 
@@ -218,12 +268,12 @@ public class AttendanceReportService {
         LocalDate startDate = LocalDate.of(year, month, 1);
         LocalDate endDate = startDate.withDayOfMonth(startDate.lengthOfMonth());
 
-        // Tính số ngày làm việc trong tháng (trừ thứ 7, CN)
+        // ĐẾM SỐ NGÀY LÀM VIỆC TRONG THÁNG (CHỈ TRỪ CHỦ NHẬT)
         int workingDays = 0;
         LocalDate current = startDate;
         while (!current.isAfter(endDate)) {
-            java.time.DayOfWeek dayOfWeek = current.getDayOfWeek();
-            if (dayOfWeek != java.time.DayOfWeek.SATURDAY && dayOfWeek != java.time.DayOfWeek.SUNDAY) {
+            DayOfWeek dayOfWeek = current.getDayOfWeek();
+            if (dayOfWeek != DayOfWeek.SUNDAY) {
                 workingDays++;
             }
             current = current.plusDays(1);
@@ -235,8 +285,8 @@ public class AttendanceReportService {
         List<User> allUsers = getEligibleUsersForAttendance(null);
         List<Attendance> allAttendances = attendanceRepository.findAll().stream()
                 .filter(a -> {
-                    LocalDate workDate = a.getWorkDate();
-                    return workDate != null && !workDate.isBefore(startDate) && !workDate.isAfter(endDate);
+                    LocalDate wDate = a.getWorkDate();
+                    return wDate != null && !wDate.isBefore(startDate) && !wDate.isAfter(endDate);
                 })
                 .toList();
 
@@ -256,7 +306,7 @@ public class AttendanceReportService {
             int totalEmployees = deptUsers.size();
             summary.setTotalEmployees(totalEmployees);
 
-            // Nếu không có nhân viên thì bỏ qua tính toán
+            // KIỂM TRA KHÔNG CÓ NHÂN VIÊN, BỎ QUA
             if (totalEmployees == 0) {
                 summary.setPresent(0);
                 summary.setLate(0);
@@ -310,7 +360,7 @@ public class AttendanceReportService {
         return summaries;
     }
 
-    // Lấy danh sách chấm công theo tháng (very important: paginated monthly attendance list)
+    // LẤY DANH SÁCH CHẤM CÔNG THEO THÁNG (RẤT QUAN TRỌNG - PHÂN TRANG)
     public Page<MonthlyAttendanceListItemResponse> getMonthlyAttendanceList(Integer year,
                                                                             Integer month,
                                                                             Integer departmentId,
@@ -335,23 +385,23 @@ public class AttendanceReportService {
         if (clinicId != null) {
             attendances = attendanceRepository.findAll().stream()
                     .filter(a -> {
-                        LocalDate workDate = a.getWorkDate();
+                        LocalDate wDate = a.getWorkDate();
                         return a.getClinicId() != null
                                 && a.getClinicId().equals(clinicId)
-                                && workDate != null
-                                && workDate.getDayOfWeek() != DayOfWeek.SUNDAY
-                                && !workDate.isBefore(startDate)
-                                && !workDate.isAfter(endDate);
+                                && wDate != null
+                                && wDate.getDayOfWeek() != DayOfWeek.SUNDAY
+                                && !wDate.isBefore(startDate)
+                                && !wDate.isAfter(endDate);
                     })
                     .toList();
         } else {
             attendances = attendanceRepository.findAll().stream()
                     .filter(a -> {
-                        LocalDate workDate = a.getWorkDate();
-                        return workDate != null
-                                && workDate.getDayOfWeek() != DayOfWeek.SUNDAY
-                                && !workDate.isBefore(startDate)
-                                && !workDate.isAfter(endDate);
+                        LocalDate wDate = a.getWorkDate();
+                        return wDate != null
+                                && wDate.getDayOfWeek() != DayOfWeek.SUNDAY
+                                && !wDate.isBefore(startDate)
+                                && !wDate.isAfter(endDate);
                     })
                     .toList();
         }
@@ -374,64 +424,30 @@ public class AttendanceReportService {
 
             List<Attendance> userAttendances = attendanceByUserId.getOrDefault(user.getId(), new ArrayList<>());
 
+            // ĐẾM NGÀY LÀM VIỆC TRONG THÁNG (KHÔNG TÍNH CHỦ NHẬT)
             int workingDays = 0;
-            int presentDays = 0;
-            int lateDays = 0;
-            int absentDays = 0;
-            int leaveDays = 0;
-            int offDays = 0;
-            BigDecimal totalWorkHours = BigDecimal.ZERO; // Tổng giờ làm việc (dùng BigDecimal để chính xác)
-
-            for (Attendance attendance : userAttendances) {
-                workingDays++;
-                String status = attendance.getAttendanceStatus();
-                if (status == null) {
-                    offDays++;
-                } else if ("ON_TIME".equals(status)) {
-                    presentDays++;
-                } else if ("LATE".equals(status)) {
-                    lateDays++;
-                } else if ("ABSENT".equals(status)) {
-                    absentDays++;
-                } else if ("APPROVED_ABSENCE".equals(status)) {
-                    leaveDays++;
-                } else {
-                    offDays++;
+            LocalDate current = startDate;
+            while (!current.isAfter(endDate)) {
+                if (current.getDayOfWeek() != DayOfWeek.SUNDAY) {
+                    workingDays++;
                 }
-
-                // Ưu tiên sử dụng actualWorkHours nếu có (đã được tính khi check-out)
-                // Nếu không có, tính từ checkIn/checkOut (fallback)
-                if (attendance.getActualWorkHours() != null) {
-                    totalWorkHours = totalWorkHours.add(attendance.getActualWorkHours());
-                } else if (attendance.getCheckInTime() != null && attendance.getCheckOutTime() != null) {
-                    // Fallback: tính từ checkIn/checkOut nếu actualWorkHours chưa có
-                    long minutes = java.time.Duration.between(
-                            attendance.getCheckInTime(),
-                            attendance.getCheckOutTime()
-                    ).toMinutes();
-                    BigDecimal hours = BigDecimal.valueOf(minutes)
-                            .divide(BigDecimal.valueOf(60), 2, java.math.RoundingMode.HALF_UP);
-                    totalWorkHours = totalWorkHours.add(hours);
-                }
+                current = current.plusDays(1);
             }
 
-            item.setWorkingDays(workingDays);
-            item.setPresentDays(presentDays);
-            item.setLateDays(lateDays);
-            item.setAbsentDays(absentDays);
-            item.setLeaveDays(leaveDays);
-            item.setOffDays(offDays);
-
-            // Chuyển đổi BigDecimal totalWorkHours sang giờ và phút
-            long totalHoursLong = totalWorkHours.longValue(); // Phần nguyên (giờ)
-            BigDecimal fractionalHours = totalWorkHours.subtract(BigDecimal.valueOf(totalHoursLong)); // Phần thập phân
-            long remainingMinutes = fractionalHours.multiply(BigDecimal.valueOf(60))
-                    .setScale(0, java.math.RoundingMode.HALF_UP)
-                    .longValue(); // Chuyển phần thập phân sang phút
-            
-            item.setTotalWorkedHours(totalHoursLong);
-            item.setTotalWorkedMinutes(remainingMinutes);
-            item.setTotalWorkedDisplay(String.format("%d hr %02d min", totalHoursLong, remainingMinutes));
+            MonthlyAttendanceListItemResponse mapped = attendanceReportMapper.mapToMonthlyListItem(
+                    user, userAttendances, workingDays, startDate, endDate);
+            item.setWorkingDays(mapped.getWorkingDays());
+            item.setPresentDays(mapped.getPresentDays());
+            item.setLateDays(mapped.getLateDays());
+            item.setAbsentDays(mapped.getAbsentDays());
+            item.setLeaveDays(mapped.getLeaveDays());
+            item.setOffDays(mapped.getOffDays());
+            item.setActualWorkedDays(mapped.getActualWorkedDays());
+            item.setTotalLateMinutes(mapped.getTotalLateMinutes());
+            item.setTotalEarlyMinutes(mapped.getTotalEarlyMinutes());
+            item.setTotalWorkedHours(mapped.getTotalWorkedHours());
+            item.setTotalWorkedMinutes(mapped.getTotalWorkedMinutes());
+            item.setTotalWorkedDisplay(mapped.getTotalWorkedDisplay());
 
             items.add(item);
         }
@@ -447,7 +463,7 @@ public class AttendanceReportService {
         return new PageImpl<>(pagedItems, PageRequest.of(page, size), items.size());
     }
 
-    // Lọc các nhân viên đủ điều kiện áp dụng chấm công (very important: filter active users eligible for attendance)
+    // LỌC NHÂN VIÊN ĐỦ ĐIỀU KIỆN CHẤM CÔNG (RẤT QUAN TRỌNG)
     private List<User> getEligibleUsersForAttendance(Integer departmentId) {
         Stream<User> stream = userRepo.findAll().stream()
                 .filter(u -> Boolean.TRUE.equals(u.getIsActive()));
@@ -457,7 +473,7 @@ public class AttendanceReportService {
                     && u.getDepartment().getId().equals(departmentId));
         }
 
-        // Loại các user có vai trò không hợp lệ chấm công
+        // LOẠI USER CÓ VAI TRÒ KHÔNG HỢP LỆ
         return stream
                 .filter(u -> {
                     List<UserRole> roles = userRoleRepo.findActiveByUserId(u.getId());
@@ -467,107 +483,24 @@ public class AttendanceReportService {
                 .toList();
     }
 
-    // Điền thông tin chấm công chi tiết cho DailyAttendanceListItemResponse (very important: fill detailed attendance info)
-    private void fillAttendanceItemWithData(DailyAttendanceListItemResponse item,
-                                            Attendance attendance,
-                                            User user,
-                                            LocalDate workDate) {
-        item.setId(attendance.getId());
-        item.setCheckInTime(attendance.getCheckInTime());
-        item.setCheckOutTime(attendance.getCheckOutTime());
-
-        String status = attendance.getAttendanceStatus();
-        boolean hasCheckIn = attendance.getCheckInTime() != null;
-        boolean hasCheckOut = attendance.getCheckOutTime() != null;
-        
-        // Phân loại trạng thái chấm công (very important: handle attendance status for display)
-        if (status == null) {
-            if (hasCheckIn || hasCheckOut) {
-                // Nếu có check-in hoặc check-out thì được xem là có mặt
-                if (hasCheckIn && hasCheckOut) {
-                    item.setStatus("Present");
-                    item.setStatusColor("green");
-                } else if (hasCheckIn) {
-                    item.setStatus("Present");
-                    item.setStatusColor("green");
-                } else {
-                    item.setStatus("Absent");
-                    item.setStatusColor("red");
-                }
-            } else {
-                // Không có check-in, check-out và trạng thái null thì xem là ngày nghỉ
-                item.setStatus("Offday");
-                item.setStatusColor("gray");
-            }
-        } else if ("ON_TIME".equals(status)) {
-            item.setStatus("Present");
-            item.setStatusColor("green");
-        } else if ("LATE".equals(status)) {
-            item.setStatus("Late");
-            item.setStatusColor("orange");
-        } else if ("ABSENT".equals(status)) {
-            item.setStatus("Absent");
-            item.setStatusColor("red");
-        } else if ("APPROVED_ABSENCE".equals(status)) {
-            item.setStatus("Approved Leave");
-            item.setStatusColor("blue");
-        } else if ("APPROVED_LATE".equals(status)) {
-            item.setStatus("Approved Late");
-            item.setStatusColor("blue");
-        } else if ("APPROVED_PRESENT".equals(status)) {
-            item.setStatus("Approved Present");
-            item.setStatusColor("blue");
-        } else {
-            item.setStatus("Unknown");
-            item.setStatusColor("gray");
-        }
-
-        // Nếu là làm thêm giờ thì đánh dấu lại trạng thái là Overtime
-        if (attendance.getIsOvertime() != null && attendance.getIsOvertime()) {
-            item.setStatus("Overtime");
-            item.setStatusColor("blue");
-        }
-
-        if (attendance.getCheckInTime() != null && attendance.getCheckOutTime() != null) {
-            long minutes = java.time.Duration.between(
-                    attendance.getCheckInTime(),
-                    attendance.getCheckOutTime()
-            ).toMinutes();
-            long hours = minutes / 60;
-            long remainingMinutes = minutes % 60;
-            item.setWorkedHours(hours);
-            item.setWorkedMinutes(remainingMinutes);
-            item.setWorkedDisplay(String.format("%d hr %02d min", hours, remainingMinutes));
-        } else {
-            item.setWorkedHours(0L);
-            item.setWorkedMinutes(0L);
-            item.setWorkedDisplay("0 hr 00 min");
-        }
-
-        // Lấy ca trực cho bác sĩ (nếu có)
-        List<DoctorSchedule> schedules = doctorScheduleRepo
-                .findByUserIdAndClinicIdAndWorkDate(user.getId(), attendance.getClinicId(), workDate);
-
-        if (!schedules.isEmpty()) {
-            DoctorSchedule schedule = schedules.get(0);
-            item.setShiftStartTime(schedule.getStartTime());
-            item.setShiftEndTime(schedule.getEndTime());
-            item.setShiftDisplay(formatTime(schedule.getStartTime()) + " - " + formatTime(schedule.getEndTime()));
-            long shiftHours = java.time.Duration.between(schedule.getStartTime(), schedule.getEndTime()).toHours();
-            item.setShiftHours(shiftHours + " hr Shift: A");
-        } else {
-            LocalTime defaultStart = attendanceStatusCalculator.getDefaultStartTime();
-            LocalTime defaultEnd = defaultStart.plusHours(9);
-            item.setShiftStartTime(defaultStart);
-            item.setShiftEndTime(defaultEnd);
-            item.setShiftDisplay(formatTime(defaultStart) + " - " + formatTime(defaultEnd));
-            item.setShiftHours("9 hr Shift: A");
-        }
-
-        item.setRemarks(attendance.getNote() != null ? attendance.getNote() : "Fixed Attendance");
+    // COPY FIELD TỪ RESPONSE MAP QUA ITEM (HỖ TRỢ)
+    private void copyDailyItemFields(DailyAttendanceListItemResponse item, DailyAttendanceListItemResponse mapped) {
+        item.setId(mapped.getId());
+        item.setCheckInTime(mapped.getCheckInTime());
+        item.setCheckOutTime(mapped.getCheckOutTime());
+        item.setStatus(mapped.getStatus());
+        item.setStatusColor(mapped.getStatusColor());
+        item.setWorkedHours(mapped.getWorkedHours());
+        item.setWorkedMinutes(mapped.getWorkedMinutes());
+        item.setWorkedDisplay(mapped.getWorkedDisplay());
+        item.setShiftStartTime(mapped.getShiftStartTime());
+        item.setShiftEndTime(mapped.getShiftEndTime());
+        item.setShiftDisplay(mapped.getShiftDisplay());
+        item.setShiftHours(mapped.getShiftHours());
+        item.setRemarks(mapped.getRemarks());
     }
 
-    // Tính phần trăm số lượng nhân viên/thống kê (very important: calculate percentage)
+    // TÍNH PHẦN TRĂM CHO CÁC THỐNG KÊ (RẤT QUAN TRỌNG)
     private BigDecimal calculatePercent(int value, int total) {
         if (total == 0) {
             return BigDecimal.ZERO;
@@ -578,12 +511,4 @@ public class AttendanceReportService {
                 .setScale(2, java.math.RoundingMode.HALF_UP);
     }
 
-    // Định dạng giờ/phút am pm phục vụ hiển thị ca làm việc (format time, for display)
-    private String formatTime(LocalTime time) {
-        int hour = time.getHour();
-        int minute = time.getMinute();
-        String period = hour < 12 ? "am" : "pm";
-        int displayHour = hour > 12 ? hour - 12 : (hour == 0 ? 12 : hour);
-        return String.format("%d.%02d%s", displayHour, minute, period);
-    }
 }

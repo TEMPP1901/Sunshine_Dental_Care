@@ -17,6 +17,7 @@ import jakarta.persistence.PreUpdate;
 
 @Entity
 public class Attendance {
+
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     @Column(name = "attendanceId", nullable = false)
@@ -49,69 +50,35 @@ public class Attendance {
     @Column(name = "note", length = 400)
     private String note;
 
-    /**
-     * Loại ca làm việc: MORNING (sáng), AFTERNOON (chiều), FULL_DAY (cả ngày)
-     * - MORNING: Ca sáng (8:00-11:00)
-     * - AFTERNOON: Ca chiều (13:00-18:00)
-     * - FULL_DAY: Cả ngày (cho nhân viên không phân ca)
-     */
     @Nationalized
     @Column(name = "shiftType", length = 20)
-    private String shiftType; // MORNING, AFTERNOON, FULL_DAY
+    private String shiftType;
 
-    /**
-     * Số giờ làm việc thực tế (tính từ check-in đến check-out)
-     * Dùng để tính lương
-     */
     @Column(name = "actualWorkHours", precision = 5, scale = 2)
-    private BigDecimal actualWorkHours; // Ví dụ: 3.5 giờ
+    private BigDecimal actualWorkHours;
 
-    /**
-     * Số giờ làm việc theo lịch (expected hours)
-     * - Ca sáng: 3 giờ (8:00-11:00)
-     * - Ca chiều: 5 giờ (13:00-18:00)
-     */
     @Column(name = "expectedWorkHours", precision = 5, scale = 2)
-    private BigDecimal expectedWorkHours; // Ví dụ: 3.0 giờ
+    private BigDecimal expectedWorkHours;
 
-    /**
-     * Số phút đi trễ (nếu check-in sau expectedStartTime)
-     * Dùng để thống kê và báo cáo
-     */
     @Column(name = "lateMinutes")
     private Integer lateMinutes;
 
-    /**
-     * Số phút ra sớm (nếu check-out trước expectedEndTime)
-     * Dùng để thống kê và báo cáo
-     */
     @Column(name = "earlyMinutes")
     private Integer earlyMinutes;
 
-    /**
-     * Số phút nghỉ trưa (chỉ cho nhân viên FULL_DAY)
-     * Mặc định: 120 phút (2 giờ) nếu check-in trước 11:00 và check-out sau 13:00
-     */
     @Column(name = "lunchBreakMinutes")
     private Integer lunchBreakMinutes;
 
-    // Face Recognition fields
     @Column(name = "faceMatchScore", precision = 5, scale = 4)
-    private BigDecimal faceMatchScore; // Similarity score 0.0 - 1.0
+    private BigDecimal faceMatchScore;
 
     @Nationalized
     @Column(name = "verificationStatus", length = 20)
-    private String verificationStatus; // PENDING, VERIFIED, FAILED
+    private String verificationStatus;
 
-    /**
-     * Trạng thái chấm công: ON_TIME, LATE, ABSENT
-     * - ON_TIME: Check-in đúng giờ (trước hoặc đúng startTime)
-     * - LATE: Check-in muộn (sau startTime)
-     * - ABSENT: Không check-in trong ngày có schedule
-     */
     @Nationalized
     @Column(name = "attendanceStatus", length = 20)
-    private String attendanceStatus; // ON_TIME, LATE, ABSENT
+    private String attendanceStatus;
 
     @ColumnDefault("sysutcdatetime()")
     @Column(name = "createdAt", nullable = false)
@@ -121,9 +88,7 @@ public class Attendance {
     @Column(name = "updatedAt", nullable = false)
     private Instant updatedAt;
 
-    /**
-     * Tự động set createdAt và updatedAt trước khi persist (insert)
-     */
+    // Tự động set createdAt và updatedAt khi tạo bản ghi mới
     @PrePersist
     protected void onCreate() {
         Instant now = Instant.now();
@@ -135,14 +100,13 @@ public class Attendance {
         }
     }
 
-    /**
-     * Tự động set updatedAt trước khi update
-     */
+    // Tự động cập nhật updatedAt khi cập nhật bản ghi
     @PreUpdate
     protected void onUpdate() {
         updatedAt = Instant.now();
     }
 
+    // Lấy id chấm công
     public Integer getId() {
         return id;
     }
@@ -199,6 +163,7 @@ public class Attendance {
         this.checkInMethod = checkInMethod;
     }
 
+    // Kiểm tra có phải ca tăng ca không
     public Boolean getIsOvertime() {
         return isOvertime;
     }
@@ -231,6 +196,7 @@ public class Attendance {
         this.updatedAt = updatedAt;
     }
 
+    // Lấy điểm nhận diện khuôn mặt
     public BigDecimal getFaceMatchScore() {
         return faceMatchScore;
     }
@@ -239,6 +205,7 @@ public class Attendance {
         this.faceMatchScore = faceMatchScore;
     }
 
+    // Lấy trạng thái xác minh khuôn mặt
     public String getVerificationStatus() {
         return verificationStatus;
     }
@@ -247,6 +214,7 @@ public class Attendance {
         this.verificationStatus = verificationStatus;
     }
 
+    // Lấy trạng thái chấm công
     public String getAttendanceStatus() {
         return attendanceStatus;
     }
@@ -263,6 +231,7 @@ public class Attendance {
         this.shiftType = shiftType;
     }
 
+    // Lấy số giờ làm việc thực tế
     public BigDecimal getActualWorkHours() {
         return actualWorkHours;
     }
@@ -271,6 +240,7 @@ public class Attendance {
         this.actualWorkHours = actualWorkHours;
     }
 
+    // Lấy số giờ làm việc theo lịch
     public BigDecimal getExpectedWorkHours() {
         return expectedWorkHours;
     }
@@ -279,6 +249,7 @@ public class Attendance {
         this.expectedWorkHours = expectedWorkHours;
     }
 
+    // Lấy số phút đi trễ
     public Integer getLateMinutes() {
         return lateMinutes;
     }
@@ -287,6 +258,7 @@ public class Attendance {
         this.lateMinutes = lateMinutes;
     }
 
+    // Lấy số phút về sớm
     public Integer getEarlyMinutes() {
         return earlyMinutes;
     }
@@ -295,6 +267,7 @@ public class Attendance {
         this.earlyMinutes = earlyMinutes;
     }
 
+    // Lấy số phút nghỉ trưa
     public Integer getLunchBreakMinutes() {
         return lunchBreakMinutes;
     }
@@ -302,5 +275,4 @@ public class Attendance {
     public void setLunchBreakMinutes(Integer lunchBreakMinutes) {
         this.lunchBreakMinutes = lunchBreakMinutes;
     }
-
 }

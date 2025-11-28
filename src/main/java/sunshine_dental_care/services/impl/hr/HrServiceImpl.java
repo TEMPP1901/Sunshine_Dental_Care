@@ -1,8 +1,10 @@
 package sunshine_dental_care.services.impl.hr;
 
 import java.time.LocalDate;
+import java.time.LocalTime;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Collectors;
 
 import org.springframework.stereotype.Service;
@@ -38,6 +40,9 @@ public class HrServiceImpl implements HrService {
     private final ClinicRepo clinicRepo;
     private final RoomRepo roomRepo;
     private final ScheduleValidationService scheduleValidationService;
+    private final sunshine_dental_care.repositories.hr.LeaveRequestRepo leaveRequestRepo;
+    
+    private static final LocalTime LUNCH_BREAK_START = LocalTime.of(11, 0);
 
     @Override
     @Transactional
@@ -63,6 +68,16 @@ public class HrServiceImpl implements HrService {
 
             if (dayAssignments != null) {
                 for (CreateWeeklyScheduleRequest.DoctorAssignmentRequest assignment : dayAssignments) {
+                    // CHECK: Nếu bác sĩ có leave request approved trong ngày này → không tạo schedule
+                    boolean hasApprovedLeave = leaveRequestRepo.hasApprovedLeaveOnDate(
+                            assignment.getDoctorId(), workDate);
+                    
+                    if (hasApprovedLeave) {
+                        log.info("Skipping schedule creation for doctor {} on {} - has approved leave request",
+                                assignment.getDoctorId(), workDate);
+                        continue; // Bỏ qua, không tạo schedule cho ngày nghỉ
+                    }
+                    
                     DoctorSchedule schedule = new DoctorSchedule();
 
                     // ÁNH XẠ THÔNG TIN CƠ BẢN: tạo entity với id để tránh lỗi serialize proxy
@@ -96,6 +111,40 @@ public class HrServiceImpl implements HrService {
         }
 
         List<DoctorSchedule> savedSchedules = doctorScheduleRepo.saveAll(schedules);
+        
+        // Sau khi lưu schedule: Nếu có schedule MORNING → Set ACTIVE cho tất cả schedule AFTERNOON của doctor trong ngày
+        for (int dayIndex = 0; dayIndex < 6; dayIndex++) {
+            LocalDate workDate = request.getWeekStart().plusDays(dayIndex);
+            
+            // Nhóm schedule theo doctor
+            Map<Integer, List<DoctorSchedule>> schedulesByDoctor = savedSchedules.stream()
+                    .filter(s -> s.getWorkDate().equals(workDate))
+                    .collect(Collectors.groupingBy(s -> s.getDoctor().getId()));
+            
+            for (Map.Entry<Integer, List<DoctorSchedule>> entry : schedulesByDoctor.entrySet()) {
+                Integer doctorId = entry.getKey();
+                List<DoctorSchedule> doctorSchedules = entry.getValue();
+                
+                // Kiểm tra xem có schedule MORNING không
+                boolean hasMorningSchedule = doctorSchedules.stream()
+                        .anyMatch(s -> s.getStartTime() != null && s.getStartTime().isBefore(LUNCH_BREAK_START));
+                
+                if (hasMorningSchedule) {
+                    // Nếu có schedule MORNING → Set ACTIVE cho tất cả schedule AFTERNOON của doctor trong ngày
+                    for (DoctorSchedule schedule : doctorSchedules) {
+                        if (schedule.getStartTime() != null && schedule.getStartTime().isAfter(LUNCH_BREAK_START)) {
+                            // Đây là schedule AFTERNOON
+                            if (schedule.getStatus() == null || !"ACTIVE".equals(schedule.getStatus())) {
+                                schedule.setStatus("ACTIVE");
+                                doctorScheduleRepo.save(schedule);
+                                log.info("Set schedule {} (AFTERNOON) to ACTIVE for doctor {} on {} (has MORNING schedule - default ACTIVE)",
+                                        schedule.getId(), doctorId, workDate);
+                            }
+                        }
+                    }
+                }
+            }
+        }
         return savedSchedules.stream()
                 .map(this::convertToDto)
                 .collect(Collectors.toList());

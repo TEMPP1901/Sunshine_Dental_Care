@@ -75,8 +75,6 @@ public interface AttendanceRepository extends JpaRepository<Attendance, Integer>
     // Kiểm tra user đã check-out trong ngày hay chưa
     @Query("SELECT COUNT(a) > 0 FROM Attendance a WHERE a.userId = :userId AND a.workDate = :workDate AND a.checkOutTime IS NOT NULL")
     boolean existsByUserIdAndWorkDateWithCheckOut(@Param("userId") Integer userId, @Param("workDate") LocalDate workDate);
-
-    // ========== QUERY METHODS CHO KẾ TOÁN TÍNH LƯƠNG ==========
     
     // Tính tổng giờ làm việc (actualWorkHours) của user trong khoảng thời gian
     // Dùng để tính lương theo giờ

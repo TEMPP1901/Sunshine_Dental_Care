@@ -30,6 +30,7 @@ import sunshine_dental_care.repositories.auth.UserRepo;
 import sunshine_dental_care.repositories.auth.UserRoleRepo;
 import sunshine_dental_care.repositories.hr.DoctorScheduleRepo;
 import sunshine_dental_care.repositories.hr.DoctorSpecialtyRepo;
+import sunshine_dental_care.repositories.hr.LeaveRequestRepo;
 import sunshine_dental_care.repositories.hr.RoomRepo;
 import sunshine_dental_care.services.interfaces.hr.AiScheduleGenerationService;
 import sunshine_dental_care.services.interfaces.hr.HrService;
@@ -44,6 +45,7 @@ public class AiScheduleGenerationServiceImpl implements AiScheduleGenerationServ
     private final DoctorSpecialtyRepo doctorSpecialtyRepo;
     private final UserRoleRepo userRoleRepo;
     private final DoctorScheduleRepo doctorScheduleRepo;
+    private final LeaveRequestRepo leaveRequestRepo;
     private final HrService hrService;
 
     public AiScheduleGenerationServiceImpl(
@@ -53,6 +55,7 @@ public class AiScheduleGenerationServiceImpl implements AiScheduleGenerationServ
         DoctorSpecialtyRepo doctorSpecialtyRepo,
         UserRoleRepo userRoleRepo,
         DoctorScheduleRepo doctorScheduleRepo,
+        LeaveRequestRepo leaveRequestRepo,
         @Lazy HrService hrService
     ) {
         this.userRepo = userRepo;
@@ -61,6 +64,7 @@ public class AiScheduleGenerationServiceImpl implements AiScheduleGenerationServ
         this.doctorSpecialtyRepo = doctorSpecialtyRepo;
         this.userRoleRepo = userRoleRepo;
         this.doctorScheduleRepo = doctorScheduleRepo;
+        this.leaveRequestRepo = leaveRequestRepo;
         this.hrService = hrService;
     }
     
@@ -70,7 +74,7 @@ public class AiScheduleGenerationServiceImpl implements AiScheduleGenerationServ
     @Value("${app.gemini.api-key:}")
     private String geminiApiKey;
 
-    // Phương thức chính: sinh lịch làm việc từ prompt người dùng sử dụng AI Gemini
+    // Phương thức quan trọng: sinh lịch từ mô tả người dùng thông qua AI Gemini
     @Override
     public CreateWeeklyScheduleRequest generateScheduleFromDescription(LocalDate weekStart, String description) {
         log.info("Generating schedule from user prompt for week starting: {} using Gemini AI", weekStart);
@@ -86,10 +90,8 @@ public class AiScheduleGenerationServiceImpl implements AiScheduleGenerationServ
         }
 
         try {
-            // TỰ ĐỘNG thêm instruction yêu cầu JSON vào prompt của user
+            // Tự động thêm hướng dẫn trả về JSON vào prompt người dùng
             String enhancedPrompt = buildEnhancedPrompt(description, weekStart);
-            
-            // Gửi prompt đã enhance tới Gemini API
             String aiResponse = callGeminiAPI(enhancedPrompt);
 
             if (aiResponse == null) {
@@ -97,10 +99,8 @@ public class AiScheduleGenerationServiceImpl implements AiScheduleGenerationServ
                 throw new RuntimeException("Gemini API is unavailable. Please check your API key and network connection.");
             }
 
-            // Parse kết quả trả về, sinh đối tượng lịch
             CreateWeeklyScheduleRequest request = parseGeminiResponse(aiResponse, weekStart);
 
-            // Validate lịch
             ValidationResultDto validation = hrService.validateSchedule(request);
             if (!validation.isValid()) {
                 log.warn("AI-generated schedule from user prompt failed validation: {}", validation.getErrors());
@@ -118,7 +118,7 @@ public class AiScheduleGenerationServiceImpl implements AiScheduleGenerationServ
         }
     }
 
-    // Phương thức sinh lịch từ prompt tùy chỉnh của người dùng
+    // Phương thức quan trọng: sinh lịch từ custom prompt của người dùng
     @Override
     public CreateWeeklyScheduleRequest generateScheduleFromCustomPrompt(LocalDate weekStart, String customPrompt) {
         log.info("Generating schedule from custom prompt for week starting: {} using Gemini AI", weekStart);
@@ -134,7 +134,6 @@ public class AiScheduleGenerationServiceImpl implements AiScheduleGenerationServ
         }
 
         try {
-            // Gửi prompt trực tiếp từ người dùng tới Gemini API
             String aiResponse = callGeminiAPI(customPrompt);
 
             if (aiResponse == null) {
@@ -142,10 +141,8 @@ public class AiScheduleGenerationServiceImpl implements AiScheduleGenerationServ
                 throw new RuntimeException("Gemini API is unavailable. Please check your API key and network connection.");
             }
 
-            // Parse kết quả trả về, sinh đối tượng lịch
             CreateWeeklyScheduleRequest request = parseGeminiResponse(aiResponse, weekStart);
 
-            // Validate lịch
             ValidationResultDto validation = hrService.validateSchedule(request);
             if (!validation.isValid()) {
                 log.warn("AI-generated schedule from custom prompt failed validation: {}", validation.getErrors());
@@ -163,7 +160,7 @@ public class AiScheduleGenerationServiceImpl implements AiScheduleGenerationServ
         }
     }
 
-    // Gửi prompt tới Gemini API
+    // Phương thức quan trọng: gửi prompt tới Gemini API, thử nhiều model nếu có lỗi 429/404
     private String callGeminiAPI(String prompt) {
         List<String> availableModels = getAvailableGeminiModels();
 
@@ -198,8 +195,7 @@ public class AiScheduleGenerationServiceImpl implements AiScheduleGenerationServ
         return null;
     }
 
-
-    // Lấy danh sách model Gemini hỗ trợ generateContent
+    // Lấy danh sách các model Gemini có hỗ trợ generateContent
     private List<String> getAvailableGeminiModels() {
         try {
             String listModelsUrl = "https://generativelanguage.googleapis.com/v1beta/models?key=" + geminiApiKey;
@@ -284,7 +280,7 @@ public class AiScheduleGenerationServiceImpl implements AiScheduleGenerationServ
         return new ArrayList<>();
     }
 
-    // Gửi data tới Gemini API với url cụ thể
+    // Gửi data tới Gemini API với url cụ thể (POST)
     private String callGeminiAPIWithUrl(String apiUrl, String prompt) {
         String url = apiUrl + "?key=" + geminiApiKey;
 
@@ -319,7 +315,7 @@ public class AiScheduleGenerationServiceImpl implements AiScheduleGenerationServ
         }
     }
 
-    // Parse kết quả sinh từ Gemini, sinh ra đối tượng CreateWeeklyScheduleRequest
+    // Phương thức quan trọng: parse response từ Gemini, trả ra đối tượng CreateWeeklyScheduleRequest chuẩn hóa
     private CreateWeeklyScheduleRequest parseGeminiResponse(String aiResponse, LocalDate weekStart) {
         try {
             JsonNode rootNode = objectMapper.readTree(aiResponse);
@@ -341,7 +337,6 @@ public class AiScheduleGenerationServiceImpl implements AiScheduleGenerationServ
 
             log.debug("Raw text from Gemini: {}", text);
 
-            // Xử lý text: tìm JSON block trong response
             String jsonText = extractJsonFromText(text);
 
             if (jsonText == null || jsonText.isEmpty()) {
@@ -359,13 +354,23 @@ public class AiScheduleGenerationServiceImpl implements AiScheduleGenerationServ
             Map<String, List<CreateWeeklyScheduleRequest.DoctorAssignmentRequest>> dailyAssignments = new HashMap<>();
 
             String[] days = {"monday", "tuesday", "wednesday", "thursday", "friday", "saturday"};
-            for (String day : days) {
+            for (int dayIndex = 0; dayIndex < days.length; dayIndex++) {
+                String day = days[dayIndex];
+                LocalDate workDate = weekStart.plusDays(dayIndex);
                 if (dailyAssignmentsNode.has(day) && dailyAssignmentsNode.get(day).isArray()) {
                     List<CreateWeeklyScheduleRequest.DoctorAssignmentRequest> dayAssignments = new ArrayList<>();
                     for (JsonNode assignmentNode : dailyAssignmentsNode.get(day)) {
+                        int doctorId = assignmentNode.get("doctorId").asInt();
+                        // Nếu bác sĩ có leave request đã duyệt trong ngày này thì bỏ qua
+                        boolean hasApprovedLeave = leaveRequestRepo.hasApprovedLeaveOnDate(doctorId, workDate);
+                        if (hasApprovedLeave) {
+                            log.info("Filtering out AI-generated assignment for doctor {} on {} - has approved leave request",
+                                    doctorId, workDate);
+                            continue;
+                        }
                         CreateWeeklyScheduleRequest.DoctorAssignmentRequest assignment = 
                             new CreateWeeklyScheduleRequest.DoctorAssignmentRequest();
-                        assignment.setDoctorId(assignmentNode.get("doctorId").asInt());
+                        assignment.setDoctorId(doctorId);
                         assignment.setClinicId(assignmentNode.get("clinicId").asInt());
                         assignment.setRoomId(assignmentNode.get("roomId").asInt());
                         assignment.setStartTime(LocalTime.parse(assignmentNode.get("startTime").asText()));
@@ -396,41 +401,30 @@ public class AiScheduleGenerationServiceImpl implements AiScheduleGenerationServ
         }
     }
 
-    // Tự động thêm instruction yêu cầu JSON vào prompt của user
+    // Phương thức quan trọng: sinh prompt chuẩn hóa (tiếng Anh), chứa tất cả rule và tài nguyên
     private String buildEnhancedPrompt(String userDescription, LocalDate weekStart) {
         StringBuilder prompt = new StringBuilder();
-        
-        // Phần 1: Introduction
         prompt.append("You are an AI-powered HR Schedule Generator for Sunshine Dental Care.\n");
         prompt.append("Your sole output MUST be a perfectly formatted JSON object that adheres to ALL CRITICAL BUSINESS RULES.\n");
         prompt.append("DO NOT output any text, explanation, or markdown wrappers (no ```json or ```).\n\n");
-        
-        // Phần 2: User request & Week info
+
         prompt.append("═══════════════════════════════════════════════════════════\n");
         prompt.append("USER REQUEST & WEEK INFO\n");
         prompt.append("═══════════════════════════════════════════════════════════\n");
         prompt.append("USER REQUEST: ").append(userDescription).append("\n");
         prompt.append("WEEK START DATE: ").append(weekStart).append(" (Monday)\n");
         prompt.append("WEEK END DATE: ").append(weekStart.plusDays(5)).append(" (Saturday)\n\n");
-        
-        // Phần 2.5: AUTO-CALCULATED EXCLUSIONS
+
         prompt.append("═══════════════════════════════════════════════════════════\n");
         prompt.append("🗓️ AUTO-CALCULATED WORK EXCLUSIONS FOR THIS WEEK\n");
         prompt.append("═══════════════════════════════════════════════════════════\n");
-        
-        // Tính toán ngày nghỉ lễ và ngày nghỉ của bác sĩ
         LocalDate weekEnd = weekStart.plusDays(5);
         List<String> exclusionDays = calculateHolidaysInWeek(weekStart);
         Map<Integer, List<String>> doctorDaysOff = parseDoctorDaysOff(userDescription, weekStart, exclusionDays);
-        
-        // KHÔNG thêm rule cứng về doc6 - để AI tự quyết định dựa trên USER REQUEST
-        // Nếu user yêu cầu "full tuần", doc6 cũng phải làm thứ 7
-        
-        // Query existing schedules để tránh conflict
+
         List<sunshine_dental_care.entities.DoctorSchedule> existingSchedules = 
             doctorScheduleRepo.findByWeekRange(weekStart, weekEnd);
-        
-        // Hiển thị working days
+
         prompt.append("👉 WORKING DAYS (MUST be included in JSON keys):\n");
         String[] dayNames = {"monday", "tuesday", "wednesday", "thursday", "friday", "saturday"};
         for (int i = 0; i < 6; i++) {
@@ -438,8 +432,7 @@ public class AiScheduleGenerationServiceImpl implements AiScheduleGenerationServ
                 prompt.append(String.format("  - %s (%s)\n", dayNames[i], weekStart.plusDays(i)));
             }
         }
-        
-        // Hiển thị excluded days
+
         if (!exclusionDays.isEmpty()) {
             prompt.append("\n❌ EXCLUDED DAYS (DO NOT include in JSON keys):\n");
             for (int i = 0; i < 6; i++) {
@@ -450,8 +443,7 @@ public class AiScheduleGenerationServiceImpl implements AiScheduleGenerationServ
                 }
             }
         }
-        
-        // Hiển thị doctor days off
+
         if (!doctorDaysOff.isEmpty()) {
             prompt.append("\n⚠️ DOCTOR SPECIFIC DAYS OFF (MUST EXCLUDE DOCTOR):\n");
             for (Map.Entry<Integer, List<String>> entry : doctorDaysOff.entrySet()) {
@@ -460,8 +452,7 @@ public class AiScheduleGenerationServiceImpl implements AiScheduleGenerationServ
                 prompt.append(String.format("  - Doctor ID %d is OFF on: %s\n", docId, days.toUpperCase()));
             }
         }
-        
-        // Hiển thị existing schedules để AI tránh conflict
+
         if (!existingSchedules.isEmpty()) {
             prompt.append("\n⚠️ EXISTING SCHEDULES (DO NOT CREATE DUPLICATES):\n");
             prompt.append("The following schedules already exist for this week. DO NOT create overlapping assignments:\n");
@@ -484,15 +475,12 @@ public class AiScheduleGenerationServiceImpl implements AiScheduleGenerationServ
             }
             prompt.append("  ⚠️ CRITICAL: DO NOT create any assignments that overlap with existing schedules above!\n");
         }
-        
+
         prompt.append("═══════════════════════════════════════════════════════════\n\n");
-        
-        // Phần 3: AVAILABLE RESOURCES - Query from database
         prompt.append("═══════════════════════════════════════════════════════════\n");
         prompt.append("📋 AVAILABLE RESOURCES IN SYSTEM\n");
         prompt.append("═══════════════════════════════════════════════════════════\n");
-        
-        // Get available doctors with DOCTOR role
+
         var allUserRoles = userRoleRepo.findAll();
         var doctors = allUserRoles.stream()
             .filter(ur -> ur.getIsActive() && ur.getRole() != null && "DOCTOR".equals(ur.getRole().getRoleName()))
@@ -500,7 +488,7 @@ public class AiScheduleGenerationServiceImpl implements AiScheduleGenerationServ
             .filter(u -> u != null && u.getIsActive())
             .distinct()
             .toList();
-        
+
         prompt.append("AVAILABLE DOCTORS (you MUST use ONLY these doctor IDs):\n");
         if (doctors.isEmpty()) {
             prompt.append("  ⚠️ NO DOCTORS AVAILABLE - Cannot create schedule\n");
@@ -514,8 +502,34 @@ public class AiScheduleGenerationServiceImpl implements AiScheduleGenerationServ
             }
         }
         prompt.append("\n");
-        
-        // Get available clinics
+
+        Map<Integer, List<String>> doctorLeaveDays = new HashMap<>();
+        for (var doctor : doctors) {
+            List<String> leaveDays = new ArrayList<>();
+            for (int i = 0; i < 6; i++) {
+                LocalDate date = weekStart.plusDays(i);
+                boolean hasApprovedLeave = leaveRequestRepo.hasApprovedLeaveOnDate(doctor.getId(), date);
+                if (hasApprovedLeave) {
+                    String dayName = dayNames[i];
+                    leaveDays.add(dayName);
+                }
+            }
+            if (!leaveDays.isEmpty()) {
+                doctorLeaveDays.put(doctor.getId(), leaveDays);
+            }
+        }
+        if (!doctorLeaveDays.isEmpty()) {
+            prompt.append("🚫 APPROVED LEAVE REQUESTS (MUST EXCLUDE DOCTOR ON THESE DAYS):\n");
+            prompt.append("The following doctors have APPROVED leave requests. DO NOT create schedules for them on these days:\n");
+            for (Map.Entry<Integer, List<String>> entry : doctorLeaveDays.entrySet()) {
+                int docId = entry.getKey();
+                String days = String.join(", ", entry.getValue());
+                prompt.append(String.format("  - Doctor ID %d has APPROVED leave on: %s\n", docId, days.toUpperCase()));
+            }
+            prompt.append("  ⚠️ CRITICAL: DO NOT create any assignments for doctors with approved leave on those days!\n");
+            prompt.append("\n");
+        }
+
         var clinics = clinicRepo.findAll().stream()
             .filter(c -> c.getIsActive() != null && c.getIsActive())
             .toList();
@@ -525,8 +539,7 @@ public class AiScheduleGenerationServiceImpl implements AiScheduleGenerationServ
                 clinic.getId(), clinic.getClinicName(), clinic.getAddress()));
         }
         prompt.append("\n");
-        
-        // Get available rooms
+
         var rooms = roomRepo.findByIsActiveTrueOrderByRoomNameAsc();
         prompt.append("AVAILABLE ROOMS (you MUST use ONLY these room IDs):\n");
         for (var room : rooms) {
@@ -538,8 +551,7 @@ public class AiScheduleGenerationServiceImpl implements AiScheduleGenerationServ
                 room.getNumberOfChairs()));
         }
         prompt.append("═══════════════════════════════════════════════════════════\n\n");
-        
-        // Phần 4: CRITICAL - Yêu cầu JSON format
+
         prompt.append("═══════════════════════════════════════════════════════════\n");
         prompt.append("⚠️ CRITICAL INSTRUCTION - MUST FOLLOW ⚠️\n");
         prompt.append("═══════════════════════════════════════════════════════════\n");
@@ -547,142 +559,52 @@ public class AiScheduleGenerationServiceImpl implements AiScheduleGenerationServ
         prompt.append("{\n");
         prompt.append("  \"dailyAssignments\": {\n");
         prompt.append("    \"monday\": [\n");
-        prompt.append("      // ⚠️ CRITICAL RULE: Each doctor works 2 shifts per day at DIFFERENT clinics\n");
-        prompt.append("      // Doctor 21: Morning at Clinic 1, Afternoon at Clinic 2 (DIFFERENT clinics!)\n");
+        prompt.append("      // Each doctor must work 2 shifts per day at different clinics\n");
         prompt.append("      {\"doctorId\": 21, \"clinicId\": 1, \"roomId\": 1, \"startTime\": \"08:00\", \"endTime\": \"11:00\"},\n");
-        prompt.append("      {\"doctorId\": 21, \"clinicId\": 2, \"roomId\": 7, \"startTime\": \"13:00\", \"endTime\": \"18:00\"},\n");
-        prompt.append("      // Doctor 22: Morning at Clinic 2, Afternoon at Clinic 1 (DIFFERENT clinics!)\n");
-        prompt.append("      {\"doctorId\": 22, \"clinicId\": 2, \"roomId\": 8, \"startTime\": \"08:00\", \"endTime\": \"11:00\"},\n");
-        prompt.append("      {\"doctorId\": 22, \"clinicId\": 1, \"roomId\": 2, \"startTime\": \"13:00\", \"endTime\": \"18:00\"},\n");
-        prompt.append("      // Doctor 23: Morning at Clinic 1, Afternoon at Clinic 2\n");
-        prompt.append("      {\"doctorId\": 23, \"clinicId\": 1, \"roomId\": 3, \"startTime\": \"08:00\", \"endTime\": \"11:00\"},\n");
-        prompt.append("      {\"doctorId\": 23, \"clinicId\": 2, \"roomId\": 9, \"startTime\": \"13:00\", \"endTime\": \"18:00\"},\n");
-        prompt.append("      // ... continue for all doctors (each doctor = 2 entries with DIFFERENT clinics)\n");
+        prompt.append("      {\"doctorId\": 21, \"clinicId\": 2, \"roomId\": 7, \"startTime\": \"13:00\", \"endTime\": \"18:00\"}\n");
         prompt.append("    ],\n");
         prompt.append("    \"tuesday\": [\n");
-        prompt.append("      // You can rotate: If Monday morning was Clinic 1, Tuesday morning can be Clinic 2\n");
-        prompt.append("      // But SAME DAY must have DIFFERENT clinics for morning and afternoon\n");
         prompt.append("      {\"doctorId\": 21, \"clinicId\": 2, \"roomId\": 7, \"startTime\": \"08:00\", \"endTime\": \"11:00\"},\n");
-        prompt.append("      {\"doctorId\": 21, \"clinicId\": 1, \"roomId\": 1, \"startTime\": \"13:00\", \"endTime\": \"18:00\"},\n");
-        prompt.append("      // ...\n");
+        prompt.append("      {\"doctorId\": 21, \"clinicId\": 1, \"roomId\": 1, \"startTime\": \"13:00\", \"endTime\": \"18:00\"}\n");
         prompt.append("    ],\n");
         prompt.append("    \"wednesday\": [...],\n");
         prompt.append("    \"thursday\": [...],\n");
         prompt.append("    \"friday\": [...],\n");
         prompt.append("    \"saturday\": [\n");
-        prompt.append("      // ⚠️ IMPORTANT: Saturday is a WORKING DAY - include ALL doctors (unless they have days off)\n");
-        prompt.append("      // If user requests 'full tuần', ALL doctors including Doctor 6 must work on Saturday\n");
         prompt.append("      {\"doctorId\": 21, \"clinicId\": 1, \"roomId\": 1, \"startTime\": \"08:00\", \"endTime\": \"11:00\"},\n");
-        prompt.append("      {\"doctorId\": 21, \"clinicId\": 2, \"roomId\": 7, \"startTime\": \"13:00\", \"endTime\": \"18:00\"},\n");
-        prompt.append("      // ... include ALL doctors (each doctor = 2 entries with DIFFERENT clinics)\n");
+        prompt.append("      {\"doctorId\": 21, \"clinicId\": 2, \"roomId\": 7, \"startTime\": \"13:00\", \"endTime\": \"18:00\"}\n");
         prompt.append("    ]\n");
         prompt.append("  }\n");
         prompt.append("}\n\n");
-        prompt.append("BUSINESS RULES (MUST FOLLOW - IN ORDER OF PRIORITY):\n");
-        prompt.append("═══════════════════════════════════════════════════════════\n");
-        prompt.append("🎯 CORE REQUIREMENTS (HIGHEST PRIORITY):\n");
-        prompt.append("═══════════════════════════════════════════════════════════\n");
-        prompt.append("1. ⚠️ FULL WEEK COVERAGE: ALL doctors MUST work on ALL working days (Monday through Saturday, excluding holidays and their specific days off)\n");
-        prompt.append("   - FULL WEEK means Monday, Tuesday, Wednesday, Thursday, Friday, AND Saturday (6 days total)\n");
-        prompt.append("   - ⚠️ CRITICAL: If user requests 'full tuần' or 'full week', this means ALL 6 days for ALL doctors\n");
-        prompt.append("   - If a day is NOT a holiday and NOT in a doctor's days off list, that doctor MUST be scheduled\n");
-        prompt.append("   - Example: If Monday is a working day and Doctor 21 is not off, Doctor 21 MUST appear in Monday's schedule\n");
-        prompt.append("   - Example: If Saturday is NOT a holiday and Doctor 21 is not off, Doctor 21 MUST appear in Saturday's schedule\n");
-        prompt.append("   - ⚠️ CRITICAL: Saturday is a WORKING DAY unless it's a holiday. Include ALL doctors on Saturday (except those with days off)\n");
-        prompt.append("   - ⚠️ CRITICAL: If user says 'full tuần', Doctor 6 MUST also work on Saturday (unless Saturday is a holiday or Doctor 6 has Saturday in days off)\n");
-        prompt.append("   - This means: Count working days (excluding holidays). Each doctor must work on ALL of those days (except their days off)\n\n");
-        prompt.append("2. ⚠️ DUAL SHIFT REQUIREMENT: Each doctor MUST work BOTH morning (08:00-11:00) AND afternoon (13:00-18:00) shifts on EVERY working day\n");
-        prompt.append("   - This means 2 entries per doctor per working day (one for morning, one for afternoon)\n");
-        prompt.append("   - Example: Doctor 21 on Monday should have EXACTLY 2 entries: 08:00-11:00 and 13:00-18:00\n");
-        prompt.append("   - NO EXCEPTIONS: Every doctor working on a day MUST have both shifts\n\n");
-        prompt.append("3. ⚠️ CLINIC ROTATION: Each doctor MUST work at DIFFERENT clinics for morning and afternoon shifts on the SAME day\n");
-        prompt.append("   - Example: If Doctor 21 works at Clinic 1 in the morning (08:00-11:00), they MUST work at Clinic 2 in the afternoon (13:00-18:00)\n");
-        prompt.append("   - Example: If Doctor 22 works at Clinic 2 in the morning, they MUST work at Clinic 1 in the afternoon\n");
-        prompt.append("   - This rule applies to EVERY doctor on EVERY working day\n");
-        prompt.append("   - ⚠️ WEEKLY ROTATION: Rotate clinics across different days to ensure fair distribution\n");
-        prompt.append("     * Example: Doctor 21: Mon (C1 AM, C2 PM), Tue (C2 AM, C1 PM), Wed (C1 AM, C2 PM), etc.\n");
-        prompt.append("     * This creates variety and ensures doctors work at both clinics throughout the week\n\n");
-        prompt.append("═══════════════════════════════════════════════════════════\n");
-        prompt.append("📋 STAFFING REQUIREMENTS:\n");
-        prompt.append("═══════════════════════════════════════════════════════════\n");
-        prompt.append("4. Each clinic must have at least 2 doctors in morning shift (08:00-11:00) on EVERY working day\n");
-        prompt.append("5. Each clinic must have at least 2 doctors in afternoon shift (13:00-18:00) on EVERY working day\n");
-        prompt.append("6. ⚠️ SPECIALTY BALANCE: Each specialty MUST have doctors assigned to BOTH clinics on each working day\n");
-        prompt.append("   - Example: If you assign a 'Preventive Care' doctor to Clinic 1, you MUST also assign\n");
-        prompt.append("     another 'Preventive Care' doctor to Clinic 2 on the same day\n");
-        prompt.append("   - Exception: If only ONE doctor of a specialty is available (due to days off), assign them to both clinics (morning at one, afternoon at the other)\n\n");
-        prompt.append("═══════════════════════════════════════════════════════════\n");
-        prompt.append("🚫 EXCLUSION RULES:\n");
-        prompt.append("═══════════════════════════════════════════════════════════\n");
-        prompt.append("7. ⚠️ PUBLIC HOLIDAYS: DO NOT schedule ANY doctors on public holidays\n");
-        prompt.append("   - If a date is listed in EXCLUDED DAYS section above, that date MUST be EXCLUDED from dailyAssignments\n");
-        prompt.append("   - Example: If Thursday (01/01/2026) is New Year's Day, do NOT include \"thursday\" in dailyAssignments\n");
-        prompt.append("   - Only schedule on working days (non-holiday dates)\n\n");
-        prompt.append("8. ⚠️ DOCTOR DAYS OFF: Follow the USER REQUEST exactly for doctor days off (see DOCTOR SPECIFIC DAYS OFF section above)\n");
-        prompt.append("   - Read the USER REQUEST carefully. If user says 'doc4 và doc5 nghỉ hai ngày không tính ngày lễ', you MUST:\n");
-        prompt.append("     * Count working days (excluding holidays listed in EXCLUDED DAYS section)\n");
-        prompt.append("     * Assign Doctor 4 to be off on exactly 2 working days (you choose which 2 days, but they must be different)\n");
-        prompt.append("     * Assign Doctor 5 to be off on exactly 2 DIFFERENT working days (you choose which 2 days, different from Doctor 4's days off)\n");
-        prompt.append("     * Ensure the 2 days off for each doctor are different from each other\n");
-        prompt.append("   - When a doctor is off, redistribute their shifts to other available doctors\n");
-        prompt.append("   - Ensure remaining doctors still follow the 2-shifts-per-day and different-clinics rules\n");
-        prompt.append("   - ⚠️ CRITICAL: Days off are IN ADDITION to holidays. If user says '2 days off excluding holidays', count 2 working days (not including holidays)\n");
-        prompt.append("   - ⚠️ CRITICAL: If user specifies specific days off, follow exactly. If user says 'nghỉ hai ngày không tính ngày lễ', you choose which 2 working days\n\n");
-        prompt.append("9. ⚠️ FOLLOW USER REQUEST: If user requests 'full tuần' or 'full week', ALL doctors (including Doctor 6) MUST work on Saturday (unless it's a holiday or their specific days off)\n");
-        prompt.append("   - FULL WEEK means ALL 6 days (Monday-Saturday) for ALL doctors\n");
-        prompt.append("   - Only exclude doctors from Saturday if:\n");
-        prompt.append("     * Saturday is a public holiday, OR\n");
-        prompt.append("     * The doctor has Saturday in their specific days off list (see DOCTOR SPECIFIC DAYS OFF section)\n");
-        prompt.append("   - If user does NOT specify that Doctor 6 should be off on Saturday, Doctor 6 MUST be scheduled on Saturday\n\n");
-        prompt.append("═══════════════════════════════════════════════════════════\n");
-        prompt.append("✅ VALIDATION CHECKLIST:\n");
-        prompt.append("═══════════════════════════════════════════════════════════\n");
-        prompt.append("Before returning the JSON, verify:\n");
-        prompt.append("- [ ] Every working day (Monday-Saturday, excluding holidays) has ALL available doctors scheduled\n");
-        prompt.append("- [ ] Saturday is included as a working day (unless it's a holiday)\n");
-        prompt.append("- [ ] Every doctor on every working day has EXACTLY 2 entries (morning + afternoon)\n");
-        prompt.append("- [ ] Every doctor's morning and afternoon shifts are at DIFFERENT clinics\n");
-        prompt.append("- [ ] Doctors rotate clinics across different days of the week\n");
-        prompt.append("- [ ] Each clinic has at least 2 doctors in both morning and afternoon shifts\n");
-        prompt.append("- [ ] Follow USER REQUEST exactly for Doctor 4 and Doctor 5 days off (if specified)\n");
-        prompt.append("- [ ] If user requests 'full tuần', Doctor 6 MUST be scheduled on Saturday (unless Saturday is a holiday)\n");
-        prompt.append("- [ ] No assignments on public holidays\n");
-        prompt.append("- [ ] All 6 days (Monday-Saturday) are covered, except holidays\n\n");
-        
-        prompt.append("JSON FORMAT RULES:\n");
-        prompt.append("1. Return ONLY the JSON object, NO explanatory text before or after\n");
-        prompt.append("2. Do NOT wrap in markdown code blocks (no ```json or ```)\n");
-        prompt.append("3. Use double quotes for all strings\n");
-        prompt.append("4. Time format: \"HH:mm\" (e.g., \"08:00\", \"13:00\")\n");
-        prompt.append("5. Days: monday, tuesday, wednesday, thursday, friday, saturday\n");
-        prompt.append("6. All fields (doctorId, clinicId, roomId, startTime, endTime) are required\n");
-        prompt.append("7. ⚠️ CRITICAL: Use ONLY the doctor IDs, clinic IDs, and room IDs listed in AVAILABLE RESOURCES above\n");
-        prompt.append("8. ⚠️ CRITICAL: Match room IDs with their correct clinic IDs (check the room's clinic in the list)\n");
-        prompt.append("9. ⚠️ CRITICAL: EXCLUDE any day that is a Vietnamese public holiday (see VIETNAM PUBLIC HOLIDAYS section above)\n");
-        prompt.append("   - If a day is a holiday, do NOT include that day key in dailyAssignments\n");
-        prompt.append("   - Only include working days (non-holiday dates) in the schedule\n");
-        prompt.append("10. If you cannot generate a schedule, return an empty dailyAssignments object: {\"dailyAssignments\": {}}\n");
-        prompt.append("═══════════════════════════════════════════════════════════\n\n");
-        prompt.append("Now generate the schedule based on the USER REQUEST above.\n");
-        prompt.append("Remember: ONLY return the JSON object, nothing else.\n");
-        
+        prompt.append("BUSINESS RULES (IN PRIORITY ORDER):\n");
+        prompt.append("1. All doctors work all working days (Monday-Saturday), except holidays and their days off\n");
+        prompt.append("2. Each doctor must work 2 shifts/day (morning 08:00-11:00 & afternoon 13:00-18:00)\n");
+        prompt.append("3. For each day, a doctor must work at different clinics for morning and afternoon shift\n");
+        prompt.append("4. Minimum 2 doctors per clinic per shift\n");
+        prompt.append("5. Each specialty must be present at both clinics each day\n");
+        prompt.append("6. No assignments on holiday\n");
+        prompt.append("7. Doctor's days off strictly follow user request (see DOCTOR SPECIFIC DAYS OFF)\n");
+        prompt.append("8. Do not create any conflicts with existing schedules\n");
+        prompt.append("9. Only use IDs provided in AVAILABLE RESOURCES\n");
+        prompt.append("\nJSON FORMAT:\n");
+        prompt.append("• Output ONLY the JSON object, no extra text\n");
+        prompt.append("• Do not wrap in markdown (no ```json)\n");
+        prompt.append("• Double quotes on all keys\n");
+        prompt.append("• If no valid schedule, return {\"dailyAssignments\":{}}\n");
+        prompt.append("\nNow generate the schedule based on the USER REQUEST above.\nONLY output the JSON object.\n");
+
         return prompt.toString();
     }
     
-    // Trích xuất JSON từ text response (xử lý trường hợp Gemini trả về text + JSON)
+    // Phương thức quan trọng: extract JSON thuần từ text trả về (có thể có markdown hoặc text)
     private String extractJsonFromText(String text) {
         if (text == null || text.isEmpty()) {
             return null;
         }
-
         String trimmed = text.trim();
-
-        // Trường hợp 1: Text bắt đầu bằng { hoặc [ (JSON thuần)
         if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
             return trimmed;
         }
-
-        // Trường hợp 2: Text có markdown code block ```json ... ```
         if (trimmed.contains("```json")) {
             int startIndex = trimmed.indexOf("```json") + 7;
             int endIndex = trimmed.indexOf("```", startIndex);
@@ -690,22 +612,17 @@ public class AiScheduleGenerationServiceImpl implements AiScheduleGenerationServ
                 return trimmed.substring(startIndex, endIndex).trim();
             }
         }
-
-        // Trường hợp 3: Text có markdown code block ``` ... ```
         if (trimmed.contains("```")) {
             int startIndex = trimmed.indexOf("```") + 3;
             int endIndex = trimmed.indexOf("```", startIndex);
             if (endIndex > startIndex) {
                 String extracted = trimmed.substring(startIndex, endIndex).trim();
-                // Bỏ "json" nếu có ở đầu
                 if (extracted.startsWith("json")) {
                     extracted = extracted.substring(4).trim();
                 }
                 return extracted;
             }
         }
-
-        // Trường hợp 4: Tìm JSON object trong text (bắt đầu bằng { và kết thúc bằng })
         int jsonStart = trimmed.indexOf('{');
         if (jsonStart >= 0) {
             int jsonEnd = trimmed.lastIndexOf('}');
@@ -713,109 +630,75 @@ public class AiScheduleGenerationServiceImpl implements AiScheduleGenerationServ
                 return trimmed.substring(jsonStart, jsonEnd + 1);
             }
         }
-
-        // Không tìm thấy JSON
         return null;
     }
     
-    // Tính toán ngày nghỉ lễ Việt Nam trong tuần
+    // Lấy danh sách các ngày lễ của Việt Nam trong một tuần
     private List<String> calculateHolidaysInWeek(LocalDate weekStart) {
         List<String> holidays = new ArrayList<>();
         String[] dayNames = {"monday", "tuesday", "wednesday", "thursday", "friday", "saturday"};
-        
         for (int i = 0; i < 6; i++) {
             LocalDate date = weekStart.plusDays(i);
             if (isVietnameseHoliday(date)) {
                 holidays.add(dayNames[i]);
             }
         }
-        
         return holidays;
     }
     
-    // Kiểm tra xem một ngày có phải là ngày nghỉ lễ Việt Nam không
+    // Kiểm tra 1 ngày có phải là ngày lễ (VN) không
     private boolean isVietnameseHoliday(LocalDate date) {
         int month = date.getMonthValue();
         int day = date.getDayOfMonth();
         int year = date.getYear();
-        
-        // 1. Tết Dương lịch (1/1)
-        if (month == 1 && day == 1) {
+        if (month == 1 && day == 1)
             return true;
-        }
-        
-        // 2. Ngày Giải phóng miền Nam (30/4)
-        if (month == 4 && day == 30) {
+        if (month == 4 && day == 30)
             return true;
-        }
-        
-        // 3. Ngày Quốc tế Lao động (1/5)
-        if (month == 5 && day == 1) {
+        if (month == 5 && day == 1)
             return true;
-        }
-        
-        // 4. Quốc khánh (2/9)
-        if (month == 9 && day == 2) {
+        if (month == 9 && day == 2)
             return true;
-        }
-        
-        // 5. Giỗ Tổ Hùng Vương (10/3 âm lịch) - xấp xỉ 10/4 dương lịch
-        // Note: Cần tính chính xác theo âm lịch, nhưng tạm thời dùng 10/4
-        if (month == 4 && day == 10) {
+        if (month == 4 && day == 10)
             return true;
-        }
-        
-        // 6. Tết Nguyên Đán - cần tính theo âm lịch
-        // Tạm thời hardcode một số năm gần đây (có thể cải thiện sau)
-        if (isTetNguyenDan(date, year)) {
+        if (isTetNguyenDan(date, year))
             return true;
-        }
-        
         return false;
     }
     
-    // Kiểm tra Tết Nguyên Đán (tạm thời hardcode, nên cải thiện bằng thư viện âm lịch)
+    // Kiểm tra ngày có thuộc Tết Nguyên Đán không (chỉ check cứng vài năm)
     private boolean isTetNguyenDan(LocalDate date, int year) {
-        // Tết Nguyên Đán thường rơi vào cuối tháng 1 hoặc đầu tháng 2
-        // Hardcode một số năm (có thể cải thiện bằng thư viện âm lịch)
         Map<Integer, LocalDate[]> tetDates = new HashMap<>();
-        tetDates.put(2024, new LocalDate[]{LocalDate.of(2024, 2, 10), LocalDate.of(2024, 2, 16)}); // 10-16/2/2024
-        tetDates.put(2025, new LocalDate[]{LocalDate.of(2025, 1, 29), LocalDate.of(2025, 2, 4)}); // 29/1-4/2/2025
-        tetDates.put(2026, new LocalDate[]{LocalDate.of(2026, 2, 17), LocalDate.of(2026, 2, 23)}); // 17-23/2/2026
-        
+        tetDates.put(2024, new LocalDate[]{LocalDate.of(2024, 2, 10), LocalDate.of(2024, 2, 16)});
+        tetDates.put(2025, new LocalDate[]{LocalDate.of(2025, 1, 29), LocalDate.of(2025, 2, 4)});
+        tetDates.put(2026, new LocalDate[]{LocalDate.of(2026, 2, 17), LocalDate.of(2026, 2, 23)});
         if (tetDates.containsKey(year)) {
             LocalDate[] range = tetDates.get(year);
             return !date.isBefore(range[0]) && !date.isAfter(range[1]);
         }
-        
         return false;
     }
     
-    // Lấy tên ngày nghỉ lễ
+    // Lấy tên ngày lễ từ ngày
     private String getHolidayName(LocalDate date) {
         int month = date.getMonthValue();
         int day = date.getDayOfMonth();
-        
         if (month == 1 && day == 1) return "New Year's Day (Tết Dương lịch)";
         if (month == 4 && day == 10) return "Hung Kings Festival (Giỗ Tổ Hùng Vương)";
         if (month == 4 && day == 30) return "Liberation Day (Ngày Giải phóng miền Nam)";
         if (month == 5 && day == 1) return "Labor Day (Ngày Quốc tế Lao động)";
         if (month == 9 && day == 2) return "National Day (Quốc khánh)";
         if (isTetNguyenDan(date, date.getYear())) return "Vietnamese New Year (Tết Nguyên Đán)";
-        
         return "Public Holiday";
     }
     
-    // CHỈ PARSE - KHÔNG TỰ ĐỘNG XỬ LÝ - ĐỂ AI TỰ QUYẾT ĐỊNH DỰA TRÊN PROMPT
+    // Chỉ parse ngày nghỉ của bác sĩ theo mô tả user, không tự động gán ngày cụ thể
     private Map<Integer, List<String>> parseDoctorDaysOff(String userDescription, @SuppressWarnings("unused") LocalDate weekStart, @SuppressWarnings("unused") List<String> exclusionDays) {
         Map<Integer, List<String>> doctorDaysOff = new HashMap<>();
         if (userDescription == null || userDescription.trim().isEmpty()) {
             return doctorDaysOff;
         }
-        
         String descLower = userDescription.toLowerCase();
-        
-        // Map tiếng Việt và tiếng Anh
         Map<String, String> dayMap = new HashMap<>();
         dayMap.put("thứ 2", "monday");
         dayMap.put("thứ hai", "monday");
@@ -835,19 +718,13 @@ public class AiScheduleGenerationServiceImpl implements AiScheduleGenerationServ
         dayMap.put("thursday", "thursday");
         dayMap.put("friday", "friday");
         dayMap.put("saturday", "saturday");
-        
-        // Pattern: doc<id> nghỉ <days> hoặc doctor <id> off <days>
         Pattern pattern = Pattern.compile("(?:doc|doctor)\\s*(\\d+)\\s+(?:nghỉ|off|nghỉ cả tuần|off all week)(?:\\s+(?:vào|on|thứ|ngày)?\\s*([^,\\.]+))?", Pattern.CASE_INSENSITIVE);
         Matcher matcher = pattern.matcher(descLower);
-        
         while (matcher.find()) {
             int doctorId = Integer.parseInt(matcher.group(1));
             String daysStr = matcher.group(2);
-            
             List<String> days = new ArrayList<>();
-            
             if (daysStr != null && !daysStr.trim().isEmpty()) {
-                // Parse các ngày
                 String[] parts = daysStr.split("(?:và|and|,|\\s+)");
                 for (String part : parts) {
                     part = part.trim();
@@ -859,22 +736,16 @@ public class AiScheduleGenerationServiceImpl implements AiScheduleGenerationServ
                     }
                 }
             } else {
-                // "nghỉ cả tuần" hoặc "off all week"
                 days.addAll(List.of("monday", "tuesday", "wednesday", "thursday", "friday", "saturday"));
             }
-            
             if (!days.isEmpty()) {
                 doctorDaysOff.put(doctorId, days);
             }
         }
-        
-        // KHÔNG tự động xử lý - chỉ parse thông tin từ user input
-        // AI sẽ tự quyết định dựa trên yêu cầu trong promp
-        
         return doctorDaysOff;
     }
     
-    // Lấy tên ngày từ date (monday, tuesday, etc.)
+    // Trả về tên ngày trong tuần (mon-sat) theo thứ tự tuần
     private String getDayNameFromDate(LocalDate weekStart, LocalDate date) {
         long daysBetween = java.time.temporal.ChronoUnit.DAYS.between(weekStart, date);
         String[] dayNames = {"monday", "tuesday", "wednesday", "thursday", "friday", "saturday"};

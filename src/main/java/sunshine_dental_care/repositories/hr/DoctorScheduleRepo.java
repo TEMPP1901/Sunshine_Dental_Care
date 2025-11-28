@@ -29,7 +29,7 @@ public interface DoctorScheduleRepo extends JpaRepository<DoctorSchedule, Intege
     @Query("SELECT COUNT(d) > 0 FROM DoctorSchedule d WHERE d.doctor.id = :doctorId AND d.workDate = :workDate")
     boolean existsByDoctorAndDate(@Param("doctorId") Integer doctorId, @Param("workDate") LocalDate workDate);
     
-    // Lấy schedule của user tại clinic trong ngày
+    // Lấy schedule của user tại clinic trong ngày (chỉ ACTIVE)
     // Lấy lịch làm việc tại CLINIC KHÁCH CHỌN thêm điều kiện status = 'ACTIVE' của bác sĩ tại clinicId đó
     @Query("SELECT d FROM DoctorSchedule d WHERE d.doctor.id = :userId AND d.clinic.id = :clinicId AND d.workDate = :workDate AND d.status = 'ACTIVE'")
     List<DoctorSchedule> findByUserIdAndClinicIdAndWorkDate(
@@ -37,6 +37,12 @@ public interface DoctorScheduleRepo extends JpaRepository<DoctorSchedule, Intege
         @Param("clinicId") Integer clinicId, 
         @Param("workDate") LocalDate workDate);
 
+    // Lấy schedule của user tại clinic trong ngày (tất cả status - dùng để update)
+    @Query("SELECT d FROM DoctorSchedule d WHERE d.doctor.id = :userId AND d.clinic.id = :clinicId AND d.workDate = :workDate ORDER BY d.startTime")
+    List<DoctorSchedule> findByUserIdAndClinicIdAndWorkDateAllStatus(
+        @Param("userId") Integer userId, 
+        @Param("clinicId") Integer clinicId, 
+        @Param("workDate") LocalDate workDate);
     
     // Lấy tất cả schedule của bác sĩ trong ngày
     @Query("SELECT d FROM DoctorSchedule d WHERE d.doctor.id = :doctorId AND d.workDate = :workDate ORDER BY d.startTime")
