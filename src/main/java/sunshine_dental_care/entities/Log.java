@@ -35,21 +35,19 @@ public class Log {
     @Column(name = "notificationId")
     private Integer id;
 
-    // --- THAY ĐỔI: THÊM QUAN HỆ USER ---
-    @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "userId", nullable = false)
-    private User user;
-    
-    // Read-only field để tương thích với code cũ
     @Column(name = "userId", nullable = false, insertable = false, updatable = false)
     private Integer userId;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "userId")
+    private User user;
 
     @Column(name = "type", nullable = false, length = 50)
     private String type; // APPOINTMENT_CREATED, ATTENDANCE_CHECKIN, etc.
 
     @Column(name = "priority", nullable = false, length = 20)
     private String priority; // HIGH, MEDIUM, LOW
-    // --- THAY ĐỔI: THÊM QUAN HỆ CLINIC ---
+
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "clinicId")
     private Clinic clinic;
@@ -102,6 +100,7 @@ public class Log {
     @ColumnDefault("sysutcdatetime()")
     @Column(name = "createdAt", nullable = false)
     private Instant createdAt;
+
     @Column(name = "actionTime", nullable = false)
     private Instant actionTime;
 
@@ -111,92 +110,11 @@ public class Log {
     // --- LIFECYCLE CALLBACK ---
     @PrePersist
     public void prePersist() {
-        if (actionTime == null) actionTime = Instant.now();
+        if (actionTime == null)
+            actionTime = Instant.now();
         if (createdAt == null)
             createdAt = Instant.now();
         if (isRead == null)
             isRead = false;
-    }
-
-    // --- GETTERS & SETTERS ---
-
-    public Integer getId() {
-        return id;
-    }
-
-    public void setId(Integer id) {
-        this.id = id;
-    }
-
-    public User getUser() {
-        return user;
-    }
-
-    public void setUser(User user) {
-        this.user = user;
-    }
-
-    public Clinic getClinic() {
-        return clinic;
-    }
-
-    public void setClinic(Clinic clinic) {
-        this.clinic = clinic;
-    }
-
-    public String getAction() {
-        return action;
-    }
-
-    public void setAction(String action) {
-        this.action = action;
-    }
-
-    public String getTableName() {
-        return tableName;
-    }
-
-    public void setTableName(String tableName) {
-        this.tableName = tableName;
-    }
-
-    public Integer getRecordId() {
-        return recordId;
-    }
-
-    public void setRecordId(Integer recordId) {
-        this.recordId = recordId;
-    }
-
-    public String getAfterData() {
-        return afterData;
-    }
-
-    public void setAfterData(String afterData) {
-        this.afterData = afterData;
-    }
-
-    public String getIpAddr() {
-        return ipAddr;
-    }
-
-    public void setIpAddr(String ipAddr) {
-        this.ipAddr = ipAddr;
-    }
-
-    public String getUserAgent() {
-        return userAgent;
-    }
-
-    public void setUserAgent(String userAgent) {
-        this.userAgent = userAgent;
-    }
-
-    public Instant getActionTime() {
-        return actionTime;
-    }
-
-    public void setActionTime(Instant actionTime) {
-        this.actionTime = actionTime;
     }
 }

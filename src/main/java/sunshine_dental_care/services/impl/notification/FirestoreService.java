@@ -76,17 +76,27 @@ public class FirestoreService {
             }
 
             String collectionPath = "notifications/" + userId + "/items";
+            String documentId = String.valueOf(notificationId);
+            
+            // Kiểm tra document có tồn tại không
+            var docRef = db.collection(collectionPath).document(documentId);
+            var docSnapshot = docRef.get().get();
+            
+            if (!docSnapshot.exists()) {
+                log.warn("[Firestore] Document not found, skipping mark as read - UserId: {}, NotificationId: {}", userId, notificationId);
+                return;
+            }
 
             Map<String, Object> updates = new HashMap<>();
             updates.put("isRead", true);
             updates.put("readAt", Instant.now().toString());
 
-            db.collection(collectionPath)
-                .document(String.valueOf(notificationId))
-                .update(updates)
-                .get();
+            docRef.update(updates).get();
 
             log.info("[Firestore] Notification marked as read - UserId: {}, NotificationId: {}", userId, notificationId);
+        } catch (com.google.api.gax.rpc.NotFoundException e) {
+            // Document không tồn tại - không phải lỗi nghiêm trọng, chỉ log warning
+            log.warn("[Firestore] Document not found when marking as read - UserId: {}, NotificationId: {}. This is normal if notification was created before Firestore integration.", userId, notificationId);
         } catch (Exception e) {
             log.error("[Firestore] Error marking notification as read: {}", e.getMessage(), e);
         }

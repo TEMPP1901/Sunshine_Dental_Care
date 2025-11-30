@@ -53,8 +53,12 @@ public class NotificationService {
         
         // Lưu thông báo vào cơ sở dữ liệu SQL Server
         try {
+            // Load User để set vào quan hệ @ManyToOne
+            User user = userRepo.findById(request.getUserId())
+                    .orElseThrow(() -> new RuntimeException("User not found: " + request.getUserId()));
+            
             notification = Log.builder()
-                    .userId(request.getUserId())
+                    .user(user)  // Set user thay vì userId
                     .type(request.getType())
                     .priority(request.getPriority() != null ? request.getPriority() : "MEDIUM")
                     .title(request.getTitle())
