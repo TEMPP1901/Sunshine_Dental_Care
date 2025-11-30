@@ -79,6 +79,8 @@ public class SecurityConfig {
                         .requestMatchers("/ws/**").permitAll() // WebSocket endpoint (authentication handled in WebSocket layer)
 
                         .requestMatchers("/api/doctor/**","/api/patients/{patientId}/records/**").hasRole("DOCTOR") // Chỉ bác sĩ được phép,
+                        .requestMatchers("/auth/sign-up").permitAll()  // Cho phép đăng ký PATIENT * đổi vị trí vì đây là public
+                        //.requestMatchers( "/api/products/**").permitAll() // Public endpoints products *huybro
 
                         // Auth Endpoints
                         .requestMatchers(
@@ -114,6 +116,8 @@ public class SecurityConfig {
                         .requestMatchers("/api/hr/employees/**").hasRole("HR")  // Chỉ HR được phép các endpoint khác
                         .requestMatchers("/api/admin/**").hasRole("ADMIN")
                         .requestMatchers("/api/hr/management/**").hasRole("HR")  // HR Management endpoints
+
+                        //.requestMatchers("/api/products/accountant/**").hasRole("ACCOUNTANT") // Cấp phép cho accountant *huybro
                         .requestMatchers("/api/hr/employees/**").hasRole("HR")  // Chỉ HR được phép
                         .requestMatchers("/api/admin/**").hasRole("ADMIN")
 

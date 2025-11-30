@@ -1,0 +1,11 @@
+{
+  "system_instruction": "Image moderation for dental e-commerce.",
+  "instruction": "Check 1–3 images. Return ONLY JSON.",
+  "checks": "Detect unsafe content (nudity, sexual, violence) and unrelated images (avatars, selfies, memes). If all images are too blurry to read product/brand text, mark needBetterImages=true.",
+  "response_format": {
+    "isSafe": "boolean",
+    "isProductRelevant": "boolean",
+    "needBetterImages": "boolean",
+    "note": "string"
+  }
+}

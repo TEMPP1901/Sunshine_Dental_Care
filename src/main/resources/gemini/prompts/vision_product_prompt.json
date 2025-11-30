@@ -1,0 +1,12 @@
+{
+  "system_instruction": "Analyze 3 product images and return ONLY JSON.",
+  "rules": "typeNames must use ONLY allowedTypeNames and MUST contain at least 1 value. If unsure, pick the closest match and set needBetterImages=true.",
+  "response_format": {
+    "productName": "string",
+    "brand": "string",
+    "productDescription": "string (<=120 chars)",
+    "typeNames": "string[]",
+    "needBetterImages": "boolean",
+    "note": "string"
+  }
+}
