@@ -34,47 +34,49 @@ public class PromptBuilderService {
     private final DoctorScheduleRepo doctorScheduleRepo;
     private final HolidayService holidayService;
 
+    // Tạo prompt chính cho AI dựa trên mô tả và ngày bắt đầu tuần
     public String buildEnhancedPrompt(String userDescription, LocalDate weekStart) {
         StringBuilder prompt = new StringBuilder();
-        
         appendHeader(prompt);
         appendUserRequest(prompt, userDescription, weekStart);
         appendSystemResources(prompt, weekStart);
         appendOutputFormat(prompt);
         appendThoughtProcess(prompt);
         appendFinalInstructions(prompt);
-
         return prompt.toString();
     }
 
+    // Header quan trọng yêu cầu output JSON chuẩn
     private void appendHeader(StringBuilder prompt) {
         prompt.append("You are an AI-powered HR Schedule Generator for Sunshine Dental Care.\n");
         prompt.append("YOUR OUTPUT MUST BE 100% VALID JSON. NOTHING ELSE.\n");
         prompt.append("STRICTLY: Your ONLY output MUST be a perfectly formatted JSON object starting with { and ending with }.\n");
-        prompt.append("STRICTLY: DO NOT output any text, explanation, or markdown wrappers like ```json.\n\n");
+        prompt.append("STRICTLY: DO NOT output any text, explanation, or markdown wrappers.\n\n");
     }
 
+    // Đưa vào yêu cầu người dùng và ngày bắt đầu tuần
     private void appendUserRequest(StringBuilder prompt, String userDescription, LocalDate weekStart) {
-        prompt.append("═════════ USER REQUEST (HIGHEST PRIORITY) ═════════\n");
+        prompt.append("USER REQUEST (HIGHEST PRIORITY)\n");
         prompt.append("USER REQUEST: \"").append(userDescription).append("\"\n");
         prompt.append("WEEK START DATE: ").append(weekStart).append(" (Monday)\n\n");
-        prompt.append("CRITICAL: You MUST interpret and implement EVERY requirement from the USER REQUEST.\n\n");
+        prompt.append("IMPORTANT: Fulfill every requirement from the USER REQUEST.\n\n");
     }
 
+    // Liệt kê các tài nguyên và ràng buộc hệ thống
     private void appendSystemResources(StringBuilder prompt, LocalDate weekStart) {
-        prompt.append("═════════ SYSTEM RESOURCES & CONSTRAINTS ═════════\n");
+        prompt.append("SYSTEM RESOURCES AND CONSTRAINTS\n");
         
-        // Doctors
+        // Danh sách bác sĩ đang hoạt động và chuyên môn
         List<User> doctors = getActiveDoctors();
         prompt.append("AVAILABLE DOCTORS (IDs and Names):\n");
         Map<Integer, List<String>> doctorSpecialtiesMap = getDoctorSpecialtiesMap(doctors);
         for (User doctor : doctors) {
             String specialties = String.join(", ", doctorSpecialtiesMap.getOrDefault(doctor.getId(), List.of("General")));
-            prompt.append(String.format("  - ID: %d, Name: %s, Specialty: %s\n", doctor.getId(), doctor.getFullName(), specialties));
+            prompt.append(String.format("- ID: %d, Name: %s, Specialty: %s\n", doctor.getId(), doctor.getFullName(), specialties));
         }
         prompt.append("\n");
 
-        // Clinics and Rooms
+        // Liệt kê các phòng khám và phòng
         List<sunshine_dental_care.entities.Clinic> clinics = getActiveClinics();
         List<sunshine_dental_care.entities.Room> rooms = getActiveRooms();
         Map<Integer, List<sunshine_dental_care.entities.Room>> roomsByClinic = rooms.stream()
@@ -83,26 +85,24 @@ public class PromptBuilderService {
 
         prompt.append("AVAILABLE CLINICS & ROOMS (IDs and Names):\n");
         for (var clinic : clinics) {
-            prompt.append(String.format("  - Clinic ID: %d, Name: %s\n", clinic.getId(), clinic.getClinicName()));
+            prompt.append(String.format("- Clinic ID: %d, Name: %s\n", clinic.getId(), clinic.getClinicName()));
             List<sunshine_dental_care.entities.Room> clinicRooms = roomsByClinic.get(clinic.getId());
             if (clinicRooms != null && !clinicRooms.isEmpty()) {
                 for (var room : clinicRooms) {
-                    prompt.append(String.format("    - Room ID: %d, Name: %s\n", room.getId(), room.getRoomName()));
+                    prompt.append(String.format("  - Room ID: %d, Name: %s\n", room.getId(), room.getRoomName()));
                 }
             }
         }
         prompt.append("\n");
 
-        // Constraints
         LocalDate weekEnd = weekStart.plusDays(5);
         String[] dayNames = {"monday", "tuesday", "wednesday", "thursday", "friday", "saturday"};
         
-        //  Tính toán ngày lễ trong tuần (sử dụng HolidayService)
+        // Tính ngày lễ trong tuần dựa vào HolidayService
         List<String> exclusionDays = holidayService.calculateHolidaysInWeek(weekStart);
         if (!exclusionDays.isEmpty()) {
-            prompt.append(" HOLIDAYS - CRITICAL: DO NOT CREATE SCHEDULES ON THESE DAYS \n");
-            prompt.append(" These are Vietnamese national holidays. NO work assignments should be created.\n");
-            prompt.append(" DO NOT include these days in your JSON output.\n\n");
+            prompt.append("HOLIDAYS - Do not assign schedules on these dates (Vietnam national holidays):\n");
+            prompt.append("Do NOT include these days in your JSON output.\n\n");
             for (int i = 0; i < dayNames.length; i++) {
                 if (exclusionDays.contains(dayNames[i])) {
                     LocalDate date = weekStart.plusDays(i);
@@ -110,17 +110,15 @@ public class PromptBuilderService {
                     if (holidayName == null) {
                         holidayName = "Holiday";
                     }
-                    prompt.append(String.format("  - %s (%s): %s - DO NOT CREATE ANY ASSIGNMENTS\n", 
-                        dayNames[i].toUpperCase(), date, holidayName));
+                    prompt.append(String.format("  - %s (%s): %s\n", dayNames[i].toUpperCase(), date, holidayName));
                 }
             }
             prompt.append("\n");
-            prompt.append(" CRITICAL REMINDER: The days listed above are HOLIDAYS. " +
-                "Your JSON output MUST NOT include these days in the 'dailyAssignments' object.\n");
-            prompt.append("If you include holiday days in your JSON, the schedule will be REJECTED.\n\n");
+            prompt.append("The days mentioned above are holidays and must NOT be included in the JSON output for 'dailyAssignments'.\n");
+            prompt.append("\n");
         }
         
-        // Liệt kê working days (không phải ngày lễ)
+        // Liệt kê ngày làm việc (ngoại trừ ngày lễ)
         List<String> workingDays = new ArrayList<>();
         for (int i = 0; i < dayNames.length; i++) {
             if (!exclusionDays.contains(dayNames[i])) {
@@ -128,7 +126,7 @@ public class PromptBuilderService {
             }
         }
         if (!workingDays.isEmpty()) {
-            prompt.append(" WORKING DAYS (MUST include in JSON):\n");
+            prompt.append("WORKING DAYS (Must include in JSON):\n");
             for (String day : workingDays) {
                 int dayIndex = java.util.Arrays.asList(dayNames).indexOf(day);
                 prompt.append(String.format("  - %s (%s)\n", day.toUpperCase(), weekStart.plusDays(dayIndex)));
@@ -136,18 +134,20 @@ public class PromptBuilderService {
             prompt.append("\n");
         }
         
+        // Đưa vào lịch nghỉ phép đã được phê duyệt
         Map<Integer, List<String>> doctorLeaveDays = getDoctorLeaveDaysMap(doctors, weekStart, weekEnd, dayNames);
         if (!doctorLeaveDays.isEmpty()) {
-            prompt.append(" APPROVED LEAVE (DO NOT schedule on these days):\n");
+            prompt.append("APPROVED LEAVE (Doctors OFF these days):\n");
             doctorLeaveDays.forEach((docId, days) -> 
                 prompt.append(String.format("  - Doctor ID %d is OFF on: %s\n", docId, String.join(", ", days).toUpperCase()))
             );
             prompt.append("\n");
         }
 
+        // Đưa vào lịch làm việc đã có (không được chồng lặp)
         List<DoctorSchedule> existingSchedules = doctorScheduleRepo.findByWeekRange(weekStart, weekEnd);
         if (!existingSchedules.isEmpty()) {
-            prompt.append("EXISTING SCHEDULES (DO NOT create overlapping assignments):\n");
+            prompt.append("EXISTING SCHEDULES (Do not overlap these):\n");
             existingSchedules.forEach(s -> 
                 prompt.append(String.format("  - Doctor ID %d on %s (%s-%s) at Clinic %d\n", 
                     s.getDoctor().getId(), s.getWorkDate(), s.getStartTime(), s.getEndTime(), s.getClinic().getId()))
@@ -156,8 +156,9 @@ public class PromptBuilderService {
         }
     }
 
+    // Hướng dẫn định dạng JSON output bắt buộc
     private void appendOutputFormat(StringBuilder prompt) {
-        prompt.append("═════════ OUTPUT FORMAT (MUST FOLLOW) ═════════\n");
+        prompt.append("OUTPUT FORMAT (You must return only this JSON representation):\n");
         prompt.append("{\n");
         prompt.append("  \"dailyAssignments\": {\n");
         prompt.append("    \"monday\": [{\"doctorId\": 1, \"clinicId\": 1, \"roomId\": 1, \"startTime\": \"08:00\", \"endTime\": \"11:00\"}],\n");
@@ -166,20 +167,22 @@ public class PromptBuilderService {
         prompt.append("}\n\n");
     }
 
+    // Hướng dẫn tư duy giải quyết bài toán lập lịch
     private void appendThoughtProcess(StringBuilder prompt) {
-        prompt.append("═════════ YOUR THOUGHT PROCESS (MUST FOLLOW) ═════════\n");
-        prompt.append("STEP 1: Analyze USER REQUEST and SYSTEM CONSTRAINTS.\n");
-        prompt.append("STEP 2: Create a PLAN to satisfy ALL requirements.\n");
-        prompt.append("STEP 3: Generate JSON based on your PLAN.\n");
-        prompt.append("STEP 4 (CRITICAL SELF-CORRECTION): Review the generated JSON. Does it meet ALL requirements? If not, START OVER from STEP 2.\n\n");
+        prompt.append("YOUR LOGIC STEPS:\n");
+        prompt.append("1. Analyze the user request and all system constraints.\n");
+        prompt.append("2. Create a plan that satisfies every rule.\n");
+        prompt.append("3. Generate JSON output based on your plan.\n");
+        prompt.append("4. Carefully self-review: If anything is missed, start again from step 2.\n\n");
     }
 
+    // Chỉ thị gửi output cuối cùng là JSON
     private void appendFinalInstructions(StringBuilder prompt) {
-        prompt.append("═════════ FINAL INSTRUCTION ═════════\n");
-        prompt.append("NOW GENERATE THE SCHEDULE. Your response MUST start with { and end with }.\n");
+        prompt.append("FINAL INSTRUCTION:\n");
+        prompt.append("Generate the schedule now. RESPONSE MUST be valid JSON object, starting with { and ending with }.\n");
     }
 
-    // Helper methods for data fetching (optimized)
+    // Lấy danh sách bác sĩ đang hoạt động
     private List<User> getActiveDoctors() {
         return userRoleRepo.findAll().stream()
             .filter(ur -> ur.getIsActive() && ur.getRole() != null && "DOCTOR".equals(ur.getRole().getRoleName()))
@@ -189,16 +192,19 @@ public class PromptBuilderService {
             .collect(Collectors.toList());
     }
 
+    // Lấy danh sách phòng khám đang hoạt động
     private List<sunshine_dental_care.entities.Clinic> getActiveClinics() {
         return clinicRepo.findAll().stream()
             .filter(c -> c.getIsActive() != null && c.getIsActive())
             .collect(Collectors.toList());
     }
 
+    // Lấy danh sách các phòng đang hoạt động
     private List<sunshine_dental_care.entities.Room> getActiveRooms() {
         return roomRepo.findByIsActiveTrueOrderByRoomNameAsc();
     }
 
+    // Lấy map doctorId -> list chuyên môn đang hoạt động của bác sĩ
     private Map<Integer, List<String>> getDoctorSpecialtiesMap(List<User> doctors) {
         if (doctors.isEmpty()) return new HashMap<>();
         List<Integer> doctorIds = doctors.stream().map(User::getId).collect(Collectors.toList());
@@ -211,11 +217,12 @@ public class PromptBuilderService {
         return result;
     }
 
+    // Lấy map doctorId -> các ngày nghỉ của bác sĩ trong tuần đó
     private Map<Integer, List<String>> getDoctorLeaveDaysMap(List<User> doctors, LocalDate weekStart, LocalDate weekEnd, String[] dayNames) {
         if (doctors.isEmpty()) return new HashMap<>();
         List<Integer> doctorIds = doctors.stream().map(User::getId).collect(Collectors.toList());
         var leaveRequests = leaveRequestRepo.findApprovedByUserIdsAndDateRange(doctorIds, weekStart, weekEnd);
-        
+
         Map<Integer, Set<LocalDate>> doctorLeaveDates = new HashMap<>();
         for (var leave : leaveRequests) {
             Set<LocalDate> dates = doctorLeaveDates.computeIfAbsent(leave.getUser().getId(), k -> new HashSet<>());

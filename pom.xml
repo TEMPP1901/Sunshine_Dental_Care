@@ -95,10 +95,6 @@
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-oauth2-client</artifactId>
         </dependency>
-        
-        <!-- ✅ Lunar Calendar: Sử dụng thuật toán tính toán động (không cần dependency) -->
-        <!-- Các thư viện lunar calendar không có sẵn trên Maven Central -->
-        <!-- HolidayService sẽ tự động tính toán ngày lễ âm lịch cho mọi năm -->
 
         <!-- ONNX Runtime for ArcFace model -->
         <dependency>
@@ -119,7 +115,6 @@
             <artifactId>gson</artifactId>
         </dependency>
 
-
         <dependency>
             <groupId>com.cloudinary</groupId>
             <artifactId>cloudinary-http5</artifactId>
@@ -131,7 +126,25 @@
             <version>1.0.0</version>
         </dependency>
 
+        <!-- WebSocket -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-websocket</artifactId>
+        </dependency>
 
+        <!-- Firebase Admin SDK -->
+        <dependency>
+            <groupId>com.google.firebase</groupId>
+            <artifactId>firebase-admin</artifactId>
+            <version>9.2.0</version>
+        </dependency>
+        
+        <!-- Google API Client (required by Firebase Admin SDK) -->
+        <dependency>
+            <groupId>com.google.api-client</groupId>
+            <artifactId>google-api-client</artifactId>
+            <version>2.2.0</version>
+        </dependency>
     </dependencies>
 
     <build>

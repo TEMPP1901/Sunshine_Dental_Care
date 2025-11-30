@@ -1,144 +1,84 @@
 package sunshine_dental_care.entities;
 
-import jakarta.persistence.*;
+import java.time.Instant;
+
 import org.hibernate.annotations.ColumnDefault;
 import org.hibernate.annotations.Nationalized;
 
-import java.time.Instant;
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+
+import jakarta.persistence.Column;
+import jakarta.persistence.Entity;
+import jakarta.persistence.GeneratedValue;
+import jakarta.persistence.GenerationType;
+import jakarta.persistence.Id;
+import jakarta.persistence.PrePersist;
+import jakarta.persistence.Table;
+import lombok.AllArgsConstructor;
+import lombok.Builder;
+import lombok.Data;
+import lombok.NoArgsConstructor;
 
 @Entity
 @Table(name = "Logs")
+@Data
+@Builder
+@NoArgsConstructor
+@AllArgsConstructor
+@JsonIgnoreProperties({ "hibernateLazyInitializer", "handler" })
 public class Log {
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
-    @Column(name = "logId", nullable = false)
+    @Column(name = "notificationId")
     private Integer id;
 
-    @Column(name = "userId")
+    @Column(name = "userId", nullable = false)
     private Integer userId;
 
-    @Column(name = "clinicId")
-    private Integer clinicId;
+    @Column(name = "type", nullable = false, length = 50)
+    private String type; // APPOINTMENT_CREATED, ATTENDANCE_CHECKIN, etc.
+
+    @Column(name = "priority", nullable = false, length = 20)
+    private String priority; // HIGH, MEDIUM, LOW
 
     @Nationalized
-    @Column(name = "\"action\"", nullable = false, length = 100)
-    private String action;
+    @Column(name = "title", nullable = false, length = 200)
+    private String title;
 
     @Nationalized
-    @Column(name = "tableName", length = 128)
-    private String tableName;
+    @Column(name = "message", nullable = false, length = 1000)
+    private String message;
 
-    @Column(name = "recordId")
-    private Integer recordId;
+    @ColumnDefault("0")
+    @Column(name = "isRead")
+    @lombok.Builder.Default
+    private Boolean isRead = false;
 
-    @Nationalized
-    @Lob
-    @Column(name = "beforeData")
-    private String beforeData;
-
-    @Nationalized
-    @Lob
-    @Column(name = "afterData")
-    private String afterData;
+    @Column(name = "readAt")
+    private Instant readAt;
 
     @Nationalized
-    @Column(name = "ipAddr", length = 50)
-    private String ipAddr;
+    @Column(name = "actionUrl", length = 500)
+    private String actionUrl;
 
-    @Nationalized
-    @Column(name = "userAgent", length = 300)
-    private String userAgent;
+    @Column(name = "relatedEntityType", length = 50)
+    private String relatedEntityType;
+
+    @Column(name = "relatedEntityId")
+    private Integer relatedEntityId;
 
     @ColumnDefault("sysutcdatetime()")
-    @Column(name = "actionTime", nullable = false)
-    private Instant actionTime;
+    @Column(name = "createdAt", nullable = false)
+    private Instant createdAt;
 
-    public Integer getId() {
-        return id;
+    @Column(name = "expiresAt")
+    private Instant expiresAt;
+
+    @PrePersist
+    void prePersist() {
+        if (createdAt == null)
+            createdAt = Instant.now();
+        if (isRead == null)
+            isRead = false;
     }
-
-    public void setId(Integer id) {
-        this.id = id;
-    }
-
-    public Integer getUserId() {
-        return userId;
-    }
-
-    public void setUserId(Integer userId) {
-        this.userId = userId;
-    }
-
-    public Integer getClinicId() {
-        return clinicId;
-    }
-
-    public void setClinicId(Integer clinicId) {
-        this.clinicId = clinicId;
-    }
-
-    public String getAction() {
-        return action;
-    }
-
-    public void setAction(String action) {
-        this.action = action;
-    }
-
-    public String getTableName() {
-        return tableName;
-    }
-
-    public void setTableName(String tableName) {
-        this.tableName = tableName;
-    }
-
-    public Integer getRecordId() {
-        return recordId;
-    }
-
-    public void setRecordId(Integer recordId) {
-        this.recordId = recordId;
-    }
-
-    public String getBeforeData() {
-        return beforeData;
-    }
-
-    public void setBeforeData(String beforeData) {
-        this.beforeData = beforeData;
-    }
-
-    public String getAfterData() {
-        return afterData;
-    }
-
-    public void setAfterData(String afterData) {
-        this.afterData = afterData;
-    }
-
-    public String getIpAddr() {
-        return ipAddr;
-    }
-
-    public void setIpAddr(String ipAddr) {
-        this.ipAddr = ipAddr;
-    }
-
-    public String getUserAgent() {
-        return userAgent;
-    }
-
-    public void setUserAgent(String userAgent) {
-        this.userAgent = userAgent;
-    }
-
-    public Instant getActionTime() {
-        return actionTime;
-    }
-
-    public void setActionTime(Instant actionTime) {
-        this.actionTime = actionTime;
-    }
-
 }

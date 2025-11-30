@@ -278,8 +278,12 @@ public class AttendanceController {
     @org.springframework.security.access.prepost.PreAuthorize("hasRole('HR')")
     public ResponseEntity<AttendanceResponse> processExplanation(
             @Valid @RequestBody AdminExplanationActionRequest request,
-            @RequestParam Integer adminUserId) {
-        AttendanceResponse response = attendanceService.processExplanation(request, adminUserId);
+            @AuthenticationPrincipal CurrentUser currentUser) {
+        Integer hrUserId = currentUser != null ? currentUser.userId() : null;
+        if (hrUserId == null) {
+            throw new org.springframework.security.access.AccessDeniedException("User not authenticated");
+        }
+        AttendanceResponse response = attendanceService.processExplanation(request, hrUserId);
         return ResponseEntity.ok(response);
     }
 }

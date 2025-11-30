@@ -10,7 +10,7 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 public class WiFiHelperService {
 
-    // Xử lý resolve thông tin wifi từ request. Nếu detect máy ảo hoặc không thấy WiFi, sẽ lấy thông tin từ máy thật
+    // Xử lý: lấy thông tin wifi từ request, nếu là máy ảo hoặc không có wifi thì sẽ trả về thông tin wifi máy thật
     public WiFiInfo resolveWiFiInfo(String ssid, String bssid) {
         boolean isEmulatorWiFi = isEmulatorWiFi(ssid, bssid);
         boolean hasNoWiFi = (ssid == null || ssid.trim().isEmpty()) && (bssid == null || bssid.trim().isEmpty());
@@ -22,7 +22,7 @@ public class WiFiHelperService {
         return new WiFiInfo(ssid, bssid);
     }
 
-    // Kiểm tra wifi có phải được gửi từ máy ảo/emulator không
+    // Kiểm tra: wifi gửi từ máy ảo/emulator hay không
     private boolean isEmulatorWiFi(String ssid, String bssid) {
         return (ssid != null && (ssid.trim().equalsIgnoreCase("AndroidWifi") ||
                 ssid.trim().equalsIgnoreCase("AndroidAP") ||
@@ -30,7 +30,7 @@ public class WiFiHelperService {
                 (bssid != null && bssid.trim().startsWith("00:13:10"));
     }
 
-    // Lấy thông tin WiFi từ máy host (thường dùng cho trường hợp chạy test/emulator)
+    // Lấy thông tin wifi của máy host (case chạy test, emulator)
     private WiFiInfo getWiFiFromHostMachine(String originalSsid, String originalBssid) {
         String ssid = originalSsid;
         String bssid = originalBssid;
@@ -52,7 +52,7 @@ public class WiFiHelperService {
         return new WiFiInfo(ssid, bssid);
     }
 
-    // DTO chứa thông tin WiFi (SSID, BSSID)
+    // DTO lưu thông tin WiFi (SSID, BSSID)
     public static class WiFiInfo {
         private final String ssid;
         private final String bssid;

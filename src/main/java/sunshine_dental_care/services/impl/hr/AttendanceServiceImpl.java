@@ -32,6 +32,7 @@ import sunshine_dental_care.dto.hrDTO.DailySummaryResponse;
 import sunshine_dental_care.dto.hrDTO.MonthlyAttendanceListItemResponse;
 import sunshine_dental_care.dto.hrDTO.MonthlySummaryResponse;
 import sunshine_dental_care.dto.hrDTO.WiFiValidationResult;
+import sunshine_dental_care.dto.notificationDTO.NotificationRequest;
 import sunshine_dental_care.entities.Attendance;
 import sunshine_dental_care.entities.Clinic;
 import sunshine_dental_care.entities.DoctorSchedule;
@@ -48,7 +49,9 @@ import sunshine_dental_care.repositories.hr.AttendanceRepository;
 import sunshine_dental_care.repositories.hr.DoctorScheduleRepo;
 import sunshine_dental_care.repositories.hr.EmployeeFaceProfileRepo;
 import sunshine_dental_care.services.impl.hr.AttendanceVerificationService.VerificationResult;
+import sunshine_dental_care.services.impl.notification.NotificationService;
 import sunshine_dental_care.services.interfaces.hr.AttendanceService;
+import sunshine_dental_care.services.interfaces.hr.ShiftService;
 import sunshine_dental_care.services.interfaces.hr.FaceRecognitionService.FaceVerificationResult;
 
 @Service
@@ -70,22 +73,19 @@ public class AttendanceServiceImpl implements AttendanceService {
     private final AttendanceExplanationHelper attendanceExplanationHelper;
     private final sunshine_dental_care.dto.hrDTO.mapper.AttendanceMapper attendanceMapper;
 
-    private static final Set<String> ADMIN_ALLOWED_STATUSES = Set.of(
-            "ON_TIME", "LATE", "ABSENT", "APPROVED_ABSENCE", "APPROVED_LATE", "APPROVED_PRESENT"
-    );
+    private final NotificationService notificationService;
+    private final ShiftService shiftService;
 
-    private static final LocalTime LUNCH_BREAK_START = LocalTime.of(11, 0);
-    private static final LocalTime LUNCH_BREAK_END = LocalTime.of(13, 0);
-    private static final LocalTime MORNING_SHIFT_END = LocalTime.of(11, 0);
-    private static final LocalTime AFTERNOON_SHIFT_START = LocalTime.of(13, 0);
     private static final LocalTime EMPLOYEE_START_TIME = LocalTime.of(8, 0);
     private static final LocalTime EMPLOYEE_END_TIME = LocalTime.of(18, 0);
-    private static final BigDecimal EMPLOYEE_EXPECTED_HOURS = BigDecimal.valueOf(8.0);
-
-    // Threshold for being late: if more than 2 hours (120 minutes) late without check-in, count at least as 2 hours late
+    private static final BigDecimal EMPLOYEE_EXPECTED_HOURS = BigDecimal.valueOf(8);
     private static final int MAX_LATE_MINUTES_THRESHOLD = 120;
 
-    // Xử lý check-in cho nhân viên hoặc bác sĩ, tính trạng thái, cập nhật lịch bác sĩ
+    private static final Set<String> ADMIN_ALLOWED_STATUSES = Set.of(
+            "ON_TIME", "LATE", "ABSENT", "APPROVED_ABSENCE", "APPROVED_LATE", "APPROVED_PRESENT");
+
+    // Xử lý check-in cho nhân viên hoặc bác sĩ, tính trạng thái, cập nhật lịch bác
+    // sĩ
     @Override
     @Transactional
     public AttendanceResponse checkIn(AttendanceCheckInRequest request) {
@@ -102,48 +102,57 @@ public class AttendanceServiceImpl implements AttendanceService {
                 .anyMatch(ur -> attendanceStatusCalculator.isDoctorRole(ur));
 
         LocalTime currentTime = LocalTime.now(ZoneId.systemDefault());
-        String shiftType;
+        Instant checkInTime = Instant.now();
+        LocalTime checkInLocalTime = checkInTime.atZone(ZoneId.systemDefault()).toLocalTime();
+
+        String shiftType = null;
         Attendance attendance;
 
         if (isDoctor) {
-            shiftType = determineShiftForDoctor(currentTime);
+            shiftType = shiftService.determineShiftForDoctor(currentTime);
+            shiftService.validateCheckInTime(shiftType, currentTime);
+
             Optional<Attendance> existingShift = attendanceRepo
                     .findByUserIdAndClinicIdAndWorkDateAndShiftType(
-                        request.getUserId(), clinicId, today, shiftType);
+                            request.getUserId(), clinicId, today, shiftType);
             if (existingShift.isPresent() && existingShift.get().getCheckInTime() != null) {
                 throw new AlreadyCheckedInException(
                         String.format("Doctor %d already checked in for %s shift at clinic %d on %s",
                                 request.getUserId(), shiftType, clinicId, today));
             }
+            String finalShiftType = shiftType;
             attendance = existingShift.orElseGet(() -> {
                 Attendance att = new Attendance();
                 att.setUserId(request.getUserId());
                 att.setClinicId(clinicId);
                 att.setWorkDate(today);
-                att.setShiftType(shiftType);
+                att.setShiftType(finalShiftType);
                 return att;
             });
-            if ("AFTERNOON".equals(shiftType) && currentTime.isBefore(AFTERNOON_SHIFT_START)) {
-                throw new AttendanceValidationException(
-                        String.format("Cannot check-in for AFTERNOON shift before 13:00. Current time: %s", currentTime));
-            }
         } else {
             shiftType = "FULL_DAY";
             Optional<Attendance> existing = attendanceRepo
-                    .findByUserIdAndClinicIdAndWorkDate(request.getUserId(), clinicId, today);
-            if (existing.isPresent() && existing.get().getCheckInTime() != null) {
-                throw new AlreadyCheckedInException(
-                        String.format("Employee %d already checked in at clinic %d on %s",
-                                request.getUserId(), clinicId, today));
-            }
-            attendance = existing.orElseGet(() -> {
+                    .findByUserIdAndWorkDate(request.getUserId(), today);
+
+            if (existing.isPresent()) {
+                Attendance existingAtt = existing.get();
+                if (!existingAtt.getClinicId().equals(clinicId)) {
+                    existingAtt.setClinicId(clinicId);
+                }
+                if (existingAtt.getCheckInTime() != null) {
+                    throw new AlreadyCheckedInException(
+                            String.format("Employee %d already checked in at clinic %d on %s",
+                                    request.getUserId(), existingAtt.getClinicId(), today));
+                }
+                attendance = existingAtt;
+            } else {
                 Attendance att = new Attendance();
                 att.setUserId(request.getUserId());
                 att.setClinicId(clinicId);
                 att.setWorkDate(today);
                 att.setShiftType("FULL_DAY");
-                return att;
-            });
+                attendance = att;
+            }
             if (attendance.getShiftType() == null || !"FULL_DAY".equals(attendance.getShiftType())) {
                 attendance.setShiftType("FULL_DAY");
             }
@@ -154,18 +163,16 @@ public class AttendanceServiceImpl implements AttendanceService {
         String bssid = wifiInfo.getBssid();
 
         VerificationResult verification = attendanceVerificationService.verify(
-            request.getUserId(),
-            clinicId,
-            request.getFaceEmbedding(),
-            ssid,
-            bssid
-        );
+                request.getUserId(),
+                clinicId,
+                request.getFaceEmbedding(),
+                ssid,
+                bssid);
 
         EmployeeFaceProfile faceProfile = verification.getFaceProfile();
         FaceVerificationResult faceResult = verification.getFaceResult();
         WiFiValidationResult wifiResult = verification.getWifiResult();
 
-        Instant checkInTime = Instant.now();
         attendance.setCheckInTime(checkInTime);
         attendance.setCheckInMethod("FACE_WIFI");
         if (request.getNote() != null && !request.getNote().trim().isEmpty()) {
@@ -173,76 +180,30 @@ public class AttendanceServiceImpl implements AttendanceService {
         }
         attendance.setFaceMatchScore(BigDecimal.valueOf(faceResult.getSimilarityScore()));
 
-        // Tính số phút đi trễ khi check-in
-        LocalTime checkInLocalTime = checkInTime.atZone(ZoneId.systemDefault()).toLocalTime();
-        LocalTime expectedStartTime;
+        // Calculate Late Minutes
+        LocalTime expectedStartTime = EMPLOYEE_START_TIME;
 
         if (isDoctor && shiftType != null) {
-            // Lấy giờ bắt đầu ca cho bác sĩ dựa trên lịch hoặc giờ mặc định
-            var schedules = doctorScheduleRepo.findByUserIdAndClinicIdAndWorkDateAllStatus(
-                    request.getUserId(), clinicId, today);
-            LocalTime scheduleStartTime = null;
-            DoctorSchedule matchedSchedule = null;
-            if (!schedules.isEmpty()) {
-                for (var schedule : schedules) {
-                    LocalTime startTime = schedule.getStartTime();
-                    boolean isMorningMatch = "MORNING".equals(shiftType) && startTime.isBefore(LUNCH_BREAK_START);
-                    boolean isAfternoonMatch = "AFTERNOON".equals(shiftType) && startTime.isAfter(LUNCH_BREAK_START);
-                    if (isMorningMatch || isAfternoonMatch) {
-                        scheduleStartTime = schedule.getStartTime();
-                        matchedSchedule = schedule;
-                        break;
-                    }
-                }
-                if (scheduleStartTime == null) {
-                    var firstSchedule = schedules.stream()
-                            .min((s1, s2) -> s1.getStartTime().compareTo(s2.getStartTime()))
-                            .orElse(null);
-                    if (firstSchedule != null) {
-                        scheduleStartTime = firstSchedule.getStartTime();
-                        matchedSchedule = firstSchedule;
-                    }
-                }
-            }
-            // Nếu có matched schedule thì set lại active
-            if (matchedSchedule != null) {
-                if (matchedSchedule.getStatus() == null || !"ACTIVE".equals(matchedSchedule.getStatus())) {
-                    matchedSchedule.setStatus("ACTIVE");
-                    doctorScheduleRepo.save(matchedSchedule);
-                }
-                // Nếu check-in ca MORNING thì set active tất cả schedule AF trong ngày cho doctor
-                if ("MORNING".equals(shiftType)) {
-                    var allSchedules = doctorScheduleRepo.findByDoctorIdAndWorkDate(request.getUserId(), today);
-                    for (var schedule : allSchedules) {
-                        if (schedule == null || schedule.getId().equals(matchedSchedule.getId())) continue;
-                        LocalTime scheduleStart = schedule.getStartTime();
-                        if (scheduleStart == null || !scheduleStart.isAfter(LUNCH_BREAK_START)) continue;
-                        if (schedule.getStatus() == null || !"ACTIVE".equals(schedule.getStatus())) {
-                            schedule.setStatus("ACTIVE");
-                            doctorScheduleRepo.save(schedule);
-                        }
-                    }
-                }
-            }
-            if (scheduleStartTime != null) {
-                expectedStartTime = scheduleStartTime;
+            Optional<DoctorSchedule> matchedSchedule = shiftService.findMatchingSchedule(
+                    request.getUserId(), clinicId, today, shiftType);
+
+            if (matchedSchedule.isPresent()) {
+                DoctorSchedule schedule = matchedSchedule.get();
+                shiftService.activateSchedule(schedule);
+                shiftService.activateAfternoonSchedulesIfMorningCheckIn(
+                        request.getUserId(), today, shiftType, schedule.getId());
+                expectedStartTime = shiftService.getExpectedStartTime(shiftType, schedule);
             } else {
-                if ("MORNING".equals(shiftType)) {
-                    expectedStartTime = LocalTime.of(8, 0);
-                } else if ("AFTERNOON".equals(shiftType)) {
-                    expectedStartTime = LocalTime.of(13, 0);
-                } else {
-                    expectedStartTime = EMPLOYEE_START_TIME;
-                }
+                expectedStartTime = shiftService.getExpectedStartTime(shiftType, null);
             }
         } else {
-            // Nhân viên dùng giờ mặc định
             expectedStartTime = EMPLOYEE_START_TIME;
         }
 
         if (checkInLocalTime.isAfter(expectedStartTime)) {
             long actualMinutesLate = java.time.Duration.between(expectedStartTime, checkInLocalTime).toMinutes();
-            long minutesLate = actualMinutesLate >= MAX_LATE_MINUTES_THRESHOLD ? MAX_LATE_MINUTES_THRESHOLD : actualMinutesLate;
+            long minutesLate = actualMinutesLate >= MAX_LATE_MINUTES_THRESHOLD ? MAX_LATE_MINUTES_THRESHOLD
+                    : actualMinutesLate;
             attendance.setLateMinutes((int) minutesLate);
         } else {
             attendance.setLateMinutes(0);
@@ -252,21 +213,20 @@ public class AttendanceServiceImpl implements AttendanceService {
         boolean wifiValid = wifiResult.isValid();
         attendance.setVerificationStatus(faceVerified && wifiValid ? "VERIFIED" : "FAILED");
 
-        // Chỉ update trạng thái attendance nếu chưa có trạng thái admin duyệt
+        // Determine Attendance Status
         String currentStatus = attendance.getAttendanceStatus();
         String currentNote = attendance.getNote();
         boolean hasApprovedExplanation = currentNote != null && currentNote.contains("[APPROVED]");
-        boolean isApprovedStatus = currentStatus != null && (
-                "APPROVED_LATE".equals(currentStatus) ||
+        boolean isApprovedStatus = currentStatus != null && ("APPROVED_LATE".equals(currentStatus) ||
                 "APPROVED_ABSENCE".equals(currentStatus) ||
                 "APPROVED_PRESENT".equals(currentStatus) ||
-                hasApprovedExplanation
-        );
+                hasApprovedExplanation);
 
         if (currentStatus == null || !isApprovedStatus) {
             String attendanceStatus = (isDoctor && shiftType != null)
                     ? determineAttendanceStatusForDoctor(request.getUserId(), clinicId, today, checkInTime, shiftType)
-                    : attendanceStatusCalculator.determineAttendanceStatus(request.getUserId(), clinicId, today, checkInTime);
+                    : attendanceStatusCalculator.determineAttendanceStatus(request.getUserId(), clinicId, today,
+                            checkInTime);
             attendance.setAttendanceStatus(attendanceStatus);
         }
         attendance = attendanceRepo.save(attendance);
@@ -275,6 +235,24 @@ public class AttendanceServiceImpl implements AttendanceService {
                 .orElseThrow(() -> new AttendanceNotFoundException("User not found"));
         Clinic clinic = clinicRepo.findById(clinicId)
                 .orElseThrow(() -> new AttendanceNotFoundException("Clinic not found"));
+
+        // Send Notification
+        try {
+            NotificationRequest notiRequest = NotificationRequest.builder()
+                    .userId(request.getUserId())
+                    .type("ATTENDANCE_CHECKIN")
+                    .priority("LOW")
+                    .title("Check-in Successful")
+                    .message(String.format("You have successfully checked in at %s. Time: %s",
+                            clinic.getClinicName(),
+                            checkInTime.atZone(ZoneId.systemDefault()).toLocalTime().toString().substring(0, 5)))
+                    .relatedEntityType("ATTENDANCE")
+                    .relatedEntityId(attendance.getId())
+                    .build();
+            notificationService.sendNotification(notiRequest);
+        } catch (Exception e) {
+            log.error("Failed to send check-in notification", e);
+        }
 
         return attendanceMapper.mapToAttendanceResponse(attendance, user, clinic, faceProfile, faceResult, wifiResult);
     }
@@ -303,21 +281,12 @@ public class AttendanceServiceImpl implements AttendanceService {
         String shiftType = attendance.getShiftType();
 
         if (isDoctor && shiftType != null) {
-            if ("MORNING".equals(shiftType)) {
-                if (currentTime.isBefore(LocalTime.of(8, 0))) {
-                    throw new AttendanceValidationException(
-                        String.format("Cannot check-out for MORNING shift before 8:00. Current time: %s", currentTime));
-                }
-            } else if ("AFTERNOON".equals(shiftType)) {
-                if (currentTime.isBefore(AFTERNOON_SHIFT_START)) {
-                    throw new AttendanceValidationException(
-                        String.format("Cannot check-out for AFTERNOON shift before 13:00. Current time: %s", currentTime));
-                }
-            }
+            shiftService.validateCheckOutTime(shiftType, currentTime);
         } else {
-            if (currentTime.isBefore(LUNCH_BREAK_END)) {
+            if (currentTime.isBefore(LocalTime.of(13, 0))) {
                 throw new AttendanceValidationException(
-                        String.format("Check-out is allowed only after lunch break (after 13:00). Current time: %s", currentTime));
+                        String.format("Check-out is allowed only after lunch break (after 13:00). Current time: %s",
+                                currentTime));
             }
         }
 
@@ -326,12 +295,11 @@ public class AttendanceServiceImpl implements AttendanceService {
         String bssid = wifiInfo.getBssid();
 
         VerificationResult verification = attendanceVerificationService.verify(
-            attendance.getUserId(),
-            attendance.getClinicId(),
-            request.getFaceEmbedding(),
-            ssid,
-            bssid
-        );
+                attendance.getUserId(),
+                attendance.getClinicId(),
+                request.getFaceEmbedding(),
+                ssid,
+                bssid);
 
         EmployeeFaceProfile faceProfile = verification.getFaceProfile();
         FaceVerificationResult faceResult = verification.getFaceResult();
@@ -340,137 +308,87 @@ public class AttendanceServiceImpl implements AttendanceService {
         Instant checkOutTime = Instant.now();
         attendance.setCheckOutTime(checkOutTime);
 
-        // Tính toán giờ công thực tế, số phút đi trễ/về sớm và nghỉ trưa
-        if (attendance.getCheckInTime() != null && checkOutTime != null) {
-            LocalTime checkInLocalTime = attendance.getCheckInTime().atZone(ZoneId.systemDefault()).toLocalTime();
-            LocalTime checkOutLocalTime = checkOutTime.atZone(ZoneId.systemDefault()).toLocalTime();
+        // Calculate Work Hours
+        LocalTime checkInLocalTime = attendance.getCheckInTime().atZone(ZoneId.systemDefault()).toLocalTime();
+        LocalTime checkOutLocalTime = checkOutTime.atZone(ZoneId.systemDefault()).toLocalTime();
 
-            LocalTime expectedStartTime;
-            LocalTime expectedEndTime;
-            BigDecimal expectedWorkHours;
+        LocalTime expectedStartTime = EMPLOYEE_START_TIME;
+        LocalTime expectedEndTime = EMPLOYEE_END_TIME;
+        BigDecimal expectedWorkHours = EMPLOYEE_EXPECTED_HOURS;
 
-            if (isDoctor) {
-                var schedules = doctorScheduleRepo.findByUserIdAndClinicIdAndWorkDate(
-                        attendance.getUserId(), attendance.getClinicId(), attendance.getWorkDate());
-                LocalTime scheduleStartTime = null;
-                LocalTime scheduleEndTime = null;
-                String attendanceShiftType = attendance.getShiftType();
-                if (!schedules.isEmpty()) {
-                    if (attendanceShiftType != null) {
-                        for (var schedule : schedules) {
-                            LocalTime startTime = schedule.getStartTime();
-                            if ("MORNING".equals(attendanceShiftType) && startTime.isBefore(LUNCH_BREAK_START)) {
-                                scheduleStartTime = schedule.getStartTime();
-                                scheduleEndTime = schedule.getEndTime();
-                                break;
-                            } else if ("AFTERNOON".equals(attendanceShiftType) && startTime.isAfter(LUNCH_BREAK_START)) {
-                                scheduleStartTime = schedule.getStartTime();
-                                scheduleEndTime = schedule.getEndTime();
-                                break;
-                            }
-                        }
-                    }
-                    if (scheduleStartTime == null) {
-                        var firstSchedule = schedules.stream()
-                                .min((s1, s2) -> s1.getStartTime().compareTo(s2.getStartTime()))
-                                .orElse(null);
-                        if (firstSchedule != null) {
-                            scheduleStartTime = firstSchedule.getStartTime();
-                            scheduleEndTime = firstSchedule.getEndTime();
-                        }
-                    }
-                }
-                if (scheduleStartTime == null) {
-                    if (attendanceShiftType != null) {
-                        if ("MORNING".equals(attendanceShiftType)) {
-                            expectedStartTime = LocalTime.of(8, 0);
-                            expectedEndTime = LocalTime.of(11, 0);
-                        } else if ("AFTERNOON".equals(attendanceShiftType)) {
-                            expectedStartTime = LocalTime.of(13, 0);
-                            expectedEndTime = LocalTime.of(18, 0);
-                        } else {
-                            expectedStartTime = LocalTime.of(8, 0);
-                            expectedEndTime = LocalTime.of(18, 0);
-                        }
-                    } else {
-                        if (checkInLocalTime.isBefore(LUNCH_BREAK_START)) {
-                            expectedStartTime = LocalTime.of(8, 0);
-                            expectedEndTime = LocalTime.of(11, 0);
-                        } else if (checkInLocalTime.isAfter(LUNCH_BREAK_END)) {
-                            expectedStartTime = LocalTime.of(13, 0);
-                            expectedEndTime = LocalTime.of(18, 0);
-                        } else {
-                            expectedStartTime = LocalTime.of(8, 0);
-                            expectedEndTime = LocalTime.of(11, 0);
-                        }
-                    }
-                } else {
-                    expectedStartTime = scheduleStartTime;
-                    expectedEndTime = scheduleEndTime;
-                }
+        if (isDoctor && shiftType != null) {
+            Optional<DoctorSchedule> matchedSchedule = shiftService.findMatchingSchedule(
+                    attendance.getUserId(), attendance.getClinicId(), attendance.getWorkDate(), shiftType);
+            DoctorSchedule schedule = matchedSchedule.orElse(null);
 
-                long expectedMinutes = java.time.Duration.between(expectedStartTime, expectedEndTime).toMinutes();
-                expectedWorkHours = BigDecimal.valueOf(expectedMinutes)
-                        .divide(BigDecimal.valueOf(60), 2, java.math.RoundingMode.HALF_UP);
-            } else {
-                expectedStartTime = EMPLOYEE_START_TIME;
-                expectedEndTime = EMPLOYEE_END_TIME;
-                expectedWorkHours = EMPLOYEE_EXPECTED_HOURS;
-            }
-            attendance.setExpectedWorkHours(expectedWorkHours);
+            expectedStartTime = shiftService.getExpectedStartTime(shiftType, schedule);
+            expectedEndTime = shiftService.getExpectedEndTime(shiftType, schedule);
 
-            long totalMinutes = java.time.Duration.between(attendance.getCheckInTime(), checkOutTime).toMinutes();
-
-            // Chỉ tính lại lateMinutes nếu chưa có từ check-in
-            long minutesLate;
-            if (attendance.getLateMinutes() != null) {
-                minutesLate = attendance.getLateMinutes();
-            } else {
-                if (checkInLocalTime.isAfter(expectedStartTime)) {
-                    long actualMinutesLate = java.time.Duration.between(expectedStartTime, checkInLocalTime).toMinutes();
-                    minutesLate = actualMinutesLate >= MAX_LATE_MINUTES_THRESHOLD
-                            ? MAX_LATE_MINUTES_THRESHOLD
-                            : actualMinutesLate;
-                    attendance.setLateMinutes((int) minutesLate);
-                } else {
-                    minutesLate = 0;
-                    attendance.setLateMinutes(0);
-                }
-            }
-
-            if (checkOutLocalTime.isBefore(expectedEndTime)) {
-                long minutesEarly = java.time.Duration.between(checkOutLocalTime, expectedEndTime).toMinutes();
-                attendance.setEarlyMinutes((int) minutesEarly);
-            } else {
-                attendance.setEarlyMinutes(0);
-            }
-
-            long lunchBreakMinutes = 0;
-            if (!isDoctor && checkInLocalTime.isBefore(LUNCH_BREAK_START) && checkOutLocalTime.isAfter(LUNCH_BREAK_END)) {
-                lunchBreakMinutes = 120;
-                attendance.setLunchBreakMinutes(120);
-            } else {
-                attendance.setLunchBreakMinutes(0);
-            }
-
-            long minutesEarly = attendance.getEarlyMinutes() != null ? attendance.getEarlyMinutes() : 0;
-            long adjustedMinutes = totalMinutes - minutesLate - minutesEarly - lunchBreakMinutes;
-            if (adjustedMinutes < 0) {
-                adjustedMinutes = 0;
-            }
-            BigDecimal actualHours = BigDecimal.valueOf(adjustedMinutes)
-                    .divide(BigDecimal.valueOf(60), 2, java.math.RoundingMode.HALF_UP);
-            attendance.setActualWorkHours(actualHours);
+            long expectedMinutes = java.time.Duration.between(expectedStartTime, expectedEndTime).toMinutes();
+            expectedWorkHours = BigDecimal.valueOf(expectedMinutes).divide(BigDecimal.valueOf(60), 2,
+                    java.math.RoundingMode.HALF_UP);
         }
+        attendance.setExpectedWorkHours(expectedWorkHours);
+
+        long totalMinutes = java.time.Duration.between(attendance.getCheckInTime(), checkOutTime).toMinutes();
+
+        // Late Minutes Logic
+        String currentStatus = attendance.getAttendanceStatus();
+        boolean isApprovedLate = "APPROVED_LATE".equals(currentStatus);
+        boolean hasApprovedExplanation = attendance.getNote() != null
+                && attendance.getNote().contains("[APPROVED]");
+
+        long minutesLate;
+        if (isApprovedLate || hasApprovedExplanation) {
+            minutesLate = 0;
+            attendance.setLateMinutes(0);
+            log.info("Check-out for APPROVED_LATE attendance {}: lateMinutes reset to 0", attendance.getId());
+        } else if (attendance.getLateMinutes() != null) {
+            minutesLate = attendance.getLateMinutes();
+        } else {
+            if (checkInLocalTime.isAfter(expectedStartTime)) {
+                long actualMinutesLate = java.time.Duration.between(expectedStartTime, checkInLocalTime).toMinutes();
+                minutesLate = actualMinutesLate >= MAX_LATE_MINUTES_THRESHOLD ? MAX_LATE_MINUTES_THRESHOLD
+                        : actualMinutesLate;
+                attendance.setLateMinutes((int) minutesLate);
+            } else {
+                minutesLate = 0;
+                attendance.setLateMinutes(0);
+            }
+        }
+
+        // Early Minutes Logic
+        if (checkOutLocalTime.isBefore(expectedEndTime)) {
+            long minutesEarly = java.time.Duration.between(checkOutLocalTime, expectedEndTime).toMinutes();
+            attendance.setEarlyMinutes((int) minutesEarly);
+        } else {
+            attendance.setEarlyMinutes(0);
+        }
+
+        long lunchBreakMinutes = 0;
+        if (!isDoctor && checkInLocalTime.isBefore(LocalTime.of(11, 0))
+                && checkOutLocalTime.isAfter(LocalTime.of(13, 0))) {
+            lunchBreakMinutes = 120;
+            attendance.setLunchBreakMinutes(120);
+        } else {
+            attendance.setLunchBreakMinutes(0);
+        }
+
+        long minutesEarly = attendance.getEarlyMinutes() != null ? attendance.getEarlyMinutes() : 0;
+        long adjustedMinutes = totalMinutes - minutesLate - minutesEarly - lunchBreakMinutes;
+        if (adjustedMinutes < 0) {
+            adjustedMinutes = 0;
+        }
+        BigDecimal actualHours = BigDecimal.valueOf(adjustedMinutes)
+                .divide(BigDecimal.valueOf(60), 2, java.math.RoundingMode.HALF_UP);
+        attendance.setActualWorkHours(actualHours);
 
         if (request.getNote() != null && !request.getNote().trim().isEmpty()) {
-            attendance.setNote(
-                    (attendance.getNote() != null ? attendance.getNote() + " | " : "") + request.getNote()
-            );
+            attendance.setNote((attendance.getNote() != null ? attendance.getNote() + " | " : "") + request.getNote());
         }
 
-        if (attendance.getFaceMatchScore() == null ||
-                faceResult.getSimilarityScore() > attendance.getFaceMatchScore().doubleValue()) {
+        if (attendance.getFaceMatchScore() == null
+                || faceResult.getSimilarityScore() > attendance.getFaceMatchScore().doubleValue()) {
             attendance.setFaceMatchScore(BigDecimal.valueOf(faceResult.getSimilarityScore()));
         }
 
@@ -480,16 +398,15 @@ public class AttendanceServiceImpl implements AttendanceService {
 
         attendance = attendanceRepo.save(attendance);
 
-        // Nếu check-out mà vẫn chưa có check-in thì set trạng thái absent nếu không phải đã được duyệt
         if (attendance.getCheckInTime() == null) {
-            String currentStatus = attendance.getAttendanceStatus();
-            String currentNote = attendance.getNote();
-            boolean hasApprovedExplanation = currentNote != null && currentNote.contains("[APPROVED]");
-            boolean isApprovedStatus = "APPROVED_ABSENCE".equals(currentStatus) ||
-                    "APPROVED_PRESENT".equals(currentStatus) ||
-                    hasApprovedExplanation;
+            String status = attendance.getAttendanceStatus();
+            String note = attendance.getNote();
+            boolean approved = note != null && note.contains("[APPROVED]");
+            boolean approvedStatus = "APPROVED_ABSENCE".equals(status) ||
+                    "APPROVED_PRESENT".equals(status) ||
+                    approved;
 
-            if (!isApprovedStatus) {
+            if (!approvedStatus) {
                 attendance.setAttendanceStatus("ABSENT");
                 attendance = attendanceRepo.save(attendance);
             }
@@ -500,6 +417,23 @@ public class AttendanceServiceImpl implements AttendanceService {
         Clinic clinic = clinicRepo.findById(attendance.getClinicId())
                 .orElseThrow(() -> new AttendanceNotFoundException("Clinic not found"));
 
+        try {
+            NotificationRequest notiRequest = NotificationRequest.builder()
+                    .userId(attendance.getUserId())
+                    .type("ATTENDANCE_CHECKOUT")
+                    .priority("LOW")
+                    .title("Check-out Successful")
+                    .message(String.format("You have successfully checked out at %s. Work hours: %.2f",
+                            clinic.getClinicName(),
+                            attendance.getActualWorkHours() != null ? attendance.getActualWorkHours() : 0.0))
+                    .relatedEntityType("ATTENDANCE")
+                    .relatedEntityId(attendance.getId())
+                    .build();
+            notificationService.sendNotification(notiRequest);
+        } catch (Exception e) {
+            log.error("Failed to send check-out notification", e);
+        }
+
         return attendanceMapper.mapToAttendanceResponse(attendance, user, clinic, faceProfile, faceResult, wifiResult);
     }
 
@@ -509,7 +443,8 @@ public class AttendanceServiceImpl implements AttendanceService {
     public AttendanceResponse getTodayAttendance(Integer userId) {
         LocalDate today = LocalDate.now();
         List<UserRole> userRoles = userRoleRepo.findActiveByUserId(userId);
-        boolean isDoctor = userRoles != null && userRoles.stream().anyMatch(ur -> attendanceStatusCalculator.isDoctorRole(ur));
+        boolean isDoctor = userRoles != null
+                && userRoles.stream().anyMatch(ur -> attendanceStatusCalculator.isDoctorRole(ur));
 
         if (isDoctor) {
             List<Attendance> attendances = attendanceRepo.findAllByUserIdAndWorkDate(userId, today);
@@ -520,8 +455,10 @@ public class AttendanceServiceImpl implements AttendanceService {
                     .min((a1, a2) -> {
                         String s1 = a1.getShiftType() != null ? a1.getShiftType() : "";
                         String s2 = a2.getShiftType() != null ? a2.getShiftType() : "";
-                        if ("MORNING".equals(s1) && "AFTERNOON".equals(s2)) return -1;
-                        if ("AFTERNOON".equals(s1) && "MORNING".equals(s2)) return 1;
+                        if ("MORNING".equals(s1) && "AFTERNOON".equals(s2))
+                            return -1;
+                        if ("AFTERNOON".equals(s1) && "MORNING".equals(s2))
+                            return 1;
                         if (a1.getCheckInTime() != null && a2.getCheckInTime() != null) {
                             return a1.getCheckInTime().compareTo(a2.getCheckInTime());
                         }
@@ -564,8 +501,10 @@ public class AttendanceServiceImpl implements AttendanceService {
             attendances.sort((a1, a2) -> {
                 String s1 = a1.getShiftType() != null ? a1.getShiftType() : "";
                 String s2 = a2.getShiftType() != null ? a2.getShiftType() : "";
-                if ("MORNING".equals(s1) && "AFTERNOON".equals(s2)) return -1;
-                if ("AFTERNOON".equals(s1) && "MORNING".equals(s2)) return 1;
+                if ("MORNING".equals(s1) && "AFTERNOON".equals(s2))
+                    return -1;
+                if ("AFTERNOON".equals(s1) && "MORNING".equals(s2))
+                    return 1;
                 if (a1.getCheckInTime() != null && a2.getCheckInTime() != null) {
                     return a1.getCheckInTime().compareTo(a2.getCheckInTime());
                 }
@@ -677,8 +616,7 @@ public class AttendanceServiceImpl implements AttendanceService {
             } else if (attendance.getCheckInTime() != null && attendance.getCheckOutTime() != null) {
                 long minutes = java.time.Duration.between(
                         attendance.getCheckInTime(),
-                        attendance.getCheckOutTime()
-                ).toMinutes();
+                        attendance.getCheckOutTime()).toMinutes();
                 BigDecimal hours = BigDecimal.valueOf(minutes)
                         .divide(BigDecimal.valueOf(60), 2, java.math.RoundingMode.HALF_UP);
                 totalHours = totalHours.add(hours);
@@ -691,8 +629,7 @@ public class AttendanceServiceImpl implements AttendanceService {
             averageHours = totalHours.divide(
                     BigDecimal.valueOf(recordsWithHours),
                     2,
-                    java.math.RoundingMode.HALF_UP
-            );
+                    java.math.RoundingMode.HALF_UP);
         }
 
         Map<String, Object> stats = new HashMap<>();
@@ -782,7 +719,8 @@ public class AttendanceServiceImpl implements AttendanceService {
     // Admin cập nhật trạng thái attendance (approve/deny) chấm công
     @Override
     @Transactional
-    public AttendanceResponse updateAttendanceStatus(Integer attendanceId, String newStatus, String adminNote, Integer adminUserId) {
+    public AttendanceResponse updateAttendanceStatus(Integer attendanceId, String newStatus, String adminNote,
+            Integer adminUserId) {
         Attendance attendance = attendanceRepo.findById(attendanceId)
                 .orElseThrow(() -> new AttendanceNotFoundException(attendanceId));
         if (newStatus == null || newStatus.trim().isEmpty()) {
@@ -836,10 +774,47 @@ public class AttendanceServiceImpl implements AttendanceService {
                 .orElseThrow(() -> new AttendanceNotFoundException("User not found"));
         Clinic clinic = clinicRepo.findById(attendance.getClinicId())
                 .orElseThrow(() -> new AttendanceNotFoundException("Clinic not found"));
+
+        // Send Notification to HR users
+        try {
+            List<Integer> hrUserIds = getHrUserIds();
+            log.info("Found {} HR users to notify about explanation submission for attendance {}",
+                    hrUserIds.size(), attendance.getId());
+
+            if (hrUserIds.isEmpty()) {
+                log.warn("No active HR users found to send notification about explanation submission");
+            }
+
+            String explanationTypeLabel = getExplanationTypeLabel(request.getExplanationType());
+
+            for (Integer hrUserId : hrUserIds) {
+                try {
+                    NotificationRequest notiRequest = NotificationRequest.builder()
+                            .userId(hrUserId)
+                            .type("EXPLANATION_SUBMITTED")
+                            .priority("MEDIUM")
+                            .title("New Attendance Explanation")
+                            .message(String.format("Employee %s has submitted a %s explanation for %s.",
+                                    user.getFullName(), explanationTypeLabel, attendance.getWorkDate()))
+                            .relatedEntityType("ATTENDANCE")
+                            .relatedEntityId(attendance.getId())
+                            .actionUrl("/hr/attendance/explanations")
+                            .build();
+                    notificationService.sendNotification(notiRequest);
+                    log.info("Notification sent successfully to HR user {} about new explanation for attendance {}",
+                            hrUserId, attendance.getId());
+                } catch (Exception e) {
+                    log.error("Failed to send notification to HR user {}: {}", hrUserId, e.getMessage(), e);
+                }
+            }
+        } catch (Exception e) {
+            log.error("Failed to send explanation submission notifications: {}", e.getMessage(), e);
+        }
+
         return attendanceMapper.mapToAttendanceResponse(attendance, user, clinic, null, null, null);
     }
 
-    // Lấy danh sách attendance đang chờ giải trình (admin)
+    // Lấy danh sách attendance đang chờ giải trình (HR)
     @Override
     @Transactional(readOnly = true)
     public List<AttendanceExplanationResponse> getPendingExplanations(Integer clinicId) {
@@ -865,18 +840,6 @@ public class AttendanceServiceImpl implements AttendanceService {
         return attendanceMapper.mapToAttendanceResponse(attendance, user, clinic, null, null, null);
     }
 
-    // Xác định ca cho bác sĩ dựa vào giờ hiện tại
-    private String determineShiftForDoctor(LocalTime currentTime) {
-        if (currentTime.isBefore(LUNCH_BREAK_START)) {
-            return "MORNING";
-        } else if (currentTime.isBefore(LUNCH_BREAK_END)) {
-            throw new AttendanceValidationException(
-                    String.format("Cannot check-in during lunch break (11:00-13:00). Current time: %s", currentTime));
-        } else {
-            return "AFTERNOON";
-        }
-    }
-
     // Xác định trạng thái ON_TIME/LATE của điểm danh bác sĩ dựa vào ca & lịch
     private String determineAttendanceStatusForDoctor(
             Integer userId,
@@ -887,54 +850,71 @@ public class AttendanceServiceImpl implements AttendanceService {
 
         LocalTime checkInLocalTime = checkInTime.atZone(ZoneId.systemDefault()).toLocalTime();
 
-        var schedules = doctorScheduleRepo.findByUserIdAndClinicIdAndWorkDate(userId, clinicId, workDate);
-        LocalTime expectedStartTime = null;
+        Optional<DoctorSchedule> matchedSchedule = shiftService.findMatchingSchedule(userId, clinicId, workDate,
+                shiftType);
+        DoctorSchedule schedule = matchedSchedule.orElse(null);
+        LocalTime expectedStartTime = shiftService.getExpectedStartTime(shiftType, schedule);
 
-        if (!schedules.isEmpty()) {
-            for (var schedule : schedules) {
-                LocalTime startTime = schedule.getStartTime();
-                if ("MORNING".equals(shiftType) && startTime.isBefore(LUNCH_BREAK_START)) {
-                    expectedStartTime = startTime;
-                    break;
-                } else if ("AFTERNOON".equals(shiftType) && startTime.isAfter(LUNCH_BREAK_START)) {
-                    expectedStartTime = startTime;
-                    break;
-                }
-            }
-            if (expectedStartTime == null) {
-                var firstSchedule = schedules.stream()
-                        .min((s1, s2) -> s1.getStartTime().compareTo(s2.getStartTime()))
-                        .orElse(null);
-                if (firstSchedule != null) {
-                    expectedStartTime = firstSchedule.getStartTime();
-                }
-            }
-        }
-        if (expectedStartTime == null) {
-            switch (shiftType) {
-                case "MORNING":
-                    expectedStartTime = LocalTime.of(8, 0);
-                    break;
-                case "AFTERNOON":
-                    expectedStartTime = LocalTime.of(13, 0);
-                    break;
-                default:
-                    expectedStartTime = LocalTime.of(8, 0);
-                    break;
-            }
-            log.warn("Doctor {} has no schedule for {} shift at clinic {} on {}. Using default start time: {}",
-                    userId, shiftType, clinicId, workDate, expectedStartTime);
-        }
+        // Kiểm tra xem có đơn nghỉ phép đã duyệt cho ngày này không
+        boolean hasApprovedLeave = attendanceStatusCalculator.hasApprovedLeaveOnDate(userId, workDate);
 
         if (checkInLocalTime.isBefore(expectedStartTime) || checkInLocalTime.equals(expectedStartTime)) {
             log.info("Doctor {} checked in ON_TIME for {} shift: {} (expected: {})",
                     userId, shiftType, checkInLocalTime, expectedStartTime);
             return "ON_TIME";
         } else {
-            long minutesLate = java.time.Duration.between(expectedStartTime, checkInLocalTime).toMinutes();
-            log.info("Doctor {} checked in LATE for {} shift: {} minutes late (expected: {}, actual: {})",
-                    userId, shiftType, minutesLate, expectedStartTime, checkInLocalTime);
-            return "LATE";
+            // Nếu có đơn nghỉ phép đã duyệt, coi như APPROVED_LATE thay vì LATE
+            if (hasApprovedLeave) {
+                long minutesLate = java.time.Duration.between(expectedStartTime, checkInLocalTime).toMinutes();
+                log.info(
+                        "Doctor {} checked in APPROVED_LATE with approved leave for {} shift: {} minutes late (expected: {}, actual: {})",
+                        userId, shiftType, minutesLate, expectedStartTime, checkInLocalTime);
+                return "APPROVED_LATE";
+            } else {
+                long minutesLate = java.time.Duration.between(expectedStartTime, checkInLocalTime).toMinutes();
+                log.info("Doctor {} checked in LATE for {} shift: {} minutes late (expected: {}, actual: {})",
+                        userId, shiftType, minutesLate, expectedStartTime, checkInLocalTime);
+                return "LATE";
+            }
         }
     }
+
+    // Lấy danh sách HR user IDs (tương tự LeaveRequestServiceImpl)
+    private List<Integer> getHrUserIds() {
+        try {
+            List<UserRole> allUserRoles = userRoleRepo.findAll();
+            return allUserRoles.stream()
+                    .filter(ur -> ur != null
+                            && Boolean.TRUE.equals(ur.getIsActive())
+                            && ur.getRole() != null
+                            && "HR".equalsIgnoreCase(ur.getRole().getRoleName())
+                            && ur.getUser() != null
+                            && Boolean.TRUE.equals(ur.getUser().getIsActive()))
+                    .map(ur -> ur.getUser().getId())
+                    .distinct()
+                    .collect(Collectors.toList());
+        } catch (Exception e) {
+            log.error("Failed to get HR user IDs: {}", e.getMessage(), e);
+            return List.of();
+        }
+    }
+
+    // Lấy label cho explanation type
+    private String getExplanationTypeLabel(String type) {
+        if (type == null)
+            return "Unknown";
+        switch (type) {
+            case "LATE_CHECKIN":
+                return "Late Check-in";
+            case "EARLY_CHECKOUT":
+                return "Early Check-out";
+            case "ABSENCE":
+                return "Absence";
+            case "MISSING_CHECKOUT":
+                return "Missing Check-out";
+            default:
+                return type;
+        }
+    }
+
 }

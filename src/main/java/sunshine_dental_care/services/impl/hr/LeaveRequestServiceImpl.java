@@ -15,6 +15,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import sunshine_dental_care.dto.hrDTO.LeaveRequestRequest;
 import sunshine_dental_care.dto.hrDTO.LeaveRequestResponse;
+import sunshine_dental_care.dto.notificationDTO.NotificationRequest;
 import sunshine_dental_care.entities.Clinic;
 import sunshine_dental_care.entities.DoctorSchedule;
 import sunshine_dental_care.entities.LeaveRequest;
@@ -25,6 +26,7 @@ import sunshine_dental_care.repositories.auth.UserRepo;
 import sunshine_dental_care.repositories.auth.UserRoleRepo;
 import sunshine_dental_care.repositories.hr.DoctorScheduleRepo;
 import sunshine_dental_care.repositories.hr.LeaveRequestRepo;
+import sunshine_dental_care.services.impl.notification.NotificationService;
 import sunshine_dental_care.services.interfaces.hr.LeaveRequestService;
 
 @Service
@@ -40,6 +42,7 @@ public class LeaveRequestServiceImpl implements LeaveRequestService {
     private final AttendanceStatusCalculator attendanceStatusCalculator;
     private final sunshine_dental_care.repositories.hr.AttendanceRepository attendanceRepository;
     private final ClinicResolutionService clinicResolutionService;
+    private final NotificationService notificationService;
 
     @Override
     @Transactional
@@ -79,10 +82,37 @@ public class LeaveRequestServiceImpl implements LeaveRequestService {
 
         leaveRequest = leaveRequestRepo.save(leaveRequest);
 
-        // KHÔNG cập nhật schedule khi tạo đơn (status = PENDING)
-        // Chỉ cập nhật khi duyệt đơn (status = APPROVED)
+        // Không update doctor schedule ở bước tạo đơn (chỉ update khi duyệt)
         log.info("Leave request created for user {} (doctor: {}) from {} to {} - status: PENDING",
                 userId, isDoctor, request.getStartDate(), request.getEndDate());
+
+        try {
+            List<Integer> hrUserIds = getHrUserIds();
+            String dateRange = request.getStartDate().equals(request.getEndDate()) 
+                ? request.getStartDate().toString()
+                : request.getStartDate() + " to " + request.getEndDate();
+            
+            for (Integer hrUserId : hrUserIds) {
+                try {
+                    NotificationRequest notiRequest = NotificationRequest.builder()
+                            .userId(hrUserId)
+                            .type("LEAVE_REQUEST_CREATED")
+                            .priority("MEDIUM")
+                            .title("New Leave Request")
+                            .message(String.format("%s has submitted a leave request from %s. Type: %s", 
+                                    user.getFullName(), dateRange, request.getType()))
+                            .relatedEntityType("LEAVE_REQUEST")
+                            .relatedEntityId(leaveRequest.getId())
+                            .build();
+                    notificationService.sendNotification(notiRequest);
+                    log.info("Notification sent to HR user {} about new leave request {}", hrUserId, leaveRequest.getId());
+                } catch (Exception e) {
+                    log.error("Failed to send notification to HR user {}: {}", hrUserId, e.getMessage());
+                }
+            }
+        } catch (Exception e) {
+            log.error("Failed to send notifications for leave request creation: {}", e.getMessage());
+        }
 
         return mapToResponse(leaveRequest);
     }
@@ -135,12 +165,40 @@ public class LeaveRequestServiceImpl implements LeaveRequestService {
         boolean isDoctor = userRoles != null && userRoles.stream()
                 .anyMatch(ur -> attendanceStatusCalculator.isDoctorRole(ur));
 
-        // Nếu là bác sĩ và đơn đã được duyệt → restore schedule status to ACTIVE
-        // Nếu đơn vẫn PENDING → không cần làm gì (schedule vẫn ACTIVE)
+        // Nếu là bác sĩ và đơn đã được duyệt thì khôi phục schedule về ACTIVE
         if (isDoctor && "APPROVED".equals(leaveRequest.getStatus())) {
             updateScheduleStatusForLeave(leaveRequest, "ACTIVE");
             log.info("Restored schedules to ACTIVE for doctor {} after canceling approved leave request",
                     userId);
+        }
+
+        try {
+            List<Integer> hrUserIds = getHrUserIds();
+            String dateRange = leaveRequest.getStartDate().equals(leaveRequest.getEndDate()) 
+                ? leaveRequest.getStartDate().toString()
+                : leaveRequest.getStartDate() + " to " + leaveRequest.getEndDate();
+            
+            for (Integer hrUserId : hrUserIds) {
+                try {
+                    NotificationRequest notiRequest = NotificationRequest.builder()
+                            .userId(hrUserId)
+                            .type("LEAVE_REQUEST_CANCELLED")
+                            .priority("LOW")
+                            .title("Leave Request Cancelled")
+                            .message(String.format("%s has cancelled their leave request from %s.", 
+                                    leaveRequest.getUser().getFullName(), dateRange))
+                            .relatedEntityType("LEAVE_REQUEST")
+                            .relatedEntityId(leaveRequest.getId())
+                            .build();
+                    notificationService.sendNotification(notiRequest);
+                    log.info("Notification sent to HR user {} about cancelled leave request {}", 
+                            hrUserId, leaveRequestId);
+                } catch (Exception e) {
+                    log.error("Failed to send notification to HR user {}: {}", hrUserId, e.getMessage());
+                }
+            }
+        } catch (Exception e) {
+            log.error("Failed to send notifications for leave request cancellation: {}", e.getMessage());
         }
 
         leaveRequestRepo.delete(leaveRequest);
@@ -208,7 +266,7 @@ public class LeaveRequestServiceImpl implements LeaveRequestService {
         boolean isDoctor = userRoles != null && userRoles.stream()
                 .anyMatch(ur -> attendanceStatusCalculator.isDoctorRole(ur));
 
-        // Nếu là bác sĩ, cần cập nhật schedule tương ứng với quyết định approve/reject
+        // Nếu là bác sĩ thì update schedule tương ứng với quyết định approve/reject
         if (isDoctor) {
             if ("APPROVED".equals(leaveRequest.getStatus())) {
                 updateScheduleStatusForLeave(leaveRequest, "INACTIVE");
@@ -221,17 +279,55 @@ public class LeaveRequestServiceImpl implements LeaveRequestService {
             }
         }
 
-        // Tạo/cập nhật attendance records với APPROVED_ABSENCE khi approve, hoặc cập nhật khi reject
+        // Tạo hoặc cập nhật attendance cho những ngày được duyệt nghỉ (APPROVED_ABSENCE), hoặc cập nhật lại khi bị reject
         if ("APPROVED".equals(leaveRequest.getStatus())) {
             createOrUpdateAttendanceForApprovedLeave(leaveRequest);
         } else if ("REJECTED".equals(leaveRequest.getStatus())) {
             updateAttendanceForRejectedLeave(leaveRequest);
         }
 
+        try {
+            User requestUser = leaveRequest.getUser();
+            String dateRange = leaveRequest.getStartDate().equals(leaveRequest.getEndDate()) 
+                ? leaveRequest.getStartDate().toString()
+                : leaveRequest.getStartDate() + " to " + leaveRequest.getEndDate();
+            
+            String notificationTitle = "APPROVED".equals(leaveRequest.getStatus()) 
+                ? "Leave Request Approved" 
+                : "Leave Request Rejected";
+            
+            String notificationMessage = "APPROVED".equals(leaveRequest.getStatus())
+                ? String.format("Your leave request from %s has been approved by %s.", 
+                    dateRange, hrUser.getFullName())
+                : String.format("Your leave request from %s has been rejected by %s.", 
+                    dateRange, hrUser.getFullName());
+            
+            if (request.getComment() != null && !request.getComment().trim().isEmpty()) {
+                notificationMessage += " Comment: " + request.getComment();
+            }
+            
+            NotificationRequest notiRequest = NotificationRequest.builder()
+                    .userId(requestUser.getId())
+                    .type("APPROVED".equals(leaveRequest.getStatus()) 
+                        ? "LEAVE_REQUEST_APPROVED" 
+                        : "LEAVE_REQUEST_REJECTED")
+                    .priority("APPROVED".equals(leaveRequest.getStatus()) ? "MEDIUM" : "HIGH")
+                    .title(notificationTitle)
+                    .message(notificationMessage)
+                    .relatedEntityType("LEAVE_REQUEST")
+                    .relatedEntityId(leaveRequest.getId())
+                    .build();
+            notificationService.sendNotification(notiRequest);
+            log.info("Notification sent to user {} about leave request {} being {}", 
+                    requestUser.getId(), leaveRequest.getId(), leaveRequest.getStatus());
+        } catch (Exception e) {
+            log.error("Failed to send notification to user about leave request processing: {}", e.getMessage());
+        }
+
         return mapToResponse(leaveRequest);
     }
 
-    // Cập nhật trạng thái toàn bộ lịch làm việc của bác sĩ trong khoảng thời gian xin nghỉ (tất cả clinics)
+    // Cập nhật trạng thái tất cả các lịch làm việc của bác sĩ trong thời gian xin nghỉ (của tất cả clinic)
     private void updateScheduleStatusForLeave(LeaveRequest leaveRequest, String status) {
         Integer userId = leaveRequest.getUser().getId();
         LocalDate startDate = leaveRequest.getStartDate();
@@ -269,7 +365,7 @@ public class LeaveRequestServiceImpl implements LeaveRequestService {
                 totalUpdated, status, userId, startDate, endDate);
     }
 
-    // Tạo mới hoặc cập nhật attendance (điểm danh) các ngày nghỉ đã duyệt thành APPROVED_ABSENCE, bỏ qua chủ nhật & không ghi đè nếu đã check-in
+    // Tạo hoặc cập nhật attendance cho các ngày nghỉ đã duyệt thành APPROVED_ABSENCE, bỏ qua chủ nhật và không ghi đè nếu đã check-in
     private void createOrUpdateAttendanceForApprovedLeave(LeaveRequest leaveRequest) {
         Integer userId = leaveRequest.getUser().getId();
         Integer clinicId = leaveRequest.getClinic().getId();
@@ -301,7 +397,6 @@ public class LeaveRequestServiceImpl implements LeaveRequestService {
                             userId, clinicId, currentDate);
                 }
             } else {
-                // Tạo mới attendance record với status APPROVED_ABSENCE
                 attendance = new sunshine_dental_care.entities.Attendance();
                 attendance.setUserId(userId);
                 attendance.setClinicId(clinicId);
@@ -322,7 +417,7 @@ public class LeaveRequestServiceImpl implements LeaveRequestService {
                 totalCreated, userId, startDate, endDate);
     }
 
-    // Khi rejected và ngày đã có attendance APPROVED_ABSENCE (nhưng chưa check-in), đổi lại thành ABSENT
+    // Nếu đơn bị từ chối và ngày đó có attendance là APPROVED_ABSENCE (nhưng chưa check-in) thì đổi lại thành ABSENT
     private void updateAttendanceForRejectedLeave(LeaveRequest leaveRequest) {
         Integer userId = leaveRequest.getUser().getId();
         Integer clinicId = leaveRequest.getClinic().getId();
@@ -344,7 +439,7 @@ public class LeaveRequestServiceImpl implements LeaveRequestService {
 
             if (existingAttendance.isPresent()) {
                 sunshine_dental_care.entities.Attendance attendance = existingAttendance.get();
-                // Chỉ đổi nếu là APPROVED_ABSENCE và chưa có check-in
+                // Chỉ update nếu attendance là APPROVED_ABSENCE và chưa có check-in
                 if ("APPROVED_ABSENCE".equals(attendance.getAttendanceStatus())
                         && attendance.getCheckInTime() == null) {
                     attendance.setAttendanceStatus("ABSENT");
@@ -364,7 +459,7 @@ public class LeaveRequestServiceImpl implements LeaveRequestService {
         }
     }
 
-    // Convert LeaveRequest entity sang LeaveRequestResponse DTO
+    // Chuyển đổi entity LeaveRequest sang DTO LeaveRequestResponse
     private LeaveRequestResponse mapToResponse(LeaveRequest leaveRequest) {
         LeaveRequestResponse response = new LeaveRequestResponse();
         response.setId(leaveRequest.getId());
@@ -388,5 +483,25 @@ public class LeaveRequestServiceImpl implements LeaveRequestService {
         response.setUpdatedAt(leaveRequest.getUpdatedAt());
 
         return response;
+    }
+
+    // Lấy danh sách ID của các user HR
+    private List<Integer> getHrUserIds() {
+        try {
+            List<UserRole> allUserRoles = userRoleRepo.findAll();
+            return allUserRoles.stream()
+                    .filter(ur -> ur != null 
+                            && Boolean.TRUE.equals(ur.getIsActive())
+                            && ur.getRole() != null 
+                            && "HR".equalsIgnoreCase(ur.getRole().getRoleName())
+                            && ur.getUser() != null
+                            && Boolean.TRUE.equals(ur.getUser().getIsActive()))
+                    .map(ur -> ur.getUser().getId())
+                    .distinct()
+                    .collect(Collectors.toList());
+        } catch (Exception e) {
+            log.error("Failed to get HR user IDs: {}", e.getMessage(), e);
+            return List.of();
+        }
     }
 }

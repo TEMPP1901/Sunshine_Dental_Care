@@ -88,6 +88,7 @@ public class SecurityConfig {
                         .requestMatchers("/api/auth/sign-up", "/api/auth/login").permitAll()
                         .requestMatchers("/api/auth/google", "/oauth2/**", "/login/oauth2/**").permitAll()
                         .requestMatchers( "/api/products/**").permitAll() // Public endpoints products *huybro
+                        .requestMatchers("/ws/**").permitAll() // WebSocket endpoint (authentication handled in WebSocket layer)
 
                         .requestMatchers("/api/doctor/**","/api/patients/{patientId}/records/**").hasRole("DOCTOR") // Chỉ bác sĩ được phép,
 
