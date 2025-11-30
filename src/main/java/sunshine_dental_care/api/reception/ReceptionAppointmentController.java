@@ -14,6 +14,7 @@ import lombok.RequiredArgsConstructor;
 import sunshine_dental_care.dto.hrDTO.DoctorScheduleDto;
 import sunshine_dental_care.dto.receptionDTO.AppointmentRequest;
 import sunshine_dental_care.dto.receptionDTO.AppointmentResponse;
+import sunshine_dental_care.dto.receptionDTO.RescheduleRequest;
 import sunshine_dental_care.security.CurrentUser;
 import sunshine_dental_care.services.interfaces.reception.ReceptionService;
 
@@ -45,6 +46,27 @@ public class ReceptionAppointmentController {
         return ResponseEntity.ok(schedules);
     }
 
+    /**
+     * API: Lấy danh sách Lịch hẹn (Appointments) trong ngày.
+     * Dùng để hiển thị đè lên lịch làm việc.
+     * GET /api/reception/appointments?date=2025-11-24&clinicId=1
+     */
+    @GetMapping("/appointments")
+    public ResponseEntity<List<AppointmentResponse>> getAppointmentsByDate(
+            @RequestParam(value = "date", required = true)
+            @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate date,
+            @RequestParam(value = "clinicId", required = false) Integer clinicId,
+            @AuthenticationPrincipal CurrentUser currentUser) {
+
+        List<AppointmentResponse> appointments = receptionService.getAppointmentsForDashboard(
+                currentUser,
+                date,
+                clinicId
+        );
+
+        return ResponseEntity.ok(appointments);
+    }
+
     @PostMapping("/appointments")
     public ResponseEntity<AppointmentResponse> createAppointment(
             @Valid @RequestBody AppointmentRequest request,
@@ -57,5 +79,24 @@ public class ReceptionAppointmentController {
         );
 
         return ResponseEntity.status(201).body(response);
+    }
+
+    /**
+     * API DỜI LỊCH (Reschedule) - Dùng cho tính năng Drag & Drop
+     * PATCH /api/reception/appointments/{id}/reschedule
+     */
+    @PatchMapping("/appointments/{id}/reschedule")
+    public ResponseEntity<AppointmentResponse> rescheduleAppointment(
+            @PathVariable Integer id,
+            @Valid @RequestBody RescheduleRequest request,
+            @AuthenticationPrincipal CurrentUser currentUser) {
+
+        AppointmentResponse response = receptionService.rescheduleAppointment(
+                currentUser,
+                id,
+                request
+        );
+
+        return ResponseEntity.ok(response);
     }
 }

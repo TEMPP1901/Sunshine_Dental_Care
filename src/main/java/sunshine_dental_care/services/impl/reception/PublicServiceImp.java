@@ -1,16 +1,20 @@
 package sunshine_dental_care.services.impl.reception;
 
+import org.springframework.transaction.annotation.Transactional;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import sunshine_dental_care.dto.hrDTO.ClinicResponse;
 import sunshine_dental_care.dto.receptionDTO.bookingDto.PublicDoctorDTO;
 import sunshine_dental_care.dto.receptionDTO.bookingDto.ServiceDTO;
+import sunshine_dental_care.dto.receptionDTO.bookingDto.ServiceVariantDTO;
+import sunshine_dental_care.entities.DoctorSpecialty;
 import sunshine_dental_care.entities.User;
 import sunshine_dental_care.repositories.auth.ClinicRepo;
 import sunshine_dental_care.repositories.auth.UserRepo;
 import sunshine_dental_care.repositories.reception.ServiceRepo;
 import sunshine_dental_care.services.interfaces.reception.PublicService;
 
+import java.math.BigDecimal;
 import java.util.List;
 import java.util.stream.Collectors;
 
@@ -31,6 +35,7 @@ public class PublicServiceImp implements PublicService {
     }
 
     @Override
+    @Transactional(readOnly = true)
     public List<ServiceDTO> getAllActiveServices() {
         return serviceRepo.findByIsActiveTrue().stream()
                 .map(s -> {
@@ -38,8 +43,38 @@ public class PublicServiceImp implements PublicService {
                     dto.setId(s.getId());
                     dto.setServiceName(s.getServiceName());
                     dto.setCategory(s.getCategory());
-                    dto.setDefaultDuration(s.getDefaultDuration());
                     dto.setDescription(s.getDescription());
+
+                    // --- LOGIC MỚI: Map Variants ---
+                    // Lấy danh sách variants từ entity cha
+                    List<ServiceVariantDTO> variantDTOs = s.getVariants().stream()
+                            .filter(v -> Boolean.TRUE.equals(v.getIsActive()))
+                            .map(v -> new ServiceVariantDTO(
+                                    v.getId(), // variantId
+                                    v.getVariantName(),
+                                    v.getDuration(),
+                                    v.getPrice(),
+                                    v.getDescription()
+                            ))
+                            .collect(Collectors.toList());
+
+                    dto.setVariants(variantDTOs);
+
+                    // Tính toán thông tin tham khảo cho cấp Cha (Min Price & Min Duration)
+                    if (!variantDTOs.isEmpty()) {
+                        BigDecimal minPrice = variantDTOs.stream()
+                                .map(ServiceVariantDTO::getPrice)
+                                .min(BigDecimal::compareTo)
+                                .orElse(BigDecimal.ZERO);
+                        dto.setPrice(minPrice); // Giá "Từ..."
+
+                        // Lấy duration của gói đầu tiên/ngắn nhất để hiển thị
+                        dto.setDefaultDuration(variantDTOs.getFirst().getDuration());
+                    } else {
+                        dto.setPrice(BigDecimal.ZERO);
+                        dto.setDefaultDuration(60);
+                    }
+
                     return dto;
                 })
                 .collect(Collectors.toList());
@@ -71,23 +106,26 @@ public class PublicServiceImp implements PublicService {
     // Helper map Entity -> DTO
     private PublicDoctorDTO mapToPublicDoctorDTO(User user) {
 
-        String displaySpecialty = "General Dentist"; // Giá trị mặc định
+        List<String> specialtyList;
 
-        // 1. Ưu tiên lấy từ bảng DoctorSpecialties (1:N)
+        /// 1. Lấy danh sách từ bảng DoctorSpecialties (1:N)
         if (user.getDoctorSpecialties() != null && !user.getDoctorSpecialties().isEmpty()) {
-            // Lấy cái đầu tiên làm đại diện hiển thị
-            displaySpecialty = user.getDoctorSpecialties().getFirst().getSpecialtyName();
+            specialtyList = user.getDoctorSpecialties().stream()
+                    .map(DoctorSpecialty::getSpecialtyName)
+                    .collect(Collectors.toList());
         }
         // 2. Fallback về cột cũ (1:1) nếu bảng kia rỗng
         else if (user.getSpecialty() != null && !user.getSpecialty().isEmpty()) {
-            displaySpecialty = user.getSpecialty();
+            specialtyList = List.of(user.getSpecialty());
+        } else {
+            specialtyList = List.of("General Dentist");
         }
 
         return new PublicDoctorDTO(
                 user.getId(),
                 user.getFullName(),
                 user.getAvatarUrl(),
-                displaySpecialty // Trả về chuyên khoa lấy được từ bảng con
+                specialtyList
         );
     }
 }

@@ -5,6 +5,8 @@ import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
+import java.util.List;
+
 @Data
 @AllArgsConstructor
 @NoArgsConstructor
@@ -12,5 +14,5 @@ public class PublicDoctorDTO {
     private Integer id;
     private String fullName;
     private String avatarUrl;
-    private String specialty;
+    private List<String> specialties;
 }

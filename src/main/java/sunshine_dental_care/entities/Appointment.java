@@ -23,8 +23,8 @@ public class Appointment {
     @JoinColumn(name = "patientId", nullable = false)
     private Patient patient;
 
-    @ManyToOne(fetch = FetchType.LAZY, optional = false)
-    @JoinColumn(name = "doctorId", nullable = false)
+    @ManyToOne(fetch = FetchType.LAZY, optional = true)
+    @JoinColumn(name = "doctorId", nullable = true)
     private User doctor;
 
     @ManyToOne(fetch = FetchType.LAZY)
@@ -65,6 +65,10 @@ public class Appointment {
     @ColumnDefault("sysutcdatetime()")
     @Column(name = "updatedAt", nullable = false)
     private Instant updatedAt;
+
+    @Nationalized
+    @Column(name = "appointmentType", length = 50)
+    private String appointmentType; // "VIP" hoặc "STANDARD"
 
     // Mỗi Lịch hẹn (Appointment) có thể chứa nhiều (Many) bản ghi Chi tiết Dịch vụ Lịch hẹn (AppointmentService).
     @OneToMany(mappedBy = "appointment", cascade = CascadeType.ALL, fetch = FetchType.LAZY)
@@ -189,6 +193,9 @@ public class Appointment {
     public void setAppointmentServices(List<AppointmentService> appointmentServices) {
         this.appointmentServices = appointmentServices;
     }
+
+    public String getAppointmentType() { return appointmentType; }
+    public void setAppointmentType(String appointmentType) { this.appointmentType = appointmentType; }
 
     @PrePersist
     public void prePersist() {

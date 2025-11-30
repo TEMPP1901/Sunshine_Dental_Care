@@ -15,18 +15,18 @@ public class AppointmentRequest {
     @NotNull(message = "Patient ID is required")
     private Integer patientId;
 
-    @NotNull(message = "Doctor ID is required")
+    private String appointmentType; // "VIP" | "STANDARD"
+
     private Integer doctorId;
 
     @NotNull(message = "Start date time is required")
     private Instant startDateTime;
 
-    // endDateTime sẽ được tính toán từ services duration, nhưng có thể được gửi lên
+    // endDateTime sẽ được tính toán từ services duration
     private Instant endDateTime;
 
     private Integer roomId;
 
-    @NotNull(message = "Status is required")
     private String status;
 
     private String channel;

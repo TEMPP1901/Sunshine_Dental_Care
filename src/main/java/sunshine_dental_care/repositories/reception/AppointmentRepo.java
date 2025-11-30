@@ -28,7 +28,6 @@ public interface AppointmentRepo extends JpaRepository<Appointment, Integer> {
             @Param("newEnd") Instant newEnd
     );
 
-
     /**
      * Lấy danh sách các lịch hẹn ĐÃ CÓ của bác sĩ trong ngày cụ thể.
      * Dùng để tô đen các ô giờ đã bị người khác đặt.
@@ -40,6 +39,20 @@ public interface AppointmentRepo extends JpaRepository<Appointment, Integer> {
             "AND CAST(a.startDateTime AS date) = :date")
     List<Appointment> findBusySlotsByDoctorAndDate(
             @Param("doctorId") Integer doctorId,
+            @Param("date") LocalDate date
+    );
+
+    /**
+     * Lấy tất cả lịch hẹn của một Clinic trong ngày cụ thể.
+     * Dùng cho Reception Dashboard.
+     * Sắp xếp theo giờ bắt đầu để hiển thị đẹp hơn.
+     */
+    @Query("SELECT a FROM Appointment a " +
+            "WHERE a.clinic.id = :clinicId " +
+            "AND CAST(a.startDateTime AS date) = :date " +
+            "ORDER BY a.startDateTime ASC")
+    List<Appointment> findByClinicIdAndDate(
+            @Param("clinicId") Integer clinicId,
             @Param("date") LocalDate date
     );
 }
