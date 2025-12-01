@@ -14,6 +14,7 @@ public class LeaveRequestResponse {
     private LocalDate startDate;
     private LocalDate endDate;
     private String type;
+    private String shiftType; // MORNING, AFTERNOON, FULL_DAY (for doctors)
     private String status; // PENDING, APPROVED, REJECTED
     private String reason;
     private Integer approvedBy;
@@ -91,6 +92,14 @@ public class LeaveRequestResponse {
     
     public void setType(String type) {
         this.type = type;
+    }
+    
+    public String getShiftType() {
+        return shiftType;
+    }
+    
+    public void setShiftType(String shiftType) {
+        this.shiftType = shiftType;
     }
     
     public String getStatus() {

@@ -2,6 +2,7 @@ package sunshine_dental_care.services.impl.hr;
 
 import java.time.Instant;
 import java.time.LocalDate;
+import java.time.LocalTime;
 import java.util.List;
 import java.util.stream.Collectors;
 
@@ -69,6 +70,21 @@ public class LeaveRequestServiceImpl implements LeaveRequestService {
         boolean isDoctor = userRoles != null && userRoles.stream()
                 .anyMatch(ur -> attendanceStatusCalculator.isDoctorRole(ur));
 
+        // Validate shiftType for doctors
+        String shiftType = request.getShiftType();
+        if (isDoctor && shiftType != null && !shiftType.trim().isEmpty()) {
+            shiftType = shiftType.toUpperCase().trim();
+            if (!"MORNING".equals(shiftType) && !"AFTERNOON".equals(shiftType) && !"FULL_DAY".equals(shiftType)) {
+                throw new IllegalArgumentException("Invalid shiftType for doctor. Must be MORNING, AFTERNOON, or FULL_DAY");
+            }
+        } else if (isDoctor) {
+            // Default to FULL_DAY if not specified for doctors
+            shiftType = "FULL_DAY";
+        } else {
+            // Non-doctors always have FULL_DAY
+            shiftType = "FULL_DAY";
+        }
+
         LeaveRequest leaveRequest = new LeaveRequest();
         leaveRequest.setUser(user);
         leaveRequest.setClinic(clinic);
@@ -77,6 +93,7 @@ public class LeaveRequestServiceImpl implements LeaveRequestService {
         leaveRequest.setType(request.getType());
         leaveRequest.setStatus("PENDING");
         leaveRequest.setReason(request.getReason());
+        leaveRequest.setShiftType(isDoctor ? shiftType : "FULL_DAY");
         leaveRequest.setCreatedAt(Instant.now());
         leaveRequest.setUpdatedAt(Instant.now());
 
@@ -131,6 +148,22 @@ public class LeaveRequestServiceImpl implements LeaveRequestService {
     public Page<LeaveRequestResponse> getMyLeaveRequests(Integer userId, int page, int size) {
         Pageable pageable = PageRequest.of(page, size);
         Page<LeaveRequest> leaveRequests = leaveRequestRepo.findByUserIdOrderByCreatedAtDesc(userId, pageable);
+        // Force load relationships để tránh lazy loading exception
+        leaveRequests.getContent().forEach(lr -> {
+            if (lr.getUser() != null) {
+                lr.getUser().getId(); // Trigger lazy load
+                lr.getUser().getUsername(); // Trigger lazy load
+                lr.getUser().getFullName(); // Trigger lazy load
+            }
+            if (lr.getClinic() != null) {
+                lr.getClinic().getId(); // Trigger lazy load
+                lr.getClinic().getClinicName(); // Trigger lazy load
+            }
+            if (lr.getApprovedBy() != null) {
+                lr.getApprovedBy().getId(); // Trigger lazy load
+                lr.getApprovedBy().getFullName(); // Trigger lazy load
+            }
+        });
         return leaveRequests.map(this::mapToResponse);
     }
 
@@ -327,14 +360,17 @@ public class LeaveRequestServiceImpl implements LeaveRequestService {
         return mapToResponse(leaveRequest);
     }
 
-    // Cập nhật trạng thái tất cả các lịch làm việc của bác sĩ trong thời gian xin nghỉ (của tất cả clinic)
+    // Cập nhật trạng thái lịch làm việc của bác sĩ trong thời gian xin nghỉ
+    // Nếu có shiftType, chỉ update schedule của ca đó; nếu FULL_DAY hoặc null, update tất cả
     private void updateScheduleStatusForLeave(LeaveRequest leaveRequest, String status) {
         Integer userId = leaveRequest.getUser().getId();
         LocalDate startDate = leaveRequest.getStartDate();
         LocalDate endDate = leaveRequest.getEndDate();
+        String shiftType = leaveRequest.getShiftType();
 
         LocalDate currentDate = startDate;
         int totalUpdated = 0;
+        LocalTime lunchBreakStart = LocalTime.of(11, 0);
 
         while (!currentDate.isAfter(endDate)) {
             List<DoctorSchedule> daySchedules = doctorScheduleRepo.findByDoctorIdAndWorkDate(
@@ -342,15 +378,30 @@ public class LeaveRequestServiceImpl implements LeaveRequestService {
 
             for (DoctorSchedule schedule : daySchedules) {
                 if (schedule != null) {
+                    // Nếu có shiftType cụ thể (MORNING/AFTERNOON), chỉ update schedule của ca đó
+                    if (shiftType != null && !shiftType.isEmpty() && !"FULL_DAY".equals(shiftType)) {
+                        LocalTime startTime = schedule.getStartTime();
+                        if (startTime == null) {
+                            continue;
+                        }
+                        
+                        String scheduleShiftType = startTime.isBefore(lunchBreakStart) ? "MORNING" : "AFTERNOON";
+                        if (!shiftType.equals(scheduleShiftType)) {
+                            // Skip schedule không khớp với ca xin nghỉ
+                            continue;
+                        }
+                    }
+                    // Nếu FULL_DAY hoặc null, update tất cả schedules
+
                     if (!status.equals(schedule.getStatus())) {
                         schedule.setStatus(status);
                         try {
                             doctorScheduleRepo.save(schedule);
                             totalUpdated++;
-                            log.debug("Updated schedule {} to {} for doctor {} at clinic {} on {}",
+                            log.debug("Updated schedule {} to {} for doctor {} at clinic {} on {} (shiftType: {})",
                                     schedule.getId(), status, userId,
                                     schedule.getClinic() != null ? schedule.getClinic().getId() : "unknown",
-                                    currentDate);
+                                    currentDate, shiftType != null ? shiftType : "FULL_DAY");
                         } catch (Exception e) {
                             log.warn("Failed to update schedule {} status: {}", schedule.getId(), e.getMessage());
                         }
@@ -361,9 +412,10 @@ public class LeaveRequestServiceImpl implements LeaveRequestService {
             currentDate = currentDate.plusDays(1);
         }
 
-        log.info("Updated {} schedules to {} for doctor {} from {} to {} (all clinics)",
-                totalUpdated, status, userId, startDate, endDate);
+        log.info("Updated {} schedules to {} for doctor {} from {} to {} (shiftType: {})",
+                totalUpdated, status, userId, startDate, endDate, shiftType != null ? shiftType : "FULL_DAY");
     }
+
 
     // Tạo hoặc cập nhật attendance cho các ngày nghỉ đã duyệt thành APPROVED_ABSENCE, bỏ qua chủ nhật và không ghi đè nếu đã check-in
     private void createOrUpdateAttendanceForApprovedLeave(LeaveRequest leaveRequest) {
@@ -461,16 +513,30 @@ public class LeaveRequestServiceImpl implements LeaveRequestService {
 
     // Chuyển đổi entity LeaveRequest sang DTO LeaveRequestResponse
     private LeaveRequestResponse mapToResponse(LeaveRequest leaveRequest) {
+        if (leaveRequest == null) {
+            throw new IllegalArgumentException("LeaveRequest cannot be null");
+        }
+        
         LeaveRequestResponse response = new LeaveRequestResponse();
         response.setId(leaveRequest.getId());
-        response.setUserId(leaveRequest.getUser().getId());
-        response.setUserName(leaveRequest.getUser().getUsername());
-        response.setUserFullName(leaveRequest.getUser().getFullName());
-        response.setClinicId(leaveRequest.getClinic().getId());
-        response.setClinicName(leaveRequest.getClinic().getClinicName());
+        
+        // Null check cho User
+        if (leaveRequest.getUser() != null) {
+            response.setUserId(leaveRequest.getUser().getId());
+            response.setUserName(leaveRequest.getUser().getUsername());
+            response.setUserFullName(leaveRequest.getUser().getFullName());
+        }
+        
+        // Null check cho Clinic
+        if (leaveRequest.getClinic() != null) {
+            response.setClinicId(leaveRequest.getClinic().getId());
+            response.setClinicName(leaveRequest.getClinic().getClinicName());
+        }
+        
         response.setStartDate(leaveRequest.getStartDate());
         response.setEndDate(leaveRequest.getEndDate());
         response.setType(leaveRequest.getType());
+        response.setShiftType(leaveRequest.getShiftType());
         response.setStatus(leaveRequest.getStatus());
         response.setReason(leaveRequest.getReason());
 

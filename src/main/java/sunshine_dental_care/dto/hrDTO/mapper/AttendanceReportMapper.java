@@ -18,7 +18,8 @@ import sunshine_dental_care.services.impl.hr.AttendanceStatusCalculator;
 
 /**
  * Mapper để chuyển đổi Attendance entities sang Report Response DTOs.
- * Tách logic mapping từ AttendanceReportService để code gọn hơn, theo pattern của Reception module.
+ * Tách logic mapping từ AttendanceReportService để code gọn hơn, theo pattern
+ * của Reception module.
  */
 @Component
 @RequiredArgsConstructor
@@ -34,7 +35,7 @@ public class AttendanceReportMapper {
             Attendance attendance,
             User user,
             LocalDate workDate) {
-        
+
         DailyAttendanceListItemResponse item = new DailyAttendanceListItemResponse();
         item.setId(attendance.getId());
         item.setCheckInTime(attendance.getCheckInTime());
@@ -43,7 +44,7 @@ public class AttendanceReportMapper {
         String status = attendance.getAttendanceStatus();
         boolean hasCheckIn = attendance.getCheckInTime() != null;
         boolean hasCheckOut = attendance.getCheckOutTime() != null;
-        
+
         // Phân loại trạng thái chấm công
         if (status == null) {
             if (hasCheckIn || hasCheckOut) {
@@ -90,8 +91,7 @@ public class AttendanceReportMapper {
         if (hasCheckIn && hasCheckOut) {
             long minutes = java.time.Duration.between(
                     attendance.getCheckInTime(),
-                    attendance.getCheckOutTime()
-            ).toMinutes();
+                    attendance.getCheckOutTime()).toMinutes();
             long hours = minutes / 60;
             long remainingMinutes = minutes % 60;
             item.setWorkedHours(hours);
@@ -137,7 +137,8 @@ public class AttendanceReportMapper {
     }
 
     /**
-     * Map User và tính toán thống kê tháng sang MonthlyAttendanceListItemResponse DTO.
+     * Map User và tính toán thống kê tháng sang MonthlyAttendanceListItemResponse
+     * DTO.
      */
     public MonthlyAttendanceListItemResponse mapToMonthlyListItem(
             User user,
@@ -145,7 +146,7 @@ public class AttendanceReportMapper {
             int workingDays,
             LocalDate startDate,
             LocalDate endDate) {
-        
+
         MonthlyAttendanceListItemResponse item = new MonthlyAttendanceListItemResponse();
         item.setUserId(user.getId());
         item.setEmployeeName(user.getFullName());
@@ -168,6 +169,9 @@ public class AttendanceReportMapper {
             } else {
                 switch (status) {
                     case "ON_TIME":
+                    case "APPROVED_PRESENT":
+                    case "APPROVED_LATE":
+                    case "APPROVED_EARLY_LEAVE":
                         presentDays++;
                         break;
                     case "LATE":
@@ -184,7 +188,7 @@ public class AttendanceReportMapper {
                         break;
                 }
             }
-            
+
             if (attendance.getCheckInTime() != null) {
                 actualWorkedDays++;
             }
@@ -201,8 +205,7 @@ public class AttendanceReportMapper {
             } else if (attendance.getCheckInTime() != null && attendance.getCheckOutTime() != null) {
                 long minutes = java.time.Duration.between(
                         attendance.getCheckInTime(),
-                        attendance.getCheckOutTime()
-                ).toMinutes();
+                        attendance.getCheckOutTime()).toMinutes();
                 BigDecimal hours = BigDecimal.valueOf(minutes)
                         .divide(BigDecimal.valueOf(60), 2, java.math.RoundingMode.HALF_UP);
                 totalWorkHours = totalWorkHours.add(hours);
@@ -225,7 +228,7 @@ public class AttendanceReportMapper {
         long remainingMinutes = fractionalHours.multiply(BigDecimal.valueOf(60))
                 .setScale(0, java.math.RoundingMode.HALF_UP)
                 .longValue();
-        
+
         item.setTotalWorkedHours(totalHoursLong);
         item.setTotalWorkedMinutes(remainingMinutes);
         item.setTotalWorkedDisplay(String.format("%d hr %02d min", totalHoursLong, remainingMinutes));
@@ -233,4 +236,3 @@ public class AttendanceReportMapper {
         return item;
     }
 }
-

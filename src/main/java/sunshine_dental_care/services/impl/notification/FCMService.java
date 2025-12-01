@@ -13,9 +13,10 @@ import lombok.extern.slf4j.Slf4j;
 public class FCMService {
 
     // Gửi notification đến một thiết bị cụ thể sử dụng FCM
+    @org.springframework.scheduling.annotation.Async
     public void sendNotification(String token, String title, String body, String actionUrl,
-                                  String relatedEntityType, Integer relatedEntityId) {
-        log.info("FCMService: Begin sending notification");
+            String relatedEntityType, Integer relatedEntityId) {
+        log.info("FCMService: Begin sending notification (Async)");
         log.info("Title: {}", title);
         log.info("Body: {}", body);
         log.info("Token: {}...", token != null && token.length() > 30 ? token.substring(0, 30) : token);
@@ -52,8 +53,9 @@ public class FCMService {
             Message message = messageBuilder.build();
             log.info("FCMService: Sending message to Firebase Cloud Messaging...");
 
-            String response = FirebaseMessaging.getInstance().send(message);
-            log.info("FCMService: FCM message sent successfully. Response: {}", response);
+            // Sử dụng sendAsync thay vì send để không block
+            FirebaseMessaging.getInstance().sendAsync(message);
+            log.info("FCMService: FCM message sent request initiated.");
         } catch (Exception e) {
             log.error("FCMService: Error while sending FCM message", e);
             log.error("Error type: {}", e.getClass().getName());
@@ -61,7 +63,7 @@ public class FCMService {
             if (e.getCause() != null) {
                 log.error("Cause: {}", e.getCause().getMessage());
             }
-            throw new RuntimeException("Failed to send FCM notification: " + e.getMessage(), e);
+            // Không throw exception để tránh rollback transaction của luồng chính
         }
     }
 }

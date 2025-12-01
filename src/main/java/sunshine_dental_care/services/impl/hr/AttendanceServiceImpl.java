@@ -51,8 +51,8 @@ import sunshine_dental_care.repositories.hr.EmployeeFaceProfileRepo;
 import sunshine_dental_care.services.impl.hr.AttendanceVerificationService.VerificationResult;
 import sunshine_dental_care.services.impl.notification.NotificationService;
 import sunshine_dental_care.services.interfaces.hr.AttendanceService;
-import sunshine_dental_care.services.interfaces.hr.ShiftService;
 import sunshine_dental_care.services.interfaces.hr.FaceRecognitionService.FaceVerificationResult;
+import sunshine_dental_care.services.interfaces.hr.ShiftService;
 
 @Service
 @RequiredArgsConstructor
@@ -112,6 +112,8 @@ public class AttendanceServiceImpl implements AttendanceService {
             shiftType = shiftService.determineShiftForDoctor(currentTime);
             shiftService.validateCheckInTime(shiftType, currentTime);
 
+            // For doctors: check for existing attendance with same shiftType (enforce
+            // uniqueness at application level)
             Optional<Attendance> existingShift = attendanceRepo
                     .findByUserIdAndClinicIdAndWorkDateAndShiftType(
                             request.getUserId(), clinicId, today, shiftType);
@@ -130,6 +132,8 @@ public class AttendanceServiceImpl implements AttendanceService {
                 return att;
             });
         } else {
+            // For non-doctor employees: only one attendance per day (no shiftType in
+            // uniqueness check)
             shiftType = "FULL_DAY";
             Optional<Attendance> existing = attendanceRepo
                     .findByUserIdAndWorkDate(request.getUserId(), today);
@@ -254,7 +258,16 @@ public class AttendanceServiceImpl implements AttendanceService {
             log.error("Failed to send check-in notification", e);
         }
 
-        return attendanceMapper.mapToAttendanceResponse(attendance, user, clinic, faceProfile, faceResult, wifiResult);
+        // Calculate expectedEndTime for response
+        LocalTime expectedEndTime = EMPLOYEE_END_TIME;
+        if (isDoctor && shiftType != null) {
+            Optional<DoctorSchedule> matchedSchedule = shiftService.findMatchingSchedule(
+                    request.getUserId(), clinicId, today, shiftType);
+            expectedEndTime = shiftService.getExpectedEndTime(shiftType, matchedSchedule.orElse(null));
+        }
+
+        return attendanceMapper.mapToAttendanceResponse(attendance, user, clinic, faceProfile, faceResult, wifiResult,
+                expectedStartTime, expectedEndTime);
     }
 
     // Xử lý check-out cho nhân viên hoặc bác sĩ, tính giờ công thực tế
@@ -373,9 +386,11 @@ public class AttendanceServiceImpl implements AttendanceService {
         } else {
             attendance.setLunchBreakMinutes(0);
         }
-
-        long minutesEarly = attendance.getEarlyMinutes() != null ? attendance.getEarlyMinutes() : 0;
-        long adjustedMinutes = totalMinutes - minutesLate - minutesEarly - lunchBreakMinutes;
+        // Fix: Do not subtract minutesLate and minutesEarly from totalMinutes.
+        // totalMinutes is the actual duration present. Late/Early are just status
+        // indicators.
+        // Subtracting them would be double-counting the time not present.
+        long adjustedMinutes = totalMinutes - lunchBreakMinutes;
         if (adjustedMinutes < 0) {
             adjustedMinutes = 0;
         }
@@ -434,7 +449,8 @@ public class AttendanceServiceImpl implements AttendanceService {
             log.error("Failed to send check-out notification", e);
         }
 
-        return attendanceMapper.mapToAttendanceResponse(attendance, user, clinic, faceProfile, faceResult, wifiResult);
+        return attendanceMapper.mapToAttendanceResponse(attendance, user, clinic, faceProfile, faceResult, wifiResult,
+                expectedStartTime, expectedEndTime);
     }
 
     // Lấy bản ghi attendance hôm nay cho user theo role
@@ -470,7 +486,8 @@ public class AttendanceServiceImpl implements AttendanceService {
             Clinic clinic = clinicRepo.findById(att.getClinicId())
                     .orElseThrow(() -> new AttendanceNotFoundException("Clinic not found"));
 
-            return attendanceMapper.mapToAttendanceResponse(att, user, clinic, null, null, null);
+            LocalTime[] times = resolveScheduledTimes(att);
+            return attendanceMapper.mapToAttendanceResponse(att, user, clinic, null, null, null, times[0], times[1]);
         } else {
             Optional<Attendance> attendance = attendanceRepo.findByUserIdAndWorkDate(userId, today);
             if (attendance.isEmpty()) {
@@ -481,7 +498,8 @@ public class AttendanceServiceImpl implements AttendanceService {
                     .orElseThrow(() -> new AttendanceNotFoundException("User not found"));
             Clinic clinic = clinicRepo.findById(att.getClinicId())
                     .orElseThrow(() -> new AttendanceNotFoundException("Clinic not found"));
-            return attendanceMapper.mapToAttendanceResponse(att, user, clinic, null, null, null);
+            LocalTime[] times = resolveScheduledTimes(att);
+            return attendanceMapper.mapToAttendanceResponse(att, user, clinic, null, null, null, times[0], times[1]);
         }
     }
 
@@ -515,7 +533,9 @@ public class AttendanceServiceImpl implements AttendanceService {
             return attendances.stream()
                     .map(att -> {
                         Clinic clinic = clinicRepo.findById(att.getClinicId()).orElse(null);
-                        return attendanceMapper.mapToAttendanceResponse(att, user, clinic, null, null, null);
+                        LocalTime[] times = resolveScheduledTimes(att);
+                        return attendanceMapper.mapToAttendanceResponse(att, user, clinic, null, null, null, times[0],
+                                times[1]);
                     })
                     .collect(java.util.stream.Collectors.toList());
         } else {
@@ -528,8 +548,9 @@ public class AttendanceServiceImpl implements AttendanceService {
                     .orElseThrow(() -> new AttendanceNotFoundException("User not found"));
             Clinic clinic = clinicRepo.findById(att.getClinicId())
                     .orElseThrow(() -> new AttendanceNotFoundException("Clinic not found"));
+            LocalTime[] times = resolveScheduledTimes(att);
             return java.util.Collections.singletonList(
-                    attendanceMapper.mapToAttendanceResponse(att, user, clinic, null, null, null));
+                    attendanceMapper.mapToAttendanceResponse(att, user, clinic, null, null, null, times[0], times[1]));
         }
     }
 
@@ -561,7 +582,8 @@ public class AttendanceServiceImpl implements AttendanceService {
         return attendances.map(att -> {
             User user = userRepo.findById(att.getUserId()).orElse(null);
             Clinic clinic = clinicRepo.findById(att.getClinicId()).orElse(null);
-            return attendanceMapper.mapToAttendanceResponse(att, user, clinic, null, null, null);
+            LocalTime[] times = resolveScheduledTimes(att);
+            return attendanceMapper.mapToAttendanceResponse(att, user, clinic, null, null, null, times[0], times[1]);
         });
     }
 
@@ -663,7 +685,9 @@ public class AttendanceServiceImpl implements AttendanceService {
 
         EmployeeFaceProfile faceProfile = faceProfileRepo.findByUserId(attendance.getUserId()).orElse(null);
 
-        return attendanceMapper.mapToAttendanceResponse(attendance, user, clinic, faceProfile, null, null);
+        LocalTime[] times = resolveScheduledTimes(attendance);
+        return attendanceMapper.mapToAttendanceResponse(attendance, user, clinic, faceProfile, null, null, times[0],
+                times[1]);
     }
 
     @Override
@@ -768,8 +792,8 @@ public class AttendanceServiceImpl implements AttendanceService {
     // Nộp giải trình cho một bản ghi attendance
     @Override
     @Transactional
-    public AttendanceResponse submitExplanation(AttendanceExplanationRequest request) {
-        Attendance attendance = attendanceExplanationHelper.submitExplanation(request);
+    public AttendanceResponse submitExplanation(AttendanceExplanationRequest request, Integer userId) {
+        Attendance attendance = attendanceExplanationHelper.submitExplanation(request, userId);
         User user = userRepo.findById(attendance.getUserId())
                 .orElseThrow(() -> new AttendanceNotFoundException("User not found"));
         Clinic clinic = clinicRepo.findById(attendance.getClinicId())
@@ -811,7 +835,8 @@ public class AttendanceServiceImpl implements AttendanceService {
             log.error("Failed to send explanation submission notifications: {}", e.getMessage(), e);
         }
 
-        return attendanceMapper.mapToAttendanceResponse(attendance, user, clinic, null, null, null);
+        LocalTime[] times = resolveScheduledTimes(attendance);
+        return attendanceMapper.mapToAttendanceResponse(attendance, user, clinic, null, null, null, times[0], times[1]);
     }
 
     // Lấy danh sách attendance đang chờ giải trình (HR)
@@ -830,14 +855,16 @@ public class AttendanceServiceImpl implements AttendanceService {
                 .orElseThrow(() -> new AttendanceNotFoundException("User not found"));
         Clinic clinic = clinicRepo.findById(attendance.getClinicId())
                 .orElseThrow(() -> new AttendanceNotFoundException("Clinic not found"));
-        return attendanceMapper.mapToAttendanceResponse(attendance, user, clinic, null, null, null);
+        LocalTime[] times = resolveScheduledTimes(attendance);
+        return attendanceMapper.mapToAttendanceResponse(attendance, user, clinic, null, null, null, times[0], times[1]);
     }
 
     // mapping attendance + lookup các thông tin liên quan
     private AttendanceResponse mapToResponseWithLookups(Attendance attendance) {
         User user = userRepo.findById(attendance.getUserId()).orElse(null);
         Clinic clinic = clinicRepo.findById(attendance.getClinicId()).orElse(null);
-        return attendanceMapper.mapToAttendanceResponse(attendance, user, clinic, null, null, null);
+        LocalTime[] times = resolveScheduledTimes(attendance);
+        return attendanceMapper.mapToAttendanceResponse(attendance, user, clinic, null, null, null, times[0], times[1]);
     }
 
     // Xác định trạng thái ON_TIME/LATE của điểm danh bác sĩ dựa vào ca & lịch
@@ -855,8 +882,9 @@ public class AttendanceServiceImpl implements AttendanceService {
         DoctorSchedule schedule = matchedSchedule.orElse(null);
         LocalTime expectedStartTime = shiftService.getExpectedStartTime(shiftType, schedule);
 
-        // Kiểm tra xem có đơn nghỉ phép đã duyệt cho ngày này không
-        boolean hasApprovedLeave = attendanceStatusCalculator.hasApprovedLeaveOnDate(userId, workDate);
+        // Kiểm tra xem có đơn nghỉ phép đã duyệt cho ngày và ca này không (cho bác sĩ)
+        boolean hasApprovedLeave = attendanceStatusCalculator.hasApprovedLeaveOnDateAndShift(userId, workDate,
+                shiftType);
 
         if (checkInLocalTime.isBefore(expectedStartTime) || checkInLocalTime.equals(expectedStartTime)) {
             log.info("Doctor {} checked in ON_TIME for {} shift: {} (expected: {})",
@@ -915,6 +943,30 @@ public class AttendanceServiceImpl implements AttendanceService {
             default:
                 return type;
         }
+    }
+
+    private LocalTime[] resolveScheduledTimes(Attendance attendance) {
+        LocalTime[] times = new LocalTime[2];
+        List<UserRole> userRoles = userRoleRepo.findActiveByUserId(attendance.getUserId());
+        boolean isDoctor = userRoles != null && userRoles.stream()
+                .anyMatch(ur -> attendanceStatusCalculator.isDoctorRole(ur));
+
+        if (isDoctor && attendance.getShiftType() != null) {
+            Optional<DoctorSchedule> schedule = shiftService.findMatchingSchedule(
+                    attendance.getUserId(), attendance.getClinicId(), attendance.getWorkDate(),
+                    attendance.getShiftType());
+            if (schedule.isPresent()) {
+                times[0] = schedule.get().getStartTime();
+                times[1] = schedule.get().getEndTime();
+            } else {
+                times[0] = shiftService.getExpectedStartTime(attendance.getShiftType(), null);
+                times[1] = shiftService.getExpectedEndTime(attendance.getShiftType(), null);
+            }
+        } else {
+            times[0] = EMPLOYEE_START_TIME;
+            times[1] = EMPLOYEE_END_TIME;
+        }
+        return times;
     }
 
 }

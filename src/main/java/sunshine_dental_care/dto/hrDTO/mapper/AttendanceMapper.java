@@ -11,7 +11,8 @@ import sunshine_dental_care.services.interfaces.hr.FaceRecognitionService.FaceVe
 
 /**
  * Mapper để chuyển đổi Attendance entity sang AttendanceResponse DTO.
- * Tách logic mapping từ AttendanceServiceImpl để code gọn hơn, theo pattern của Reception module.
+ * Tách logic mapping từ AttendanceServiceImpl để code gọn hơn, theo pattern của
+ * Reception module.
  */
 @Component
 public class AttendanceMapper {
@@ -19,12 +20,12 @@ public class AttendanceMapper {
     /**
      * Map Attendance entity sang AttendanceResponse DTO.
      * 
-     * @param attendance Attendance entity
-     * @param user User entity (có thể null)
-     * @param clinic Clinic entity (có thể null)
+     * @param attendance  Attendance entity
+     * @param user        User entity (có thể null)
+     * @param clinic      Clinic entity (có thể null)
      * @param faceProfile EmployeeFaceProfile (có thể null)
-     * @param faceResult FaceVerificationResult (có thể null)
-     * @param wifiResult WiFiValidationResult (có thể null)
+     * @param faceResult  FaceVerificationResult (có thể null)
+     * @param wifiResult  WiFiValidationResult (có thể null)
      * @return AttendanceResponse DTO
      */
     public AttendanceResponse mapToAttendanceResponse(
@@ -33,12 +34,15 @@ public class AttendanceMapper {
             Clinic clinic,
             EmployeeFaceProfile faceProfile,
             FaceVerificationResult faceResult,
-            WiFiValidationResult wifiResult) {
-        
-        if (attendance == null) return null;
+            WiFiValidationResult wifiResult,
+            java.time.LocalTime startTime,
+            java.time.LocalTime endTime) {
+
+        if (attendance == null)
+            return null;
 
         AttendanceResponse response = new AttendanceResponse();
-        
+
         // Basic fields
         response.setId(attendance.getId());
         response.setUserId(attendance.getUserId());
@@ -60,6 +64,8 @@ public class AttendanceMapper {
         response.setLunchBreakMinutes(attendance.getLunchBreakMinutes());
         response.setCreatedAt(attendance.getCreatedAt());
         response.setUpdatedAt(attendance.getUpdatedAt());
+        response.setStartTime(startTime);
+        response.setEndTime(endTime);
 
         // Map User fields
         if (user != null) {
@@ -82,4 +88,3 @@ public class AttendanceMapper {
         return response;
     }
 }
-

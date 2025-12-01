@@ -15,6 +15,7 @@ public class LeaveRequestRequest {
     private LocalDate endDate;
     private String type; // VACATION, SICK, PERSONAL, OTHER
     private String reason;
+    private String shiftType; // MORNING, AFTERNOON, FULL_DAY (null = full day, only for doctors)
     
     // Dùng cho duyệt/từ chối đơn
     private Integer leaveRequestId;
@@ -60,6 +61,14 @@ public class LeaveRequestRequest {
     
     public void setReason(String reason) {
         this.reason = reason;
+    }
+    
+    public String getShiftType() {
+        return shiftType;
+    }
+    
+    public void setShiftType(String shiftType) {
+        this.shiftType = shiftType;
     }
     
     public Integer getLeaveRequestId() {

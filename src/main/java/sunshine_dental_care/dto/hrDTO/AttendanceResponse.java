@@ -13,6 +13,7 @@ public class AttendanceResponse {
     private String faceImageUrl;
     private Integer clinicId;
     private String clinicName;
+    @com.fasterxml.jackson.annotation.JsonFormat(pattern = "yyyy-MM-dd")
     private LocalDate workDate;
     private Instant checkInTime;
     private Instant checkOutTime;
@@ -267,4 +268,27 @@ public class AttendanceResponse {
         this.updatedAt = updatedAt;
     }
 
+    // Thời gian bắt đầu ca làm việc (theo lịch)
+    @com.fasterxml.jackson.annotation.JsonFormat(pattern = "HH:mm:ss")
+    private java.time.LocalTime startTime;
+
+    // Thời gian kết thúc ca làm việc (theo lịch)
+    @com.fasterxml.jackson.annotation.JsonFormat(pattern = "HH:mm:ss")
+    private java.time.LocalTime endTime;
+
+    public java.time.LocalTime getStartTime() {
+        return startTime;
+    }
+
+    public void setStartTime(java.time.LocalTime startTime) {
+        this.startTime = startTime;
+    }
+
+    public java.time.LocalTime getEndTime() {
+        return endTime;
+    }
+
+    public void setEndTime(java.time.LocalTime endTime) {
+        this.endTime = endTime;
+    }
 }

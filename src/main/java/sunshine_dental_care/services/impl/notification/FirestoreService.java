@@ -27,6 +27,7 @@ public class FirestoreService {
     }
 
     // Lưu thông báo lên Firestore để cập nhật realtime cho mobile
+    @org.springframework.scheduling.annotation.Async
     public void saveNotification(NotificationResponse notification) {
         try {
             Firestore db = getFirestore();
@@ -48,21 +49,27 @@ public class FirestoreService {
             notificationData.put("title", notification.getTitle());
             notificationData.put("message", notification.getMessage());
             notificationData.put("actionUrl", notification.getActionUrl() != null ? notification.getActionUrl() : "");
-            notificationData.put("relatedEntityType", notification.getRelatedEntityType() != null ? notification.getRelatedEntityType() : "");
-            notificationData.put("relatedEntityId", notification.getRelatedEntityId() != null ? notification.getRelatedEntityId() : "");
+            notificationData.put("relatedEntityType",
+                    notification.getRelatedEntityType() != null ? notification.getRelatedEntityType() : "");
+            notificationData.put("relatedEntityId",
+                    notification.getRelatedEntityId() != null ? notification.getRelatedEntityId() : "");
             notificationData.put("isRead", notification.getIsRead());
-            notificationData.put("createdAt", notification.getCreatedAt() != null ? notification.getCreatedAt().toString() : Instant.now().toString());
-            notificationData.put("expiresAt", notification.getExpiresAt() != null ? notification.getExpiresAt().toString() : "");
+            notificationData.put("createdAt",
+                    notification.getCreatedAt() != null ? notification.getCreatedAt().toString()
+                            : Instant.now().toString());
+            notificationData.put("expiresAt",
+                    notification.getExpiresAt() != null ? notification.getExpiresAt().toString() : "");
             notificationData.put("readAt", notification.getReadAt() != null ? notification.getReadAt().toString() : "");
 
+            // Sử dụng ApiFuture để không block thread chính
             db.collection(collectionPath)
-                .document(notificationId)
-                .set(notificationData)
-                .get();
+                    .document(notificationId)
+                    .set(notificationData); // Không gọi .get()
 
-            log.info("[Firestore] Notification saved to Firestore - UserId: {}, NotificationId: {}", userId, notificationId);
+            log.info("[Firestore] Notification save initiated (Async) - UserId: {}, NotificationId: {}", userId,
+                    notificationId);
         } catch (Exception e) {
-            log.error("[Firestore] Error saving notification to Firestore: {}", e.getMessage(), e);
+            log.error("[Firestore] Error initiating save to Firestore: {}", e.getMessage(), e);
         }
     }
 
@@ -77,13 +84,14 @@ public class FirestoreService {
 
             String collectionPath = "notifications/" + userId + "/items";
             String documentId = String.valueOf(notificationId);
-            
+
             // Kiểm tra document có tồn tại không
             var docRef = db.collection(collectionPath).document(documentId);
             var docSnapshot = docRef.get().get();
-            
+
             if (!docSnapshot.exists()) {
-                log.warn("[Firestore] Document not found, skipping mark as read - UserId: {}, NotificationId: {}", userId, notificationId);
+                log.warn("[Firestore] Document not found, skipping mark as read - UserId: {}, NotificationId: {}",
+                        userId, notificationId);
                 return;
             }
 
@@ -93,10 +101,13 @@ public class FirestoreService {
 
             docRef.update(updates).get();
 
-            log.info("[Firestore] Notification marked as read - UserId: {}, NotificationId: {}", userId, notificationId);
+            log.info("[Firestore] Notification marked as read - UserId: {}, NotificationId: {}", userId,
+                    notificationId);
         } catch (com.google.api.gax.rpc.NotFoundException e) {
             // Document không tồn tại - không phải lỗi nghiêm trọng, chỉ log warning
-            log.warn("[Firestore] Document not found when marking as read - UserId: {}, NotificationId: {}. This is normal if notification was created before Firestore integration.", userId, notificationId);
+            log.warn(
+                    "[Firestore] Document not found when marking as read - UserId: {}, NotificationId: {}. This is normal if notification was created before Firestore integration.",
+                    userId, notificationId);
         } catch (Exception e) {
             log.error("[Firestore] Error marking notification as read: {}", e.getMessage(), e);
         }
@@ -114,9 +125,9 @@ public class FirestoreService {
             String collectionPath = "notifications/" + userId + "/items";
 
             db.collection(collectionPath)
-                .document(String.valueOf(notificationId))
-                .delete()
-                .get();
+                    .document(String.valueOf(notificationId))
+                    .delete()
+                    .get();
 
             log.info("[Firestore] Notification deleted - UserId: {}, NotificationId: {}", userId, notificationId);
         } catch (Exception e) {

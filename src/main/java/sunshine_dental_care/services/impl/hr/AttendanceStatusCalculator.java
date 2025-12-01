@@ -282,6 +282,16 @@ public class AttendanceStatusCalculator {
     public boolean hasApprovedLeaveOnDate(Integer userId, LocalDate workDate) {
         return leaveRequestRepo.hasApprovedLeaveOnDate(userId, workDate);
     }
+    
+    // Kiểm tra user có đơn nghỉ phép đã duyệt cho ngày và ca cụ thể không (cho bác sĩ)
+    public boolean hasApprovedLeaveOnDateAndShift(Integer userId, LocalDate workDate, String shiftType) {
+        if (shiftType == null || shiftType.isEmpty() || "FULL_DAY".equals(shiftType)) {
+            // Nếu FULL_DAY hoặc null, check như bình thường
+            return leaveRequestRepo.hasApprovedLeaveOnDate(userId, workDate);
+        }
+        // Nếu có shiftType cụ thể (MORNING/AFTERNOON), check theo ca
+        return leaveRequestRepo.hasApprovedLeaveOnDateAndShift(userId, workDate, shiftType);
+    }
 
     // Reset trạng thái INACTIVE schedule về ACTIVE cho ngày mới (chỉ reset do vắng mặt, không reset nếu đã approved nghỉ phép)
     public void resetScheduleStatusForNewDay(LocalDate workDate) {

@@ -258,8 +258,13 @@ public class AttendanceController {
     @PostMapping("/explanations/submit")
     @org.springframework.security.access.prepost.PreAuthorize("hasAnyRole('DOCTOR', 'HR', 'RECEPTION', 'ACCOUNTANT')")
     public ResponseEntity<AttendanceResponse> submitExplanation(
-            @Valid @RequestBody AttendanceExplanationRequest request) {
-        AttendanceResponse response = attendanceService.submitExplanation(request);
+            @Valid @RequestBody AttendanceExplanationRequest request,
+            @AuthenticationPrincipal CurrentUser currentUser) {
+        Integer userId = currentUser != null ? currentUser.userId() : null;
+        if (userId == null) {
+            throw new org.springframework.security.access.AccessDeniedException("User not authenticated");
+        }
+        AttendanceResponse response = attendanceService.submitExplanation(request, userId);
         return ResponseEntity.ok(response);
     }
 

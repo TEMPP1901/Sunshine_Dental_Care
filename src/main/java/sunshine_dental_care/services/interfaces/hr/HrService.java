@@ -26,4 +26,7 @@ public interface HrService {
 
     // Kiểm tra hợp lệ của lịch làm việc tạo mới
     ValidationResultDto validateSchedule(CreateWeeklyScheduleRequest request);
+
+    // Lấy lịch làm việc của user (bác sĩ) trong tuần
+    List<DoctorScheduleDto> getMySchedule(Integer userId, LocalDate weekStart);
 }

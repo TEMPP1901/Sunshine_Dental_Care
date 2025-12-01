@@ -52,9 +52,43 @@ public class AttendanceExplanationHelper {
                 .collect(Collectors.toList());
     }
 
-    public Attendance submitExplanation(AttendanceExplanationRequest request) {
-        Attendance attendance = attendanceRepo.findById(request.getAttendanceId())
-                .orElseThrow(() -> new AttendanceNotFoundException(request.getAttendanceId()));
+    public Attendance submitExplanation(AttendanceExplanationRequest request, Integer userId) {
+        Attendance attendance;
+
+        // Nếu attendanceId = 0 hoặc null, tạo attendance record mới từ schedule
+        if (request.getAttendanceId() == null || request.getAttendanceId() == 0) {
+            // Kiểm tra các thông tin cần thiết
+            if (request.getClinicId() == null || request.getWorkDate() == null || request.getShiftType() == null) {
+                throw new AttendanceValidationException(
+                        "Missing required information to create attendance: clinicId, workDate, and shiftType are required when attendanceId is 0");
+            }
+
+            // Kiểm tra xem đã có attendance record chưa (tránh duplicate)
+            java.util.Optional<Attendance> existing = attendanceRepo
+                    .findByUserIdAndClinicIdAndWorkDateAndShiftType(
+                            userId, request.getClinicId(), request.getWorkDate(), request.getShiftType());
+
+            if (existing.isPresent()) {
+                attendance = existing.get();
+            } else {
+                // Tạo attendance record mới
+                attendance = new Attendance();
+                attendance.setUserId(userId);
+                attendance.setClinicId(request.getClinicId());
+                attendance.setWorkDate(request.getWorkDate());
+                attendance.setShiftType(request.getShiftType());
+                attendance.setAttendanceStatus("ABSENT"); // Mặc định là ABSENT vì chưa check-in
+                attendance = attendanceRepo.save(attendance);
+                log.info(
+                        "Created new attendance record (id={}) for explanation submission: userId={}, clinicId={}, workDate={}, shiftType={}",
+                        attendance.getId(), userId, request.getClinicId(), request.getWorkDate(),
+                        request.getShiftType());
+            }
+        } else {
+            // Lấy attendance record hiện có
+            attendance = attendanceRepo.findById(request.getAttendanceId())
+                    .orElseThrow(() -> new AttendanceNotFoundException(request.getAttendanceId()));
+        }
 
         String note = String.format("[EXPLANATION_REQUEST:%s] %s",
                 request.getExplanationType().toUpperCase(), request.getReason());
@@ -88,6 +122,10 @@ public class AttendanceExplanationHelper {
     public Attendance processExplanation(AdminExplanationActionRequest request, Integer adminUserId) {
         Attendance attendance = attendanceRepo.findById(request.getAttendanceId())
                 .orElseThrow(() -> new AttendanceNotFoundException(request.getAttendanceId()));
+
+        // Log để debug - đảm bảo đang xử lý đúng attendance
+        log.info("Processing explanation for attendanceId={}, userId={}, workDate={}, shiftType={}",
+                attendance.getId(), attendance.getUserId(), attendance.getWorkDate(), attendance.getShiftType());
 
         String note = attendance.getNote();
         if (note == null || !note.contains("[EXPLANATION_REQUEST:")) {
@@ -141,9 +179,24 @@ public class AttendanceExplanationHelper {
         // Nếu duyệt giải trình đi trễ (LATE) (QUAN TRỌNG)
         boolean hasRecalculated = false;
         if ("LATE".equalsIgnoreCase(explanationType) && "APPROVED_LATE".equals(newStatus)) {
+            Integer oldLateMinutes = attendance.getLateMinutes();
+            long credit = oldLateMinutes != null ? oldLateMinutes : 0;
+
             attendance.setLateMinutes(0);
             if (attendance.getCheckInTime() != null && attendance.getCheckOutTime() != null) {
-                recalculateWorkHoursForApprovedLate(attendance);
+                recalculateWorkHoursWithCredit(attendance, credit);
+                hasRecalculated = true;
+            }
+        }
+
+        // Nếu duyệt giải trình về sớm (EARLY_CHECKOUT)
+        if ("EARLY_CHECKOUT".equalsIgnoreCase(explanationType) && "APPROVED_EARLY_LEAVE".equals(newStatus)) {
+            Integer oldEarlyMinutes = attendance.getEarlyMinutes();
+            long credit = oldEarlyMinutes != null ? oldEarlyMinutes : 0;
+
+            attendance.setEarlyMinutes(0);
+            if (attendance.getCheckInTime() != null && attendance.getCheckOutTime() != null) {
+                recalculateWorkHoursWithCredit(attendance, credit);
                 hasRecalculated = true;
             }
         }
@@ -162,8 +215,10 @@ public class AttendanceExplanationHelper {
 
             String finalStatus = attendance.getAttendanceStatus();
             if ("APPROVED_LATE".equals(finalStatus)) {
+                Integer oldLateMinutes = attendance.getLateMinutes();
+                long credit = oldLateMinutes != null ? oldLateMinutes : 0;
                 attendance.setLateMinutes(0);
-                recalculateWorkHoursForApprovedLate(attendance);
+                recalculateWorkHoursWithCredit(attendance, credit);
                 hasRecalculated = true;
             } else {
                 if (attendance.getCheckOutTime() != null) {
@@ -177,14 +232,20 @@ public class AttendanceExplanationHelper {
         if (!hasRecalculated && attendance.getCheckInTime() != null && attendance.getCheckOutTime() != null) {
             String finalStatus = attendance.getAttendanceStatus();
             if ("APPROVED_LATE".equals(finalStatus)) {
-                attendance.setLateMinutes(0);
-                recalculateWorkHoursForApprovedLate(attendance);
+                // Fallback logic if not handled above
+                recalculateWorkHours(attendance, attendance.getCheckOutTime());
+            } else if ("APPROVED_EARLY_LEAVE".equals(finalStatus)) {
+                recalculateWorkHours(attendance, attendance.getCheckOutTime());
             } else {
                 recalculateWorkHours(attendance, attendance.getCheckOutTime());
             }
         }
 
         try {
+            // Log để debug - đảm bảo gửi notification đúng user
+            log.info("Sending approval notification to userId={} for attendanceId={}, workDate={}, shiftType={}",
+                    attendance.getUserId(), attendance.getId(), attendance.getWorkDate(), attendance.getShiftType());
+
             NotificationRequest notiRequest = NotificationRequest.builder()
                     .userId(attendance.getUserId())
                     .type("EXPLANATION_APPROVED")
@@ -197,12 +258,13 @@ public class AttendanceExplanationHelper {
                     .build();
             notificationService.sendNotification(notiRequest);
         } catch (Exception e) {
-            // Chỉ log lỗi khi thực sự fail gửi noti
+            log.error("Failed to send approval notification for attendanceId={}, userId={}: {}",
+                    attendance.getId(), attendance.getUserId(), e.getMessage());
         }
     }
 
-    // Tính lại giờ công cho duyệt LATE (QUAN TRỌNG)
-    private void recalculateWorkHoursForApprovedLate(Attendance attendance) {
+    // Tính lại giờ công có cộng thêm thời gian được duyệt (credit)
+    private void recalculateWorkHoursWithCredit(Attendance attendance, long creditedMinutes) {
         if (attendance.getCheckInTime() == null || attendance.getCheckOutTime() == null) {
             return;
         }
@@ -214,7 +276,8 @@ public class AttendanceExplanationHelper {
                 .atZone(ZoneId.systemDefault())
                 .toLocalTime();
 
-        long totalMinutes = java.time.Duration.between(attendance.getCheckInTime(), attendance.getCheckOutTime()).toMinutes();
+        long totalMinutes = java.time.Duration.between(attendance.getCheckInTime(), attendance.getCheckOutTime())
+                .toMinutes();
 
         long lunchBreakMinutes = 0;
         LocalTime LUNCH_BREAK_START = LocalTime.of(11, 0);
@@ -227,10 +290,16 @@ public class AttendanceExplanationHelper {
             attendance.setLunchBreakMinutes(0);
         }
 
+        // Reset late/early minutes as they are approved
         attendance.setLateMinutes(0);
         attendance.setEarlyMinutes(0);
 
-        long adjustedMinutes = totalMinutes - lunchBreakMinutes;
+        // Actual Hours = (Physical Time - Lunch) + Credited Time
+        long adjustedMinutes = (totalMinutes - lunchBreakMinutes) + creditedMinutes;
+        log.info(
+                "RecalculateWorkHoursWithCredit: totalMinutes={}, lunchBreakMinutes={}, creditedMinutes={}, adjustedMinutes={}",
+                totalMinutes, lunchBreakMinutes, creditedMinutes, adjustedMinutes);
+
         if (adjustedMinutes < 0) {
             adjustedMinutes = 0;
         }
@@ -276,7 +345,8 @@ public class AttendanceExplanationHelper {
 
         attendance.setEarlyMinutes(0);
 
-        long adjustedMinutes = totalMinutes - minutesLate - 0 - lunchBreakMinutes;
+        // Fix: Do not subtract minutesLate from totalMinutes.
+        long adjustedMinutes = totalMinutes - lunchBreakMinutes;
         if (adjustedMinutes < 0) {
             adjustedMinutes = 0;
         }
@@ -291,6 +361,8 @@ public class AttendanceExplanationHelper {
     private String determineApprovedStatus(String explanationType, String oldStatus) {
         if ("LATE".equalsIgnoreCase(explanationType)) {
             return "APPROVED_LATE";
+        } else if ("EARLY_CHECKOUT".equalsIgnoreCase(explanationType)) {
+            return "APPROVED_EARLY_LEAVE";
         } else if ("ABSENT".equalsIgnoreCase(explanationType)) {
             return "APPROVED_ABSENCE";
         } else if ("MISSING_CHECK_IN".equalsIgnoreCase(explanationType)) {
@@ -320,6 +392,10 @@ public class AttendanceExplanationHelper {
         attendance.setNote(note);
 
         try {
+            // Log để debug - đảm bảo gửi notification đúng user
+            log.info("Sending rejection notification to userId={} for attendanceId={}, workDate={}, shiftType={}",
+                    attendance.getUserId(), attendance.getId(), attendance.getWorkDate(), attendance.getShiftType());
+
             NotificationRequest notiRequest = NotificationRequest.builder()
                     .userId(attendance.getUserId())
                     .type("EXPLANATION_REJECTED")
@@ -332,7 +408,8 @@ public class AttendanceExplanationHelper {
                     .build();
             notificationService.sendNotification(notiRequest);
         } catch (Exception e) {
-            // Chỉ log lỗi khi thực sự fail gửi noti
+            log.error("Failed to send rejection notification for attendanceId={}, userId={}: {}",
+                    attendance.getId(), attendance.getUserId(), e.getMessage());
         }
     }
 
@@ -405,6 +482,7 @@ public class AttendanceExplanationHelper {
         response.setCheckOutTime(attendance.getCheckOutTime());
         response.setAttendanceStatus(attendance.getAttendanceStatus());
         response.setNote(attendance.getNote());
+        response.setShiftType(attendance.getShiftType()); // Set shiftType for doctors
 
         String note = attendance.getNote();
         if (note != null) {

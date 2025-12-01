@@ -73,7 +73,7 @@ public interface AttendanceService {
     List<AttendanceExplanationResponse> getAttendanceNeedingExplanation(Integer userId);
 
     // Nhân viên gửi giải trình
-    AttendanceResponse submitExplanation(AttendanceExplanationRequest request);
+    AttendanceResponse submitExplanation(AttendanceExplanationRequest request, Integer userId);
 
     // Admin xem danh sách các giải trình đang chờ duyệt
     List<AttendanceExplanationResponse> getPendingExplanations(Integer clinicId);

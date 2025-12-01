@@ -57,8 +57,7 @@ public class AttendanceReportService {
                 .collect(Collectors.toMap(
                         Attendance::getUserId,
                         a -> a,
-                        (a1, a2) -> a1
-                ));
+                        (a1, a2) -> a1));
 
         for (Department dept : departments) {
             DailySummaryResponse summary = new DailySummaryResponse();
@@ -137,10 +136,10 @@ public class AttendanceReportService {
 
     // LẤY DANH SÁCH CHẤM CÔNG THEO NGÀY (RẤT QUAN TRỌNG - PHÂN TRANG)
     public Page<DailyAttendanceListItemResponse> getDailyAttendanceList(LocalDate workDate,
-                                                                        Integer departmentId,
-                                                                        Integer clinicId,
-                                                                        int page,
-                                                                        int size) {
+            Integer departmentId,
+            Integer clinicId,
+            int page,
+            int size) {
         log.info("Getting daily attendance list for date: {}, departmentId: {}, clinicId: {}",
                 workDate, departmentId, clinicId);
 
@@ -155,34 +154,20 @@ public class AttendanceReportService {
                     .toList();
         }
 
-        Map<Integer, Attendance> attendanceByUserId = attendances.stream()
-                .collect(Collectors.toMap(
-                        Attendance::getUserId,
-                        a -> a,
-                        (a1, a2) -> a1
-                ));
+        // Group attendances by userId - với bác sĩ có thể có nhiều ca
+        Map<Integer, List<Attendance>> attendanceByUserId = attendances.stream()
+                .collect(Collectors.groupingBy(Attendance::getUserId));
 
         List<DailyAttendanceListItemResponse> items = new ArrayList<>();
 
         for (User user : eligibleUsers) {
-            DailyAttendanceListItemResponse item = new DailyAttendanceListItemResponse();
-            item.setId(null);
-            item.setUserId(user.getId());
-            item.setEmployeeName(user.getFullName());
-            item.setAvatarUrl(user.getAvatarUrl());
-
             List<UserRole> roles = userRoleRepo.findActiveByUserId(user.getId());
-            if (roles != null && !roles.isEmpty() && roles.get(0).getRole() != null) {
-                item.setJobTitle(roles.get(0).getRole().getRoleName());
-            }
-
-            Attendance attendance = attendanceByUserId.get(user.getId());
 
             // KIỂM TRA USER LÀ BÁC SĨ KHÔNG
             boolean isDoctor = roles != null && roles.stream()
                     .anyMatch(ur -> attendanceStatusCalculator.isDoctorRole(ur));
 
-            //  BÁC SĨ LUÔN ĐƯỢC CHECK VÀ CẬP NHẬT ABSENT THEO CA LỊCH
+            // BÁC SĨ LUÔN ĐƯỢC CHECK VÀ CẬP NHẬT ABSENT THEO CA LỊCH
             if (isDoctor) {
                 try {
                     // ĐÁNH DẤU VẮNG DỰA THEO LỊCH ĐI LÀM CỦA BÁC SĨ
@@ -191,15 +176,59 @@ public class AttendanceReportService {
                     log.warn("Error marking absent for doctor {} on {}: {}", user.getId(), workDate, e.getMessage(), e);
                 }
 
-                List<Attendance> doctorAttendances = attendanceRepository.findAllByUserIdAndWorkDate(user.getId(), workDate);
-                if (!doctorAttendances.isEmpty()) {
-                    attendance = doctorAttendances.get(0);
-                }
-            }
+                // Với bác sĩ: tạo 1 item cho mỗi ca (có thể có nhiều ca trong ngày)
+                List<Attendance> doctorAttendances = attendanceRepository.findAllByUserIdAndWorkDate(user.getId(),
+                        workDate);
 
-            if (attendance == null) {
-                // NẾU KHÔNG PHẢI BÁC SĨ, ĐÁNH DẤU ABSENT THEO CLINIC
-                if (!isDoctor) {
+                if (doctorAttendances.isEmpty()) {
+                    // Không có attendance nào - tạo 1 item ABSENT
+                    DailyAttendanceListItemResponse item = new DailyAttendanceListItemResponse();
+                    item.setId(null);
+                    item.setUserId(user.getId());
+                    item.setEmployeeName(user.getFullName());
+                    item.setAvatarUrl(user.getAvatarUrl());
+                    if (roles != null && !roles.isEmpty() && roles.get(0).getRole() != null) {
+                        item.setJobTitle(roles.get(0).getRole().getRoleName());
+                    }
+                    item.setStatus("Absent");
+                    item.setStatusColor("red");
+                    item.setCheckInTime(null);
+                    item.setCheckOutTime(null);
+                    item.setRemarks("Fixed Attendance");
+                    items.add(item);
+                } else {
+                    // Tạo 1 item cho mỗi ca
+                    for (Attendance attendance : doctorAttendances) {
+                        DailyAttendanceListItemResponse item = new DailyAttendanceListItemResponse();
+                        item.setId(attendance.getId());
+                        item.setUserId(user.getId());
+                        item.setEmployeeName(user.getFullName());
+                        item.setAvatarUrl(user.getAvatarUrl());
+                        if (roles != null && !roles.isEmpty() && roles.get(0).getRole() != null) {
+                            item.setJobTitle(roles.get(0).getRole().getRoleName());
+                        }
+                        DailyAttendanceListItemResponse mapped = attendanceReportMapper.mapToDailyListItem(attendance,
+                                user, workDate);
+                        copyDailyItemFields(item, mapped);
+                        items.add(item);
+                    }
+                }
+            } else {
+                // Với nhân viên thường: chỉ có 1 attendance record mỗi ngày
+                DailyAttendanceListItemResponse item = new DailyAttendanceListItemResponse();
+                item.setId(null);
+                item.setUserId(user.getId());
+                item.setEmployeeName(user.getFullName());
+                item.setAvatarUrl(user.getAvatarUrl());
+                if (roles != null && !roles.isEmpty() && roles.get(0).getRole() != null) {
+                    item.setJobTitle(roles.get(0).getRole().getRoleName());
+                }
+
+                List<Attendance> userAttendances = attendanceByUserId.getOrDefault(user.getId(), new ArrayList<>());
+                Attendance attendance = userAttendances.isEmpty() ? null : userAttendances.get(0);
+
+                if (attendance == null) {
+                    // ĐÁNH DẤU ABSENT THEO CLINIC
                     Integer userClinicId = null;
                     if (roles != null && !roles.isEmpty()) {
                         for (UserRole userRole : roles) {
@@ -220,27 +249,32 @@ public class AttendanceReportService {
 
                     if (userClinicId != null) {
                         attendanceStatusCalculator.markAbsentIfNeeded(user.getId(), userClinicId, workDate);
-                        attendance = attendanceRepository.findByUserIdAndClinicIdAndWorkDate(user.getId(), userClinicId, workDate)
+                        attendance = attendanceRepository
+                                .findByUserIdAndClinicIdAndWorkDate(user.getId(), userClinicId, workDate)
                                 .orElse(null);
                     }
-                }
 
-                if (attendance == null) {
-                    item.setStatus("Absent");
-                    item.setStatusColor("red");
-                    item.setCheckInTime(null);
-                    item.setCheckOutTime(null);
-                    item.setRemarks("Fixed Attendance");
+                    if (attendance == null) {
+                        item.setStatus("Absent");
+                        item.setStatusColor("red");
+                        item.setCheckInTime(null);
+                        item.setCheckOutTime(null);
+                        item.setRemarks("Fixed Attendance");
+                    } else {
+                        item.setId(attendance.getId());
+                        DailyAttendanceListItemResponse mapped = attendanceReportMapper.mapToDailyListItem(attendance,
+                                user, workDate);
+                        copyDailyItemFields(item, mapped);
+                    }
                 } else {
-                    DailyAttendanceListItemResponse mapped = attendanceReportMapper.mapToDailyListItem(attendance, user, workDate);
+                    item.setId(attendance.getId());
+                    DailyAttendanceListItemResponse mapped = attendanceReportMapper.mapToDailyListItem(attendance, user,
+                            workDate);
                     copyDailyItemFields(item, mapped);
                 }
-            } else {
-                DailyAttendanceListItemResponse mapped = attendanceReportMapper.mapToDailyListItem(attendance, user, workDate);
-                copyDailyItemFields(item, mapped);
-            }
 
-            items.add(item);
+                items.add(item);
+            }
         }
 
         items.sort((a, b) -> a.getEmployeeName().compareToIgnoreCase(b.getEmployeeName()));
@@ -362,11 +396,11 @@ public class AttendanceReportService {
 
     // LẤY DANH SÁCH CHẤM CÔNG THEO THÁNG (RẤT QUAN TRỌNG - PHÂN TRANG)
     public Page<MonthlyAttendanceListItemResponse> getMonthlyAttendanceList(Integer year,
-                                                                            Integer month,
-                                                                            Integer departmentId,
-                                                                            Integer clinicId,
-                                                                            int page,
-                                                                            int size) {
+            Integer month,
+            Integer departmentId,
+            Integer clinicId,
+            int page,
+            int size) {
         log.info("Getting monthly attendance list for year: {}, month: {}, departmentId: {}, clinicId: {}",
                 year, month, departmentId, clinicId);
 
@@ -383,28 +417,17 @@ public class AttendanceReportService {
         List<User> eligibleUsers = getEligibleUsersForAttendance(departmentId);
         List<Attendance> attendances;
         if (clinicId != null) {
-            attendances = attendanceRepository.findAll().stream()
-                    .filter(a -> {
-                        LocalDate wDate = a.getWorkDate();
-                        return a.getClinicId() != null
-                                && a.getClinicId().equals(clinicId)
-                                && wDate != null
-                                && wDate.getDayOfWeek() != DayOfWeek.SUNDAY
-                                && !wDate.isBefore(startDate)
-                                && !wDate.isAfter(endDate);
-                    })
-                    .toList();
+            attendances = attendanceRepository.findByClinicIdAndWorkDateBetween(clinicId, startDate, endDate);
         } else {
-            attendances = attendanceRepository.findAll().stream()
-                    .filter(a -> {
-                        LocalDate wDate = a.getWorkDate();
-                        return wDate != null
-                                && wDate.getDayOfWeek() != DayOfWeek.SUNDAY
-                                && !wDate.isBefore(startDate)
-                                && !wDate.isAfter(endDate);
-                    })
-                    .toList();
+            attendances = attendanceRepository.findByWorkDateBetween(startDate, endDate);
         }
+
+        // Filter out Sundays explicitly if needed, though usually not saved
+        attendances = attendances.stream()
+                .filter(a -> a.getWorkDate().getDayOfWeek() != DayOfWeek.SUNDAY)
+                .collect(Collectors.toList());
+
+        log.info("Fetched {} attendance records for monthly report", attendances.size());
 
         Map<Integer, List<Attendance>> attendanceByUserId = attendances.stream()
                 .collect(Collectors.groupingBy(Attendance::getUserId));
