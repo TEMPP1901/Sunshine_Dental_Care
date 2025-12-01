@@ -1,5 +1,6 @@
 package sunshine_dental_care.dto.receptionDTO;
 
+import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;
 
@@ -16,6 +17,8 @@ public class AppointmentRequest {
     private Integer patientId;
 
     private String appointmentType; // "VIP" | "STANDARD"
+
+    private BigDecimal bookingFee; // Phí đặt lịch hẹn
 
     private Integer doctorId;
 

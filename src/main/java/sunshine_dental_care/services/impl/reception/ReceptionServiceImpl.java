@@ -1,11 +1,9 @@
 package sunshine_dental_care.services.impl.reception;
-
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
-
 import org.springframework.stereotype.Service; // Annotation của Spring
 import org.springframework.transaction.annotation.Transactional;
 
@@ -113,9 +111,27 @@ public class ReceptionServiceImpl implements ReceptionService {
     public AppointmentResponse createNewAppointment(CurrentUser currentUser, AppointmentRequest request) {
         User creator = userRepo.getReferenceById(currentUser.userId());
         Clinic clinic = clinicRepo.findById(request.getClinicId()).orElseThrow(() -> new ResourceNotFoundException("Clinic not found."));
-        User doctor = userRepo.findById(request.getDoctorId()).orElseThrow(() -> new ResourceNotFoundException("Doctor not found."));
+
+        // 1. XỬ LÝ LOẠI LỊCH & BÁC SĨ
+        String type = request.getAppointmentType() != null ? request.getAppointmentType() : "VIP";
+        User doctor = null;
+
+        if ("VIP".equalsIgnoreCase(type)) {
+            if (request.getDoctorId() == null) {
+                throw new AppointmentConflictException("Lịch đặt VIP yêu cầu phải chọn Bác sĩ.");
+            }
+            doctor = userRepo.findById(request.getDoctorId())
+                    .orElseThrow(() -> new ResourceNotFoundException("Doctor not found."));
+        } else {
+            // Standard: Nếu có gửi ID thì tìm, không thì để null
+            if (request.getDoctorId() != null) {
+                doctor = userRepo.findById(request.getDoctorId()).orElse(null);
+            }
+        }
+
         Room room = (request.getRoomId() != null) ? roomRepo.findById(request.getRoomId()).orElseThrow(() -> new ResourceNotFoundException("Room not found.")) : null;
 
+        // 2. XỬ LÝ BỆNH NHÂN
         Patient patient;
         if (request.getPatientId() != null && request.getPatientId() > 0) {
             patient = patientRepo.findById(request.getPatientId()).orElseThrow(() -> new ResourceNotFoundException("Patient not found"));
@@ -123,12 +139,11 @@ public class ReceptionServiceImpl implements ReceptionService {
             patient = patientRepo.findByUserId(currentUser.userId()).orElseThrow(() -> new ResourceNotFoundException("Patient profile not found"));
         }
 
+        // 3. TÍNH TOÁN THỜI GIAN
         long totalDurationMinutes = request.getServices().stream()
                 .mapToLong(req -> {
-                    // Tìm Variant theo ID
                     sunshine_dental_care.entities.ServiceVariant v = serviceVariantRepo.findById(req.getServiceId())
                             .orElseThrow(() -> new ResourceNotFoundException("Service Variant not found: " + req.getServiceId()));
-                    // Lấy duration từ Variant
                     return (long) v.getDuration() * req.getQuantity();
                 })
                 .sum();
@@ -136,16 +151,27 @@ public class ReceptionServiceImpl implements ReceptionService {
         Instant start = request.getStartDateTime();
         Instant end = start.plusSeconds(TimeUnit.MINUTES.toSeconds(totalDurationMinutes));
 
-        validateDoctorWorkingHours(request.getDoctorId(), request.getClinicId(), start, end);
+        // 4. KIỂM TRA XUNG ĐỘT (QUAN TRỌNG: CHỈ CHECK NẾU CÓ BÁC SĨ)
+        // --- ĐÃ SỬA ĐOẠN NÀY ---
+        if (doctor != null) {
+            // 4a. Check giờ làm việc của bác sĩ đó
+            validateDoctorWorkingHours(doctor.getId(), request.getClinicId(), start, end);
 
-        Integer roomIdToCheck = (room != null) ? room.getId() : null;
-        List<Appointment> conflicts = appointmentRepo.findConflictAppointments(request.getDoctorId(), roomIdToCheck, start, end);
-        if (!conflicts.isEmpty()) throw new AppointmentConflictException("Bác sĩ đã có lịch hẹn khác.");
+            // 4b. Check trùng lịch với bác sĩ đó
+            Integer roomIdToCheck = (room != null) ? room.getId() : null;
+            List<Appointment> conflicts = appointmentRepo.findConflictAppointments(doctor.getId(), roomIdToCheck, start, end);
 
+            if (!conflicts.isEmpty()) {
+                throw new AppointmentConflictException("Bác sĩ đã có lịch hẹn khác trong khoảng thời gian này.");
+            }
+        }
+        // -----------------------
+
+        // 5. TẠO APPOINTMENT
         Appointment appointment = new Appointment();
         appointment.setClinic(clinic);
         appointment.setPatient(patient);
-        appointment.setDoctor(doctor);
+        appointment.setDoctor(doctor); // Có thể null (Standard)
         appointment.setRoom(room);
         appointment.setStartDateTime(start);
         appointment.setEndDateTime(end);
@@ -153,20 +179,34 @@ public class ReceptionServiceImpl implements ReceptionService {
         appointment.setChannel(request.getChannel() != null ? request.getChannel() : "Walk-in");
         appointment.setNote(request.getNote());
         appointment.setCreatedBy(creator);
+
+        // Set Type & Fee
+        appointment.setAppointmentType(type);
+        if (request.getBookingFee() != null) {
+            appointment.setBookingFee(request.getBookingFee());
+        } else {
+            // Fallback giá mặc định
+            appointment.setBookingFee("VIP".equalsIgnoreCase(type) ?
+                    new java.math.BigDecimal("1000000") : new java.math.BigDecimal("500000"));
+        }
+
         appointment = appointmentRepo.save(appointment);
 
+        // 6. LƯU DỊCH VỤ
         for (ServiceItemRequest req : request.getServices()) {
             sunshine_dental_care.entities.ServiceVariant v = serviceVariantRepo.findById(req.getServiceId())
                     .orElseThrow(() -> new ResourceNotFoundException("Service Variant not found"));
 
             AppointmentService as = new AppointmentService();
             as.setAppointment(appointment);
-            as.setService(v.getService());
+            as.setService(v.getService()); // Lưu cha để tương thích
             as.setQuantity(req.getQuantity());
-            as.setUnitPrice(v.getPrice()); // Lấy giá từ Variant
+            as.setUnitPrice(v.getPrice());
             as.setDiscountPct(req.getDiscountPct());
+
             String note = req.getNote() != null ? req.getNote() : "";
-            as.setNote(note + " [" + v.getVariantName() + "]");
+            as.setNote(note + " [" + v.getVariantName() + "]"); // Lưu tên gói vào note
+
             appointmentServiceRepo.save(as);
         }
         return appointmentMapper.mapToAppointmentResponse(appointment);
@@ -174,66 +214,87 @@ public class ReceptionServiceImpl implements ReceptionService {
 
     @Override
     @Transactional
-    public AppointmentResponse rescheduleAppointment(CurrentUser currentUser, Integer appointmentId, RescheduleRequest request) {
+    public AppointmentResponse rescheduleAppointment(CurrentUser currentUser,
+                                                     Integer appointmentId,
+                                                     RescheduleRequest request) {
+
         Appointment appointment = appointmentRepo.findById(appointmentId)
                 .orElseThrow(() -> new ResourceNotFoundException("Appointment not found"));
 
-        User targetDoctor = appointment.getDoctor();
-        if (request.getNewDoctorId() != null && !request.getNewDoctorId().equals(targetDoctor.getId())) {
-            targetDoctor = userRepo.findById(request.getNewDoctorId())
-                    .orElseThrow(() -> new ResourceNotFoundException("Target doctor not found"));
+        // Bác sĩ hiện tại (có thể null nếu lịch đang ở hàng chờ)
+        User originalDoctor = appointment.getDoctor();
+        User targetDoctor   = originalDoctor;
+
+        Integer newDoctorId = request.getNewDoctorId();
+
+        // Nếu request có gửi newDoctorId
+        if (newDoctorId != null) {
+            // Nếu chưa có bác sĩ hoặc khác bác sĩ cũ thì load từ DB
+            if (originalDoctor == null || !newDoctorId.equals(originalDoctor.getId())) {
+                targetDoctor = userRepo.findById(newDoctorId)
+                        .orElseThrow(() -> new ResourceNotFoundException("Target doctor not found"));
+            }
+        } else if (originalDoctor == null) {
+            // Lịch đang hàng chờ mà không gửi bác sĩ mới -> request sai
+            throw new IllegalArgumentException("newDoctorId is required for unassigned appointment");
         }
 
+        // ===== Tính giờ mới =====
         Instant oldStart = appointment.getStartDateTime();
-        Instant oldEnd = appointment.getEndDateTime();
+        Instant oldEnd   = appointment.getEndDateTime();
         long durationSeconds = oldEnd.getEpochSecond() - oldStart.getEpochSecond();
 
         Instant newStart = request.getNewStartDateTime();
-        Instant newEnd = newStart.plusSeconds(durationSeconds);
+        Instant newEnd   = newStart.plusSeconds(durationSeconds);
 
-        validateDoctorWorkingHours(targetDoctor.getId(), appointment.getClinic().getId(), newStart, newEnd);
-
-        List<Appointment> conflicts = appointmentRepo.findConflictAppointments(
+        // ===== Validate giờ làm việc bác sĩ mới =====
+        validateDoctorWorkingHours(
                 targetDoctor.getId(),
-                null,
+                appointment.getClinic().getId(),
                 newStart,
                 newEnd
         );
 
-        boolean hasRealConflict = conflicts.stream().anyMatch(a -> !a.getId().equals(appointmentId));
+        // ===== Check conflict =====
+        List<Appointment> conflicts = appointmentRepo.findConflictAppointments(
+                targetDoctor.getId(),
+                null,       // roomId tạm để null như bạn đang dùng
+                newStart,
+                newEnd
+        );
+
+        boolean hasRealConflict = conflicts.stream()
+                .anyMatch(a -> !a.getId().equals(appointmentId));
 
         if (hasRealConflict) {
             throw new AppointmentConflictException("Khung giờ mới đã bị trùng lịch hẹn khác.");
         }
 
+        // ===== Cập nhật bác sĩ & giờ mới =====
         appointment.setDoctor(targetDoctor);
         appointment.setStartDateTime(newStart);
         appointment.setEndDateTime(newEnd);
 
-        if (!targetDoctor.getId().equals(appointment.getDoctor().getId())) {
+        // Nếu đổi bác sĩ thì reset room
+        if (originalDoctor == null || !targetDoctor.getId().equals(originalDoctor.getId())) {
             appointment.setRoom(null);
         }
 
+        // ===== Ghi log nếu có lý do =====
         if (request.getReason() != null) {
-            // Tạo bản ghi Log mới
             Log actionLog = new Log();
 
-            // Set quan hệ
             actionLog.setUser(userRepo.getReferenceById(currentUser.userId()));
             actionLog.setClinic(appointment.getClinic());
-
             actionLog.setTableName("Appointments");
             actionLog.setRecordId(appointment.getId());
             actionLog.setAction("RESCHEDULE");
-
-            // Lưu lý do vào
             actionLog.setAfterData("Reschedule Reason: " + request.getReason());
-
-            // thời gian được @PrePersist tự tạo
 
             logRepo.save(actionLog);
         }
 
         return appointmentMapper.mapToAppointmentResponse(appointmentRepo.save(appointment));
     }
+
 }
