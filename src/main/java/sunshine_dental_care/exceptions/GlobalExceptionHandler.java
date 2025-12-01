@@ -441,22 +441,13 @@ public class GlobalExceptionHandler {
         return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(body);
     }
 
-    // Xử lí validation trùng email
-    @ExceptionHandler(DuplicateEmailException.class)
-    public ResponseEntity<Map<String, Object>> handleDuplicateEmail(DuplicateEmailException ex) {
-        return buildConflictResponse("email", ex.getMessage());
-    }
-
-    // Xử lí validate trùng username
-    @ExceptionHandler(DuplicateUsernameException.class)
-    public ResponseEntity<Map<String, Object>> handleDuplicateUsername(DuplicateUsernameException ex) {
-        return buildConflictResponse("username", ex.getMessage());
-    }
-
     // Log validate không áp dụng validation springboot -> chuyển sang log linh hoạt hơn
     @ExceptionHandler(CheckoutValidationException.class)
     public ResponseEntity<Map<String, Object>> handleCheckoutValidation(CheckoutValidationException ex) {
         Map<String, Object> response = new HashMap<>();
+        response.put("timestamp", LocalDateTime.now());
+        response.put("status", HttpStatus.BAD_REQUEST.value());
+        response.put("error", "Validation Failed");
         response.put("message", "Validation failed");
         response.put("fieldErrors", ex.getFieldErrors()); // Trả về Map lỗi chi tiết: field -> message
         return ResponseEntity.badRequest().body(response);
