@@ -1,5 +1,6 @@
 package sunshine_dental_care.entities;
 
+import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;
 
@@ -64,6 +65,9 @@ public class Appointment {
     @Nationalized
     @Column(name = "appointmentType", length = 50)
     private String appointmentType; // "VIP" hoặc "STANDARD"
+
+    @Column(name = "bookingFee")
+    private BigDecimal bookingFee; // Phí đặt lịch hẹn
 
     // Mỗi Lịch hẹn (Appointment) có thể chứa nhiều (Many) bản ghi Chi tiết Dịch vụ Lịch hẹn (AppointmentService).
     @OneToMany(mappedBy = "appointment", cascade = CascadeType.ALL, fetch = FetchType.LAZY)
@@ -173,6 +177,7 @@ public class Appointment {
         this.updatedAt = updatedAt;
     }
 
+
     public List<AppointmentService> getAppointmentServices() {
         return appointmentServices;
     }
@@ -183,6 +188,9 @@ public class Appointment {
 
     public String getAppointmentType() { return appointmentType; }
     public void setAppointmentType(String appointmentType) { this.appointmentType = appointmentType; }
+
+    public BigDecimal getBookingFee() { return bookingFee; }
+    public void setBookingFee(BigDecimal bookingFee) { this.bookingFee = bookingFee; }
 
     @PrePersist
     public void prePersist() {
