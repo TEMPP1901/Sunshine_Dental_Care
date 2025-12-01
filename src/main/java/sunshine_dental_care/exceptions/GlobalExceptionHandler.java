@@ -22,6 +22,7 @@ import sunshine_dental_care.exceptions.hr.EmployeeExceptions.EmployeeNotFoundExc
 import sunshine_dental_care.exceptions.hr.EmployeeExceptions.EmployeeValidationException;
 import sunshine_dental_care.exceptions.hr.ScheduleException;
 import sunshine_dental_care.exceptions.hr.ScheduleValidationException;
+import sunshine_dental_care.exceptions.huy_bro_checkoutLog.CheckoutValidationException;
 
 
 @RestControllerAdvice
@@ -258,5 +259,14 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(DuplicateUsernameException.class)
     public ResponseEntity<Map<String, Object>> handleDuplicateUsername(DuplicateUsernameException ex) {
         return buildConflictResponse("username", ex.getMessage());
+    }
+
+    // Log validate không áp dụng validation springboot -> chuyển sang log linh hoạt hơn
+    @ExceptionHandler(CheckoutValidationException.class)
+    public ResponseEntity<Map<String, Object>> handleCheckoutValidation(CheckoutValidationException ex) {
+        Map<String, Object> response = new HashMap<>();
+        response.put("message", "Validation failed");
+        response.put("fieldErrors", ex.getFieldErrors()); // Trả về Map lỗi chi tiết: field -> message
+        return ResponseEntity.badRequest().body(response);
     }
 }

@@ -10,14 +10,16 @@ import org.springframework.core.io.Resource;
 import org.springframework.stereotype.Service;
 import sunshine_dental_care.entities.huybro_products.ProductType;
 import sunshine_dental_care.repositories.huybro_products.ProductTypeRepository;
-import sunshine_dental_care.services.huybro_products.gemini.dto.GeminiVisionResult;
-import sunshine_dental_care.services.huybro_products.gemini.dto.ProductImageAnalyzeRequestDto;
+import sunshine_dental_care.services.huybro_products.gemini.dto.*;
 import sunshine_dental_care.services.huybro_products.gemini.services.product_image.GeminiProductImageFlowService;
 import sunshine_dental_care.utils.huybro_utils.format.FormatTypeProduct;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
+import java.util.stream.Collectors;
 
 @Service
 @Slf4j
@@ -37,7 +39,19 @@ public class GeminiProductImageServiceImpl implements GeminiProductImageService 
 
     @Override
     public GeminiVisionResult analyzeProductImages(ProductImageAnalyzeRequestDto request) {
-        var base64Images = request.getBase64Images();
+
+        List<ProductImageBase64Dto> images = request.getImages();
+        if (images == null || images.isEmpty()) {
+            throw new IllegalArgumentException("Product images must not be empty");
+        }
+
+        List<ProductImageBase64Dto> sorted = images.stream()
+                .sorted(Comparator.comparing(ProductImageBase64Dto::getImageOrder))
+                .toList();
+
+        List<String> base64Images = sorted.stream()
+                .map(ProductImageBase64Dto::getBase64)
+                .toList();
 
         List<String> allowedTypeNames = productTypeRepository.findAll()
                 .stream()
@@ -47,21 +61,53 @@ public class GeminiProductImageServiceImpl implements GeminiProductImageService 
         String moderationRequestJson = buildModerationRequestJson(base64Images);
         String visionRequestJson = buildVisionRequestJson(base64Images, allowedTypeNames);
 
-        GeminiVisionResult visionResult = flowService.runFlowModerationThenVision(
+        GeminiVisionResult result = flowService.runFlowModerationThenVision(
                 moderationRequestJson,
                 visionRequestJson
         );
 
+        List<GeminiModerationImageResult> moderationImages = result.getImages();
+        if (moderationImages == null || moderationImages.isEmpty()) {
+            throw new IllegalStateException("No moderation results found");
+        }
+
+        List<Integer> invalidOrders = new ArrayList<>();
+
+        for (var res : moderationImages) {
+            if (!res.isSafe() || !res.isProductRelevant()) {
+
+                int idx = res.getIndex();
+                if (idx >= 0 && idx < sorted.size()) {
+                    invalidOrders.add(sorted.get(idx).getImageOrder());
+                } else {
+                    invalidOrders.add(idx + 1);
+                }
+            }
+        }
+
+        int total = sorted.size();
+        int invalidCount = invalidOrders.size();
+        int validCount = total - invalidCount;
+
+        if (validCount == 0) {
+            throw new IllegalArgumentException("All images are invalid. Cannot generate product content.");
+        }
+
+        if (!invalidOrders.isEmpty()) {
+            log.warn("[GeminiProductImageService] Invalid images at positions: {}", invalidOrders);
+        }
+
+        // Resolve typeNames theo logic BE
         List<String> resolvedTypeNames = FormatTypeProduct.resolveTypeNames(
-                visionResult.getProductName(),
-                visionResult.getProductDescription(),
+                result.getProductName(),
+                result.getProductDescription(),
                 allowedTypeNames,
                 3
         );
 
-        visionResult.setTypeNames(resolvedTypeNames);
+        result.setTypeNames(resolvedTypeNames);
 
-        return visionResult;
+        return result;
     }
 
 

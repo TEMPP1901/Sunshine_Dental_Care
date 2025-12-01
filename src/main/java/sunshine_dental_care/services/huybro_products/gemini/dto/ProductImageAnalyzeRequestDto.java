@@ -6,6 +6,5 @@ import java.util.List;
 
 @Data
 public class ProductImageAnalyzeRequestDto {
-    private List<String> base64Images;
-    private List<String> allowedTypeNames;
+    private List<ProductImageBase64Dto> images;
 }
