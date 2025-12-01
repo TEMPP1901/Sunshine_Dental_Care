@@ -28,14 +28,6 @@ public class ClinicResolutionService {
     private final UserRoleRepo userRoleRepo;
     private final ClinicRepo clinicRepo;
 
-    /**
-     * Resolve clinicId cho user. Ưu tiên: providedClinicId → UserClinicAssignment → UserRole → Fallback
-     * 
-     * @param userId User ID cần resolve clinic
-     * @param providedClinicId ClinicId được cung cấp trong request (có thể null)
-     * @return Resolved clinicId
-     * @throws AttendanceValidationException Nếu không thể resolve clinicId
-     */
     public Integer resolveClinicId(Integer userId, Integer providedClinicId) {
         if (providedClinicId != null) {
             return providedClinicId;

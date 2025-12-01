@@ -8,9 +8,10 @@ import java.util.stream.Collectors;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
-import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -32,9 +33,8 @@ public class NotificationService {
     private final NotificationRepository notificationRepository;
     private final UserDeviceRepo userDeviceRepo;
     private final UserRepo userRepo;
-    private final FCMService fcmService;
-    private final SimpMessagingTemplate messagingTemplate;
     private final FirestoreService firestoreService;
+    private final NotificationAsyncService notificationAsyncService;
 
     // Gửi thông báo đến user qua DB, WebSocket, Firestore và FCM
     @Transactional
@@ -50,15 +50,15 @@ public class NotificationService {
         }
 
         Log notification = null;
-        
+
         // Lưu thông báo vào cơ sở dữ liệu SQL Server
         try {
             // Load User để set vào quan hệ @ManyToOne
             User user = userRepo.findById(request.getUserId())
                     .orElseThrow(() -> new RuntimeException("User not found: " + request.getUserId()));
-            
+
             notification = Log.builder()
-                    .user(user)  // Set user thay vì userId
+                    .user(user) // Set user thay vì userId
                     .type(request.getType())
                     .priority(request.getPriority() != null ? request.getPriority() : "MEDIUM")
                     .title(request.getTitle())
@@ -72,80 +72,10 @@ public class NotificationService {
                     .build();
 
             notification = notificationRepository.save(notification);
-            log.info("Notification saved to SQL Server (Logs table) - ID: {}, UserId: {}", 
+            log.info("Notification saved to SQL Server (Logs table) - ID: {}, UserId: {}",
                     notification.getId(), request.getUserId());
         } catch (Exception e) {
             log.error("Failed to save notification to SQL Server: {}", e.getMessage(), e);
-        }
-
-        // Đẩy thông báo qua WebSocket cho web client realtime
-        if (notification != null) {
-            try {
-                String userId = String.valueOf(request.getUserId());
-                NotificationResponse response = toResponse(notification);
-                
-                // Destination sẽ là /user/{userId}/queue/notifications (Spring tự động thêm /user/ prefix)
-                String destination = "/user/" + userId + "/queue/notifications";
-                log.info("[WebSocket] Preparing to send notification to user {} at destination {}", 
-                        userId, destination);
-
-                messagingTemplate.convertAndSendToUser(
-                        userId,
-                        "/queue/notifications",
-                        response);
-
-                log.info("[WebSocket] Notification sent successfully to user {} at destination {} (full path: {})",
-                        userId, "/queue/notifications", destination);
-            } catch (Exception e) {
-                log.error("[WebSocket] Error sending WebSocket message to user {}: {}", 
-                        request.getUserId(), e.getMessage(), e);
-            }
-        }
-
-        // Lưu thông báo lên Firestore cho mobile realtime
-        if (notification != null) {
-            try {
-                NotificationResponse response = toResponse(notification);
-                firestoreService.saveNotification(response);
-                log.info("[Firestore] Notification saved to Firestore for user: {}", request.getUserId());
-            } catch (Exception e) {
-                log.error("[Firestore] Error saving to Firestore: {}", e.getMessage(), e);
-            }
-        }
-
-        // Gửi thông báo qua FCM cho các thiết bị di động
-        log.info("Start FCM notification process for user: {}", request.getUserId());
-        try {
-            List<UserDevice> devices = userDeviceRepo.findByUserId(request.getUserId());
-            log.info("Found {} device(s) for user: {}", devices.size(), request.getUserId());
-            
-            if (devices.isEmpty()) {
-                log.warn("No FCM devices found for user: {}. User may not have logged in on mobile app yet.", 
-                        request.getUserId());
-            } else {
-                int successCount = 0;
-                for (UserDevice device : devices) {
-                    try {
-                        fcmService.sendNotification(
-                                device.getFcmToken(),
-                                request.getTitle(),
-                                request.getMessage(),
-                                request.getActionUrl(),
-                                request.getRelatedEntityType(),
-                                request.getRelatedEntityId());
-                        successCount++;
-                        log.info("FCM notification sent successfully to device: {} (type: {})", 
-                                device.getId(), device.getDeviceType());
-                    } catch (Exception e) {
-                        log.error("Failed to send FCM to device {} (type: {}): {}", 
-                                device.getId(), device.getDeviceType(), e.getMessage(), e);
-                    }
-                }
-                log.info("FCM notifications summary: {}/{} devices sent successfully for user: {}", 
-                        successCount, devices.size(), request.getUserId());
-            }
-        } catch (Exception e) {
-            log.error("Error sending FCM notifications: {}", e.getMessage(), e);
         }
 
         // Trả về response, nếu lưu DB thất bại thì dùng response tạm
@@ -166,7 +96,24 @@ public class NotificationService {
                     .build();
         }
 
-        return toResponse(notification);
+        NotificationResponse response = toResponse(notification);
+
+        // Gọi service async để phân phối thông báo (WebSocket, Firestore, FCM)
+        // Sử dụng TransactionSynchronization để đảm bảo transaction đã commit trước khi
+        // gửi event
+        // Tránh trường hợp client nhận được event nhưng query DB chưa thấy dữ liệu mới
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCommit() {
+                try {
+                    notificationAsyncService.distributeNotification(response, String.valueOf(request.getUserId()));
+                } catch (Exception e) {
+                    log.error("Failed to trigger async notification distribution: {}", e.getMessage(), e);
+                }
+            }
+        });
+
+        return response;
     }
 
     // Đăng ký thiết bị nhận thông báo FCM cho 1 user
@@ -186,18 +133,19 @@ public class NotificationService {
         userDeviceRepo.save(device);
     }
 
-    // Lấy danh sách thông báo cho user với phân trang và có thể bao gồm hết hoặc chỉ đang hoạt động
+    // Lấy danh sách thông báo cho user với phân trang và có thể bao gồm hết hoặc
+    // chỉ đang hoạt động
     @Transactional(readOnly = true)
     public Page<NotificationResponse> getNotifications(Integer userId, int page, int size, boolean includeExpired) {
         Pageable pageable = PageRequest.of(page, size);
         Page<Log> notifications;
-        
+
         if (includeExpired) {
             notifications = notificationRepository.findByUserIdOrderByCreatedAtDesc(userId, pageable);
         } else {
             notifications = notificationRepository.findActiveNotificationsByUserId(userId, pageable);
         }
-        
+
         return notifications.map(this::toResponse);
     }
 
@@ -215,23 +163,23 @@ public class NotificationService {
     public NotificationResponse markAsRead(Integer notificationId, Integer userId) {
         Log notification = notificationRepository.findById(notificationId)
                 .orElseThrow(() -> new RuntimeException("Notification not found"));
-        
+
         // Kiểm tra quyền sở hữu
         if (!notification.getUserId().equals(userId)) {
             throw new RuntimeException("Notification does not belong to user");
         }
-        
+
         notification.setIsRead(true);
         notification.setReadAt(Instant.now());
         notification = notificationRepository.save(notification);
-        
+
         // Cập nhật thông báo đã đọc trên Firestore
         try {
             firestoreService.markAsRead(userId, notificationId);
         } catch (Exception e) {
             log.error("[Firestore] Error marking as read in Firestore: {}", e.getMessage());
         }
-        
+
         return toResponse(notification);
     }
 
@@ -258,13 +206,13 @@ public class NotificationService {
         long lowPriority = notificationRepository.countByUserIdAndPriority(userId, "LOW");
         long expired = notificationRepository.countExpiredByUserId(userId);
         long today = notificationRepository.countTodayByUserId(userId);
-        
+
         Instant weekAgo = Instant.now().minus(7, ChronoUnit.DAYS);
         long thisWeek = notificationRepository.countByUserIdAndCreatedAtAfter(userId, weekAgo);
-        
+
         Instant monthAgo = Instant.now().minus(30, ChronoUnit.DAYS);
         long thisMonth = notificationRepository.countByUserIdAndCreatedAtAfter(userId, monthAgo);
-        
+
         return NotificationStatistics.builder()
                 .totalNotifications(total)
                 .unreadCount(unread)

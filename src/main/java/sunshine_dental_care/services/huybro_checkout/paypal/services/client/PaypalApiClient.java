@@ -101,8 +101,7 @@ public class PaypalApiClient {
                 url,
                 HttpMethod.POST,
                 entity,
-                String.class
-        );
+                String.class);
 
         if (!response.getStatusCode().is2xxSuccessful()) {
             throw new IllegalStateException("Failed to obtain PayPal access token");
@@ -117,8 +116,8 @@ public class PaypalApiClient {
     }
 
     public CreateOrderResult createOrder(BigDecimal totalAmount,
-                                         String currency,
-                                         String invoiceCode) {
+            String currency,
+            String invoiceCode) {
         String accessToken = obtainAccessToken();
 
         String url = baseUrl + "/v2/checkout/orders";
@@ -145,8 +144,8 @@ public class PaypalApiClient {
             ((com.fasterxml.jackson.databind.node.ObjectNode) purchaseUnit)
                     .put("invoice_id", invoiceCode);
 
-            com.fasterxml.jackson.databind.node.ArrayNode purchaseUnits =
-                    objectMapper.createArrayNode().add(purchaseUnit);
+            com.fasterxml.jackson.databind.node.ArrayNode purchaseUnits = objectMapper.createArrayNode()
+                    .add(purchaseUnit);
 
             ((com.fasterxml.jackson.databind.node.ObjectNode) root)
                     .set("purchase_units", purchaseUnits);
@@ -168,8 +167,7 @@ public class PaypalApiClient {
                 url,
                 HttpMethod.POST,
                 entity,
-                String.class
-        );
+                String.class);
 
         if (!response.getStatusCode().is2xxSuccessful()) {
             throw new IllegalStateException("Failed to create PayPal order");
@@ -212,8 +210,7 @@ public class PaypalApiClient {
                 url,
                 HttpMethod.POST,
                 entity,
-                String.class
-        );
+                String.class);
 
         if (!response.getStatusCode().is2xxSuccessful()) {
             throw new IllegalStateException("Failed to capture PayPal order");
