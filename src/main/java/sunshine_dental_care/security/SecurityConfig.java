@@ -80,8 +80,12 @@ public class SecurityConfig {
 
                         .requestMatchers("/api/doctor/**","/api/patients/{patientId}/records/**").hasRole("DOCTOR") // Chỉ bác sĩ được phép,
                         .requestMatchers("/auth/sign-up").permitAll()  // Cho phép đăng ký PATIENT * đổi vị trí vì đây là public
-                        //.requestMatchers( "/api/products/**").permitAll() // Public endpoints products *huybro
 
+                        // Products
+                        .requestMatchers("/api/products/accountant/**").hasRole("ACCOUNTANT")
+                        .requestMatchers("/api/products/**").permitAll()
+                        .requestMatchers("/api/cart/**").permitAll()
+                        .requestMatchers("/api/checkout/**").permitAll()
                         // Auth Endpoints
                         .requestMatchers(
                                 "/api/auth/sign-up",
@@ -117,7 +121,6 @@ public class SecurityConfig {
                         .requestMatchers("/api/admin/**").hasRole("ADMIN")
                         .requestMatchers("/api/hr/management/**").hasRole("HR")  // HR Management endpoints
 
-                        //.requestMatchers("/api/products/accountant/**").hasRole("ACCOUNTANT") // Cấp phép cho accountant *huybro
                         .requestMatchers("/api/hr/employees/**").hasRole("HR")  // Chỉ HR được phép
                         .requestMatchers("/api/admin/**").hasRole("ADMIN")
 

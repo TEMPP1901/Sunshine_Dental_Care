@@ -14,7 +14,6 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 import sunshine_dental_care.config.huybro_config.StaticResourceConfig;
-import sunshine_dental_care.config.huybro_config.enable.EnableTestOffSecurity;
 import sunshine_dental_care.dto.huybro_products.*;
 import sunshine_dental_care.services.huybro_products.gemini.dto.GeminiVisionResult;
 import sunshine_dental_care.services.huybro_products.gemini.dto.ProductImageAnalyzeRequestDto;
@@ -105,7 +104,6 @@ public class ProductController {
             @RequestParam(required = false) List<String> brand,
             @RequestParam(required = false) BigDecimal minPrice,
             @RequestParam(required = false) BigDecimal maxPrice,
-            @RequestParam(required = false) Boolean active,
             @RequestParam(required = false, name = "type") List<String> types
     ) {
         // map sort key
@@ -123,7 +121,7 @@ public class ProductController {
         filter.setBrands(brand);
         filter.setMinPrice(minPrice);
         filter.setMaxPrice(maxPrice);
-        filter.setActive(active);
+        filter.setActive(true);
         filter.setTypes(types);
 
         Page<ProductDto> result = productService.search(filter, pageable);
@@ -140,6 +138,16 @@ public class ProductController {
 
     //role: accountant
 
+    // GET /api/products/accountant
+    @GetMapping("/accountant")
+    public ResponseEntity<List<ProductDto>> getAllProductsForAccountant() {
+        List<ProductDto> products = productService.findAllProductsForAccountant();
+        if (products.isEmpty()) {
+            return ResponseEntity.noContent().build();
+        }
+        return ResponseEntity.ok(products);
+    }
+
     // GET /api/products/accountant/page
     @GetMapping("/accountant/page")
     public PageResponseDto<ProductDto> pageForAccountant(
@@ -152,7 +160,10 @@ public class ProductController {
             @RequestParam(required = false) Boolean active,
             @RequestParam(required = false, name = "type") List<String> types
     ) {
-        Sort sort = Sort.by("createdAt").descending();
+        Sort sort = Sort.by(
+                Sort.Order.desc("updatedAt"),
+                Sort.Order.desc("createdAt")
+        );
         Pageable pageable = PageRequest.of(page, size, sort);
 
         ProductFilterDto filter = new ProductFilterDto();
@@ -182,6 +193,16 @@ public class ProductController {
     ) {
         ProductDto created = productService.createProduct(dto);
         return ResponseEntity.status(HttpStatus.CREATED).body(created);
+    }
+
+    // PUT /api/products/accountant/{id}
+    @PutMapping("/accountant/update/{id}")
+    public ResponseEntity<ProductDto> updateProductForAccountant(
+            @PathVariable Integer id,
+            @Valid @RequestBody ProductUpdateDto dto
+    ) {
+        ProductDto updated = productService.updateProduct(id, dto);
+        return ResponseEntity.ok(updated);
     }
 
     // POST /api/products/accountant/suggest-sku
@@ -291,5 +312,6 @@ public class ProductController {
                     .body(body);
         }
     }
+
 }
 

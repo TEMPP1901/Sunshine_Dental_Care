@@ -52,4 +52,5 @@ public interface ProductRepository extends JpaRepository<Product, Integer> {
 
     @Query("SELECT COALESCE(MAX(p.id), 0) FROM Product p")
     Integer findMaxId();
+    List<Product> findByIsActiveTrue();
 }

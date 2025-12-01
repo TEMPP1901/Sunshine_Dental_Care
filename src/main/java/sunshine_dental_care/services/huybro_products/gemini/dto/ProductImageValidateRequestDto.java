@@ -6,5 +6,5 @@ import java.util.List;
 
 @Data
 public class ProductImageValidateRequestDto {
-    private List<String> base64Images;
+    private List<ProductImageBase64Dto> images;
 }

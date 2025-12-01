@@ -8,7 +8,7 @@ import java.math.BigDecimal;
 import java.util.List;
 
 @Data
-public class ProductCreateDto {
+public class ProductUpdateDto {
 
     @NotBlank(message = "SKU must not be empty")
     @Size(min = 5, max = 64, message = "SKU must be between 5 and 64 characters")
@@ -49,7 +49,7 @@ public class ProductCreateDto {
     @NotNull(message = "Product images must not be null")
     @Size(min = 3, max = 3, message = "Product must contain exactly 3 images")
     @Valid
-    private List<ProductImageCreateDto> image;
+    private List<ProductImageUpdateDto> image;
 
     @NotNull(message = "Product type must not be null")
     @Size(min = 1, message = "Product must have at least 1 type")

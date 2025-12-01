@@ -12,4 +12,5 @@ public class GeminiVisionResult {
     private List<String> typeNames;
     private boolean needBetterImages;
     private String note;
+    private List<GeminiModerationImageResult> images;
 }

@@ -13,9 +13,11 @@ import sunshine_dental_care.repositories.huybro_products.ProductsProductTypeRepo
 import sunshine_dental_care.services.huybro_products.interfaces.ProductService;
 import sunshine_dental_care.utils.huybro_utils.format.FormatTypeProduct;
 
+import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.stream.Collectors;
 
@@ -79,8 +81,13 @@ public class ProductServiceImpl implements ProductService {
 
     @Override
     public List<ProductDto> findAllProducts() {
-        List<Product> products = productRepository.findAll();
+        List<Product> products = productRepository.findByIsActiveTrue();
+        return products.stream().map(this::mapToDto).collect(Collectors.toList());
+    }
 
+    @Override
+    public List<ProductDto> findAllProductsForAccountant() {
+        List<Product> products = productRepository.findAll();
         return products.stream().map(this::mapToDto).collect(Collectors.toList());
     }
 
@@ -135,8 +142,26 @@ public class ProductServiceImpl implements ProductService {
         }
         product.setCurrency(currency);
 
-        product.setIsTaxable(dto.getIsTaxable() != null ? dto.getIsTaxable() : Boolean.TRUE);
-        product.setTaxCode(dto.getTaxCode());
+        Boolean taxableFlag = dto.getIsTaxable();
+        BigDecimal tax = dto.getTaxCode();
+        boolean taxable;
+        BigDecimal finalTax;
+
+        if (Boolean.FALSE.equals(taxableFlag)) {
+            taxable = false;
+            finalTax = BigDecimal.ZERO;
+        } else {
+            if (tax.compareTo(BigDecimal.ZERO) <= 0) {
+                taxable = false;
+                finalTax = BigDecimal.ZERO;
+            } else {
+                taxable = true;
+                finalTax = tax;
+            }
+        }
+        product.setIsTaxable(taxable);
+        product.setTaxCode(finalTax);
+
         product.setIsActive(dto.getIsActive() != null ? dto.getIsActive() : Boolean.TRUE);
         product.setCreatedAt(now);
         product.setUpdatedAt(now);
@@ -170,6 +195,97 @@ public class ProductServiceImpl implements ProductService {
         productsProductTypeRepository.saveAll(pptList);
 
         return mapToDto(savedProduct);
+    }
+
+    @Override
+    @Transactional
+    public ProductDto updateProduct(Integer id, ProductUpdateDto dto) {
+        LocalDateTime now = LocalDateTime.now();
+
+        Product product = productRepository.findById(id)
+                .orElseThrow(() -> new IllegalArgumentException("Product not found"));
+
+        product.setSku(dto.getSku().trim());
+        product.setProductName(dto.getProductName().trim());
+        product.setBrand(dto.getBrand().trim());
+        product.setProductDescription(dto.getProductDescription().trim());
+        product.setUnit(dto.getUnit());
+        product.setDefaultRetailPrice(dto.getDefaultRetailPrice());
+
+        String currency = dto.getCurrency() != null ? dto.getCurrency().trim() : "USD";
+        if (currency.isEmpty()) {
+            currency = "USD";
+        }
+        product.setCurrency(currency);
+
+        Boolean taxableFlag = dto.getIsTaxable();
+        BigDecimal tax = dto.getTaxCode();
+        boolean taxable;
+        BigDecimal finalTax;
+
+        if (Boolean.FALSE.equals(taxableFlag)) {
+            taxable = false;
+            finalTax = BigDecimal.ZERO;
+        } else {
+            if (tax.compareTo(BigDecimal.ZERO) <= 0) {
+                taxable = false;
+                finalTax = BigDecimal.ZERO;
+            } else {
+                taxable = true;
+                finalTax = tax;
+            }
+        }
+        product.setIsTaxable(taxable);
+        product.setTaxCode(finalTax);
+
+        product.setIsActive(dto.getIsActive() != null ? dto.getIsActive() : Boolean.TRUE);
+        product.setUpdatedAt(now);
+
+        productRepository.save(product);
+
+        List<ProductImage> existingImages =
+                productImageRepository.findByProduct_IdOrderByImageOrderAsc(id);
+
+        if (existingImages.size() != 3) {
+            throw new IllegalStateException("Product must have exactly 3 images in database");
+        }
+
+        Map<Integer, ProductImage> mapByOrder = existingImages.stream()
+                .collect(Collectors.toMap(ProductImage::getImageOrder, img -> img));
+
+        for (ProductImageUpdateDto imgDto : dto.getImage()) {
+            ProductImage img = mapByOrder.get(imgDto.getImageOrder());
+            if (img == null) {
+                throw new IllegalArgumentException("Invalid image order: " + imgDto.getImageOrder());
+            }
+            img.setImageUrl(imgDto.getImageUrl().trim());
+        }
+
+        productImageRepository.saveAll(existingImages);
+
+        List<ProductsProductType> oldLinks =
+                productsProductTypeRepository.findByProduct_Id(id);
+        if (!oldLinks.isEmpty()) {
+            productsProductTypeRepository.deleteAll(oldLinks);
+        }
+
+        List<ProductType> types =
+                productTypeRepository.findByTypeNameIn(dto.getTypeNames());
+        if (types.size() != dto.getTypeNames().size()) {
+            throw new IllegalArgumentException("Some product types were not found");
+        }
+
+        List<ProductsProductType> pptList = new ArrayList<>();
+        for (ProductType type : types) {
+            ProductsProductType ppt = new ProductsProductType();
+            ppt.setId(new ProductsProductTypeId(product.getId(), type.getId()));
+            ppt.setProduct(product);
+            ppt.setType(type);
+            pptList.add(ppt);
+        }
+        productsProductTypeRepository.saveAll(pptList);
+
+        return mapToDto(product);
     }
 
     @Override
