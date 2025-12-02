@@ -30,24 +30,17 @@ public class SecurityConfig {
     @Bean
     public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
         http
-                // 1. CORS & CSRF
                 .cors(Customizer.withDefaults())
                 .csrf(AbstractHttpConfigurer::disable)
-
-                // 2. Stateless Session (Vì dùng JWT)
                 .sessionManagement(sm -> sm.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
-
-                // 3. Xử lý lỗi 401 (Unauthorized) & 403 (Forbidden) trả về JSON
                 .exceptionHandling(e -> e
                         .authenticationEntryPoint((req, res, ex) -> {
-                            // Trả về JSON nếu là API request
                             String uri = req.getRequestURI();
                             if (uri != null && uri.startsWith("/api/")) {
                                 res.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
                                 res.setContentType("application/json;charset=UTF-8");
                                 res.getWriter().write("{\"error\":\"Unauthorized\",\"message\":\"Authentication required\"}");
                             } else {
-                                // Redirect login nếu là trang thường (hoặc mặc định)
                                 res.sendError(HttpServletResponse.SC_UNAUTHORIZED, ex.getMessage());
                             }
                         })
@@ -62,13 +55,8 @@ public class SecurityConfig {
                             }
                         })
                 )
-
-                // 4. Phân quyền URL
                 .authorizeHttpRequests(auth -> auth
-                        // Preflight requests
                         .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
-
-                        // --- CÁC API CÔNG KHAI (KHÔNG CẦN LOGIN) ---
                         .requestMatchers("/locale").permitAll()
                         .requestMatchers("/uploads_avatar/**").permitAll()
 
@@ -79,32 +67,30 @@ public class SecurityConfig {
                                 "/api/auth/google",
                                 "/oauth2/**",
                                 "/login/oauth2/**",
-
-                                // === THÊM 2 DÒNG NÀY ĐỂ FIX LỖI 401 ===
                                 "/api/auth/forgot-password",
-                                "/api/auth/reset-password"
+                                "/api/auth/reset-password",
+                                "/api/auth/verify-account",
+
+                                // [MỚI] API OTP
+                                "/api/auth/login-phone/step1",
+                                "/api/auth/login-phone/step2",
+
+                                // [MỚI] API Login SĐT + Pass
+                                "/api/auth/login-phone/password",
+
+                                "/api/auth/resend-verification"
                         ).permitAll()
 
-
-                        // --- CÁC API CẦN LOGIN ---
                         .requestMatchers(HttpMethod.POST, "/api/auth/change-password").authenticated()
-
-                        // Phân quyền theo Role
                         .requestMatchers("/api/hr/employees/**").hasRole("HR")
                         .requestMatchers("/api/hr/management/**").hasRole("HR")
                         .requestMatchers("/api/admin/**").hasRole("ADMIN")
-
-                        // Tất cả request còn lại phải đăng nhập
                         .anyRequest().authenticated()
                 )
-
-                // 5. Cấu hình OAuth2 (Google Login)
                 .oauth2Login(oauth -> oauth
                         .userInfoEndpoint(u -> u.userService(oAuth2UserService))
                         .successHandler(oAuth2SuccessHandler)
                 )
-
-                // 6. Thêm Filter JWT
                 .addFilterBefore(jwtAuthFilter, UsernamePasswordAuthenticationFilter.class);
 
         return http.build();

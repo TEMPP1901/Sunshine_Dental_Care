@@ -80,13 +80,28 @@ public class User {
     @Column(name = "failedLoginAttempts")
     private Integer failedLoginAttempts = 0;
 
-    // --- [MỚI] TOKEN RESET PASSWORD ---
+    // --- TOKEN RESET PASSWORD ---
     @Column(name = "resetPasswordToken", length = 64)
     private String resetPasswordToken;
 
-    // --- [MỚI] THỜI GIAN HẾT HẠN TOKEN ---
     @Column(name = "resetPasswordTokenExpiry")
     private Instant resetPasswordTokenExpiry;
+
+    // --- TOKEN XÁC THỰC TÀI KHOẢN (EMAIL) ---
+    @Column(name = "verificationToken", length = 64)
+    private String verificationToken;
+
+    @Column(name = "verificationTokenExpiry")
+    private Instant verificationTokenExpiry;
+
+    // --- [MỚI] MÃ OTP ĐỂ ĐĂNG NHẬP SĐT ---
+    @Column(name = "otpCode", length = 10)
+    private String otpCode;
+
+    @Column(name = "otpExpiry")
+    private Instant otpExpiry;
+
+    // --- AUDIT FIELDS ---
 
     @ColumnDefault("sysutcdatetime()")
     @Column(name = "createdAt", nullable = false)
@@ -99,6 +114,8 @@ public class User {
     @Column(name = "lastLoginAt")
     private Instant lastLoginAt;
 
+    // --- RELATIONS ---
+
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "departmentId")
     private Department department;
@@ -110,7 +127,9 @@ public class User {
     @OneToMany(mappedBy = "doctor", cascade = CascadeType.ALL, fetch = FetchType.LAZY, orphanRemoval = true)
     private List<DoctorSpecialty> doctorSpecialties;
 
-    // --- GETTERS & SETTERS ---
+    // =================================================================
+    // GETTERS & SETTERS
+    // =================================================================
 
     public Integer getId() { return id; }
     public void setId(Integer id) { this.id = id; }
@@ -151,13 +170,28 @@ public class User {
     public Integer getFailedLoginAttempts() { return failedLoginAttempts == null ? 0 : failedLoginAttempts; }
     public void setFailedLoginAttempts(Integer failedLoginAttempts) { this.failedLoginAttempts = failedLoginAttempts; }
 
-    // Getter & Setter cho Reset Password
+    // Reset Password
     public String getResetPasswordToken() { return resetPasswordToken; }
     public void setResetPasswordToken(String resetPasswordToken) { this.resetPasswordToken = resetPasswordToken; }
 
     public Instant getResetPasswordTokenExpiry() { return resetPasswordTokenExpiry; }
     public void setResetPasswordTokenExpiry(Instant resetPasswordTokenExpiry) { this.resetPasswordTokenExpiry = resetPasswordTokenExpiry; }
 
+    // Verify Account (Email)
+    public String getVerificationToken() { return verificationToken; }
+    public void setVerificationToken(String verificationToken) { this.verificationToken = verificationToken; }
+
+    public Instant getVerificationTokenExpiry() { return verificationTokenExpiry; }
+    public void setVerificationTokenExpiry(Instant verificationTokenExpiry) { this.verificationTokenExpiry = verificationTokenExpiry; }
+
+    // [MỚI] OTP Login (Phone)
+    public String getOtpCode() { return otpCode; }
+    public void setOtpCode(String otpCode) { this.otpCode = otpCode; }
+
+    public Instant getOtpExpiry() { return otpExpiry; }
+    public void setOtpExpiry(Instant otpExpiry) { this.otpExpiry = otpExpiry; }
+
+    // Audit
     public Instant getCreatedAt() { return createdAt; }
     public void setCreatedAt(Instant createdAt) { this.createdAt = createdAt; }
 
@@ -167,6 +201,7 @@ public class User {
     public Instant getLastLoginAt() { return lastLoginAt; }
     public void setLastLoginAt(Instant lastLoginAt) { this.lastLoginAt = lastLoginAt; }
 
+    // Relations
     public Department getDepartment() { return department; }
     public void setDepartment(Department department) { this.department = department; }
 

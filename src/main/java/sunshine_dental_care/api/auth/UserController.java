@@ -3,9 +3,12 @@ package sunshine_dental_care.api.auth;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
+import sunshine_dental_care.entities.Patient;
 import sunshine_dental_care.entities.User;
+import sunshine_dental_care.repositories.auth.PatientRepo;
 import sunshine_dental_care.repositories.auth.UserRepo;
 import sunshine_dental_care.security.CurrentUser;
 import sunshine_dental_care.services.auth_service.UserAvatarService;
@@ -20,6 +23,8 @@ import java.util.Map;
 public class UserController {
 
     private final UserRepo userRepo;
+    // 1. [MỚI] Inject thêm PatientRepo để thao tác với bảng Patients
+    private final PatientRepo patientRepo;
     private final UserAvatarService userAvatarService;
 
     @GetMapping("/me")
@@ -42,13 +47,17 @@ public class UserController {
         return ResponseEntity.ok(body);
     }
 
+    // =================================================================
+    // API CẬP NHẬT THÔNG TIN CÁ NHÂN (ĐÃ THÊM LOGIC ĐỒNG BỘ PATIENT)
+    // =================================================================
     @PatchMapping("/{id}")
+    @Transactional // [MỚI] Đảm bảo tính toàn vẹn dữ liệu (User & Patient cùng update)
     public ResponseEntity<?> updateProfile(
             @PathVariable Integer id,
             @RequestBody Map<String, String> dto,
             @AuthenticationPrincipal CurrentUser cu
     ) {
-        // User Update profile
+        // Kiểm tra quyền: Chỉ chính chủ mới được sửa
         if (!id.equals(cu.userId())) {
             return ResponseEntity.status(403).body(Map.of("error", "Forbidden"));
         }
@@ -56,19 +65,48 @@ public class UserController {
         User u = userRepo.findById(id)
                 .orElseThrow(() -> new IllegalArgumentException("User not found"));
 
-        if (dto.containsKey("fullName")) u.setFullName(dto.get("fullName"));
-        if (dto.containsKey("email"))    u.setEmail(dto.get("email"));
-        if (dto.containsKey("phone"))    u.setPhone(dto.get("phone"));
+        boolean isDataChanged = false;
 
+        // 1. Cập nhật thông tin vào object User
+        if (dto.containsKey("fullName")) {
+            u.setFullName(dto.get("fullName"));
+            isDataChanged = true;
+        }
+        if (dto.containsKey("email")) {
+            u.setEmail(dto.get("email"));
+            isDataChanged = true;
+        }
+        if (dto.containsKey("phone")) {
+            u.setPhone(dto.get("phone"));
+            isDataChanged = true;
+        }
+
+        // Lưu bảng User trước
         userRepo.save(u);
 
+        // 2. [QUAN TRỌNG] Đồng bộ sang bảng Patients
+        // Nếu User update thành công, ta tìm Patient tương ứng để update theo
+        if (isDataChanged) {
+            Patient p = patientRepo.findByUserId(u.getId()).orElse(null);
+
+            if (p != null) {
+                // Nếu User có Patient profile, cập nhật các trường tương ứng
+                if (dto.containsKey("fullName")) p.setFullName(u.getFullName());
+                if (dto.containsKey("email"))    p.setEmail(u.getEmail());
+                if (dto.containsKey("phone"))    p.setPhone(u.getPhone()); // <--- Đây là cái bạn cần nhất
+
+                patientRepo.save(p);
+            }
+        }
+
+        // Trả về dữ liệu User đã cập nhật để Frontend hiển thị lại
         return ResponseEntity.ok(new LinkedHashMap<String, Object>() {{
             put("userId", u.getId());
             put("fullName", u.getFullName());
             put("email", u.getEmail());
             put("phone", u.getPhone());
             put("username", u.getUsername());
-            put("avatarUrl", u.getAvatarUrl()); // Cloudinary absolute URL
+            put("avatarUrl", u.getAvatarUrl());
         }});
     }
 
