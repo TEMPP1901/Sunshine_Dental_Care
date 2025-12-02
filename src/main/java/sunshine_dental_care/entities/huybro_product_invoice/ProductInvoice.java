@@ -122,4 +122,10 @@ public class ProductInvoice {
     @Column(name = "paymentReference", length = 100)
     private String paymentReference;
 
+    @Size(max = 50)
+    @Nationalized
+    @ColumnDefault("N'NEW'")
+    @Column(name = "invoiceStatus", nullable = false, length = 50)
+    private String invoiceStatus;
+
 }
