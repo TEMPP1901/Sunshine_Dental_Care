@@ -1,12 +1,19 @@
 package sunshine_dental_care.entities;
 
-import jakarta.persistence.*;
-import org.hibernate.annotations.ColumnDefault;
-import org.hibernate.annotations.Nationalized;
-
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.LocalDate;
+
+import org.hibernate.annotations.ColumnDefault;
+import org.hibernate.annotations.Nationalized;
+
+import jakarta.persistence.Column;
+import jakarta.persistence.Entity;
+import jakarta.persistence.GeneratedValue;
+import jakarta.persistence.GenerationType;
+import jakarta.persistence.Id;
+import jakarta.persistence.PrePersist;
+import jakarta.persistence.PreUpdate;
 
 @Entity
 public class Attendance {
@@ -64,6 +71,49 @@ public class Attendance {
     @Column(name = "note", length = 400)
     private String note;
 
+    /**
+     * Loại ca làm việc: MORNING (sáng), AFTERNOON (chiều), FULL_DAY (cả ngày)
+     * - MORNING: Ca sáng (8:00-11:00)
+     * - AFTERNOON: Ca chiều (13:00-18:00)
+     * - FULL_DAY: Cả ngày (cho nhân viên không phân ca)
+     */
+    @Nationalized
+    @Column(name = "shiftType", length = 20)
+    private String shiftType; // MORNING, AFTERNOON, FULL_DAY
+
+    /**
+     * Số giờ làm việc thực tế (tính từ check-in đến check-out)
+     * Dùng để tính lương
+     */
+    @Column(name = "actualWorkHours", precision = 5, scale = 2)
+    private BigDecimal actualWorkHours; // Ví dụ: 3.5 giờ
+
+    /**
+     * Số giờ làm việc theo lịch (expected hours)
+     * - Ca sáng: 3 giờ (8:00-11:00)
+     * - Ca chiều: 5 giờ (13:00-18:00)
+     */
+    @Column(name = "expectedWorkHours", precision = 5, scale = 2)
+    private BigDecimal expectedWorkHours; // Ví dụ: 3.0 giờ
+
+    // Face Recognition fields
+    @Column(name = "faceMatchScore", precision = 5, scale = 4)
+    private BigDecimal faceMatchScore; // Similarity score 0.0 - 1.0
+
+    @Nationalized
+    @Column(name = "verificationStatus", length = 20)
+    private String verificationStatus; // PENDING, VERIFIED, FAILED
+
+    /**
+     * Trạng thái chấm công: ON_TIME, LATE, ABSENT
+     * - ON_TIME: Check-in đúng giờ (trước hoặc đúng startTime)
+     * - LATE: Check-in muộn (sau startTime)
+     * - ABSENT: Không check-in trong ngày có schedule
+     */
+    @Nationalized
+    @Column(name = "attendanceStatus", length = 20)
+    private String attendanceStatus; // ON_TIME, LATE, ABSENT
+
     @ColumnDefault("sysutcdatetime()")
     @Column(name = "createdAt", nullable = false)
     private Instant createdAt;
@@ -71,6 +121,28 @@ public class Attendance {
     @ColumnDefault("sysutcdatetime()")
     @Column(name = "updatedAt", nullable = false)
     private Instant updatedAt;
+
+    /**
+     * Tự động set createdAt và updatedAt trước khi persist (insert)
+     */
+    @PrePersist
+    protected void onCreate() {
+        Instant now = Instant.now();
+        if (createdAt == null) {
+            createdAt = now;
+        }
+        if (updatedAt == null) {
+            updatedAt = now;
+        }
+    }
+
+    /**
+     * Tự động set updatedAt trước khi update
+     */
+    @PreUpdate
+    protected void onUpdate() {
+        updatedAt = Instant.now();
+    }
 
     public Integer getId() {
         return id;
@@ -206,6 +278,54 @@ public class Attendance {
 
     public void setUpdatedAt(Instant updatedAt) {
         this.updatedAt = updatedAt;
+    }
+
+    public BigDecimal getFaceMatchScore() {
+        return faceMatchScore;
+    }
+
+    public void setFaceMatchScore(BigDecimal faceMatchScore) {
+        this.faceMatchScore = faceMatchScore;
+    }
+
+    public String getVerificationStatus() {
+        return verificationStatus;
+    }
+
+    public void setVerificationStatus(String verificationStatus) {
+        this.verificationStatus = verificationStatus;
+    }
+
+    public String getAttendanceStatus() {
+        return attendanceStatus;
+    }
+
+    public void setAttendanceStatus(String attendanceStatus) {
+        this.attendanceStatus = attendanceStatus;
+    }
+
+    public String getShiftType() {
+        return shiftType;
+    }
+
+    public void setShiftType(String shiftType) {
+        this.shiftType = shiftType;
+    }
+
+    public BigDecimal getActualWorkHours() {
+        return actualWorkHours;
+    }
+
+    public void setActualWorkHours(BigDecimal actualWorkHours) {
+        this.actualWorkHours = actualWorkHours;
+    }
+
+    public BigDecimal getExpectedWorkHours() {
+        return expectedWorkHours;
+    }
+
+    public void setExpectedWorkHours(BigDecimal expectedWorkHours) {
+        this.expectedWorkHours = expectedWorkHours;
     }
 
 }

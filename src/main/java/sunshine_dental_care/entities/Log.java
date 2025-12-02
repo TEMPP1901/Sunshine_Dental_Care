@@ -14,11 +14,15 @@ public class Log {
     @Column(name = "logId", nullable = false)
     private Integer id;
 
-    @Column(name = "userId")
-    private Integer userId;
+    // --- THAY ĐỔI: THÊM QUAN HỆ USER ---
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "userId")
+    private User user;
 
-    @Column(name = "clinicId")
-    private Integer clinicId;
+    // --- THAY ĐỔI: THÊM QUAN HỆ CLINIC ---
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "clinicId")
+    private Clinic clinic;
 
     @Nationalized
     @Column(name = "\"action\"", nullable = false, length = 100)
@@ -53,6 +57,14 @@ public class Log {
     @Column(name = "actionTime", nullable = false)
     private Instant actionTime;
 
+    // --- LIFECYCLE CALLBACK ---
+    @PrePersist
+    public void prePersist() {
+        if (actionTime == null) actionTime = Instant.now();
+    }
+
+    // --- GETTERS & SETTERS ---
+
     public Integer getId() {
         return id;
     }
@@ -61,20 +73,20 @@ public class Log {
         this.id = id;
     }
 
-    public Integer getUserId() {
-        return userId;
+    public User getUser() {
+        return user;
     }
 
-    public void setUserId(Integer userId) {
-        this.userId = userId;
+    public void setUser(User user) {
+        this.user = user;
     }
 
-    public Integer getClinicId() {
-        return clinicId;
+    public Clinic getClinic() {
+        return clinic;
     }
 
-    public void setClinicId(Integer clinicId) {
-        this.clinicId = clinicId;
+    public void setClinic(Clinic clinic) {
+        this.clinic = clinic;
     }
 
     public String getAction() {
@@ -140,5 +152,4 @@ public class Log {
     public void setActionTime(Instant actionTime) {
         this.actionTime = actionTime;
     }
-
 }

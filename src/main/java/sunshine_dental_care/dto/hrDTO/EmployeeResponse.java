@@ -1,6 +1,7 @@
 package sunshine_dental_care.dto.hrDTO;
 
 import java.time.LocalDateTime;
+import java.util.List;
 
 public class EmployeeResponse {
     private Integer id;
@@ -11,10 +12,14 @@ public class EmployeeResponse {
     private String username;
     private String avatarUrl;
     private Boolean isActive;
+    private String faceImageUrl;
+    private String faceEmbedding;
     private Object department;        
     private Object role;              
     private Object clinic;            
     private String roleAtClinic;
+    private String specialty;         // Specialty for doctors (backward compatibility)
+    private List<String> specialties;  // Multiple specialties for doctors
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
     private LocalDateTime lastLoginAt;
@@ -24,6 +29,7 @@ public class EmployeeResponse {
     
     public EmployeeResponse(Integer id, String code, String fullName, String email,
                            String phone, String username, String avatarUrl, Boolean isActive,
+                           String faceImageUrl, String faceEmbedding,
                            Object department, Object role, Object clinic, String roleAtClinic,
                            LocalDateTime createdAt, LocalDateTime updatedAt, LocalDateTime lastLoginAt) {
         this.id = id;
@@ -34,6 +40,8 @@ public class EmployeeResponse {
         this.username = username;
         this.avatarUrl = avatarUrl;
         this.isActive = isActive;
+        this.faceImageUrl = faceImageUrl;
+        this.faceEmbedding = faceEmbedding;
         this.department = department;
         this.role = role;
         this.clinic = clinic;
@@ -108,6 +116,22 @@ public class EmployeeResponse {
         this.isActive = isActive;
     }
     
+    public String getFaceImageUrl() {
+        return faceImageUrl;
+    }
+    
+    public void setFaceImageUrl(String faceImageUrl) {
+        this.faceImageUrl = faceImageUrl;
+    }
+    
+    public String getFaceEmbedding() {
+        return faceEmbedding;
+    }
+    
+    public void setFaceEmbedding(String faceEmbedding) {
+        this.faceEmbedding = faceEmbedding;
+    }
+    
     public Object getDepartment() {
         return department;
     }
@@ -162,5 +186,21 @@ public class EmployeeResponse {
     
     public void setLastLoginAt(LocalDateTime lastLoginAt) {
         this.lastLoginAt = lastLoginAt;
+    }
+    
+    public String getSpecialty() {
+        return specialty;
+    }
+    
+    public void setSpecialty(String specialty) {
+        this.specialty = specialty;
+    }
+
+    public List<String> getSpecialties() {
+        return specialties;
+    }
+
+    public void setSpecialties(List<String> specialties) {
+        this.specialties = specialties;
     }
 }

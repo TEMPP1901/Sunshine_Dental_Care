@@ -1,10 +1,12 @@
 package sunshine_dental_care.entities;
 
+import java.math.BigDecimal;
+import java.time.Instant;
+import java.util.List;
+
 import jakarta.persistence.*;
 import org.hibernate.annotations.ColumnDefault;
 import org.hibernate.annotations.Nationalized;
-
-import java.time.Instant;
 
 @Entity
 @Table(name = "Appointments")
@@ -22,8 +24,8 @@ public class Appointment {
     @JoinColumn(name = "patientId", nullable = false)
     private Patient patient;
 
-    @ManyToOne(fetch = FetchType.LAZY, optional = false)
-    @JoinColumn(name = "doctorId", nullable = false)
+    @ManyToOne(fetch = FetchType.LAZY, optional = true)
+    @JoinColumn(name = "doctorId", nullable = true)
     private User doctor;
 
     @ManyToOne(fetch = FetchType.LAZY)
@@ -34,10 +36,6 @@ public class Appointment {
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "roomId")
     private Room room;
-
-    @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "chairId")
-    private Chair chair;
 
     @Column(name = "startDateTime", nullable = false)
     private Instant startDateTime;
@@ -68,6 +66,17 @@ public class Appointment {
     @ColumnDefault("sysutcdatetime()")
     @Column(name = "updatedAt", nullable = false)
     private Instant updatedAt;
+
+    @Nationalized
+    @Column(name = "appointmentType", length = 50)
+    private String appointmentType; // "VIP" hoặc "STANDARD"
+
+    @Column(name = "bookingFee")
+    private BigDecimal bookingFee; // Phí đặt lịch hẹn
+
+    // Mỗi Lịch hẹn (Appointment) có thể chứa nhiều (Many) bản ghi Chi tiết Dịch vụ Lịch hẹn (AppointmentService).
+    @OneToMany(mappedBy = "appointment", cascade = CascadeType.ALL, fetch = FetchType.LAZY)
+    private List<AppointmentService> appointmentServices;
 
     public Integer getId() {
         return id;
@@ -115,14 +124,6 @@ public class Appointment {
 
     public void setRoom(Room room) {
         this.room = room;
-    }
-
-    public Chair getChair() {
-        return chair;
-    }
-
-    public void setChair(Chair chair) {
-        this.chair = chair;
     }
 
     public Instant getStartDateTime() {
@@ -187,6 +188,40 @@ public class Appointment {
 
     public void setUpdatedAt(Instant updatedAt) {
         this.updatedAt = updatedAt;
+    }
+
+
+    public List<AppointmentService> getAppointmentServices() {
+        return appointmentServices;
+    }
+
+    public void setAppointmentServices(List<AppointmentService> appointmentServices) {
+        this.appointmentServices = appointmentServices;
+    }
+
+    public String getAppointmentType() { return appointmentType; }
+    public void setAppointmentType(String appointmentType) { this.appointmentType = appointmentType; }
+
+    public BigDecimal getBookingFee() { return bookingFee; }
+    public void setBookingFee(BigDecimal bookingFee) { this.bookingFee = bookingFee; }
+
+    @PrePersist
+    public void prePersist() {
+        if (createdAt == null) {
+            createdAt = Instant.now();
+        }
+        if (updatedAt == null) {
+            updatedAt = Instant.now();
+        }
+        // Mặc định channel nếu chưa có
+        if (channel == null) {
+            channel = "WALK_IN";
+        }
+    }
+
+    @PreUpdate
+    public void preUpdate() {
+        updatedAt = Instant.now();
     }
 
 }

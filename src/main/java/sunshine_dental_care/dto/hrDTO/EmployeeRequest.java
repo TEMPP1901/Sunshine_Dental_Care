@@ -1,5 +1,7 @@
 package sunshine_dental_care.dto.hrDTO;
 
+import java.util.List;
+
 import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
@@ -18,7 +20,7 @@ public class EmployeeRequest {
     @Pattern(regexp = "^[0-9]{10,11}$", message = "Phone must be 10-11 digits")
     private String phone;
     
-    @NotBlank(message = "Username is required")
+    // Username is optional - will be auto-generated from email if not provided
     @Size(min = 3, max = 50, message = "Username must be between 3 and 50 characters")
     private String username;
     
@@ -26,17 +28,19 @@ public class EmployeeRequest {
     private String password;          // Chỉ cần khi tạo mới
     
     private String code;
-    private String avatarUrl;
+    private String avatarUrl;        // Optional - not sent from frontend (uploaded via separate /avatar endpoint)
     
     private Integer departmentId;
     
     @NotNull(message = "Role ID is required for new employee")
     private Integer roleId;           // Chỉ cần khi tạo mới
     
-    @NotNull(message = "Clinic ID is required for new employee")
-    private Integer clinicId;         // Chỉ cần khi tạo mới
-    private String roleAtClinic;
-    private String description;
+    private Integer clinicId;         // Optional - can be null
+    private Integer roomId;           // Optional - room assignment (not used in current frontend form)
+    private String roleAtClinic;      // Optional - not used in current frontend form (displayed in detail view only)
+    private String description;       // Optional - not used in current frontend form
+    private String specialty;         // Optional - deprecated, use specialties instead (kept for backward compatibility with other clients)
+    private List<String> specialties; // Optional - multiple specialties for doctors (preferred)
     
     // Constructors
     public EmployeeRequest() {}
@@ -154,5 +158,29 @@ public class EmployeeRequest {
     
     public void setDescription(String description) {
         this.description = description;
+    }
+    
+    public Integer getRoomId() {
+        return roomId;
+    }
+    
+    public void setRoomId(Integer roomId) {
+        this.roomId = roomId;
+    }
+    
+    public String getSpecialty() {
+        return specialty;
+    }
+    
+    public void setSpecialty(String specialty) {
+        this.specialty = specialty;
+    }
+
+    public List<String> getSpecialties() {
+        return specialties;
+    }
+
+    public void setSpecialties(List<String> specialties) {
+        this.specialties = specialties;
     }
 }

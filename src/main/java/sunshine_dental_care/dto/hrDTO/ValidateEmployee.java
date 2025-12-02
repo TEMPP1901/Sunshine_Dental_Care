@@ -16,11 +16,10 @@ public final class ValidateEmployee {
     public static void validateCreate(EmployeeRequest request, UserRepo userRepo) {
         requireNonBlank(request.getFullName(), "Full name is required");
         requireNonBlank(request.getEmail(), "Email is required");
-        requireNonBlank(request.getUsername(), "Username is required");
         requireNonBlank(request.getPassword(), "Password is required for new employee");
 
         requireNonNull(request.getRoleId(), "Role ID is required for new employee");
-        requireNonNull(request.getClinicId(), "Clinic ID is required for new employee");
+        // Clinic ID is now optional - will be set to null if not provided
 
         if (!EMAIL_REGEX.matcher(request.getEmail()).matches()) {
             throw new EmployeeValidationException("Invalid email format");
@@ -35,8 +34,11 @@ public final class ValidateEmployee {
         if (userRepo.findByEmailIgnoreCase(request.getEmail()).isPresent()) {
             throw new EmployeeValidationException("Email already exists: " + request.getEmail());
         }
-        if (userRepo.findByUsernameIgnoreCase(request.getUsername()).isPresent()) {
-            throw new EmployeeValidationException("Username already exists: " + request.getUsername());
+        // Username is optional - will be auto-generated from email if not provided
+        if (request.getUsername() != null && !request.getUsername().trim().isEmpty()) {
+            if (userRepo.findByUsernameIgnoreCase(request.getUsername()).isPresent()) {
+                throw new EmployeeValidationException("Username already exists: " + request.getUsername());
+            }
         }
 
         // Validate role: allow only DOCTOR(3), RECEPTIONIST(4), ACCOUNTANT(5)
