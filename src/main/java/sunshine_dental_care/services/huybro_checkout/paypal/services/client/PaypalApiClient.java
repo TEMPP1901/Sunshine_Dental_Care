@@ -1,17 +1,23 @@
 package sunshine_dental_care.services.huybro_checkout.paypal.services.client;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
-import org.apache.tomcat.util.codec.binary.Base64;
+import java.math.BigDecimal;
+import java.math.RoundingMode;
+import java.util.Base64;
+
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.http.*;
+import org.springframework.http.HttpEntity;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpMethod;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestTemplate;
 
-import java.math.BigDecimal;
-import java.math.RoundingMode;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 
 @Service
 @RequiredArgsConstructor
@@ -83,7 +89,7 @@ public class PaypalApiClient {
         String url = baseUrl + "/v1/oauth2/token";
 
         String basicAuth = clientId + ":" + secret;
-        String encodedAuth = Base64.encodeBase64String(basicAuth.getBytes());
+        String encodedAuth = Base64.getEncoder().encodeToString(basicAuth.getBytes());
 
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.APPLICATION_FORM_URLENCODED);
@@ -95,8 +101,7 @@ public class PaypalApiClient {
                 url,
                 HttpMethod.POST,
                 entity,
-                String.class
-        );
+                String.class);
 
         if (!response.getStatusCode().is2xxSuccessful()) {
             throw new IllegalStateException("Failed to obtain PayPal access token");
@@ -111,8 +116,8 @@ public class PaypalApiClient {
     }
 
     public CreateOrderResult createOrder(BigDecimal totalAmount,
-                                         String currency,
-                                         String invoiceCode) {
+            String currency,
+            String invoiceCode) {
         String accessToken = obtainAccessToken();
 
         String url = baseUrl + "/v2/checkout/orders";
@@ -139,8 +144,8 @@ public class PaypalApiClient {
             ((com.fasterxml.jackson.databind.node.ObjectNode) purchaseUnit)
                     .put("invoice_id", invoiceCode);
 
-            com.fasterxml.jackson.databind.node.ArrayNode purchaseUnits =
-                    objectMapper.createArrayNode().add(purchaseUnit);
+            com.fasterxml.jackson.databind.node.ArrayNode purchaseUnits = objectMapper.createArrayNode()
+                    .add(purchaseUnit);
 
             ((com.fasterxml.jackson.databind.node.ObjectNode) root)
                     .set("purchase_units", purchaseUnits);
@@ -162,8 +167,7 @@ public class PaypalApiClient {
                 url,
                 HttpMethod.POST,
                 entity,
-                String.class
-        );
+                String.class);
 
         if (!response.getStatusCode().is2xxSuccessful()) {
             throw new IllegalStateException("Failed to create PayPal order");
@@ -206,8 +210,7 @@ public class PaypalApiClient {
                 url,
                 HttpMethod.POST,
                 entity,
-                String.class
-        );
+                String.class);
 
         if (!response.getStatusCode().is2xxSuccessful()) {
             throw new IllegalStateException("Failed to capture PayPal order");

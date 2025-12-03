@@ -1,5 +1,6 @@
 package sunshine_dental_care.services.interfaces.hr;
 
+import java.util.List;
 import java.util.Map;
 
 import org.springframework.data.domain.Page;
@@ -28,4 +29,10 @@ public interface HrEmployeeService {
     
     // Thống kê nhân viên
     Map<String, Object> getStatistics(Integer clinicId, Integer departmentId);
+    
+    // Xóa nhân viên (soft delete - set isActive = false)
+    void deleteEmployee(Integer id, String reason);
+    
+    // Lấy danh sách tất cả bác sĩ (public - không yêu cầu HR role)
+    List<EmployeeResponse> getAllDoctors();
 }

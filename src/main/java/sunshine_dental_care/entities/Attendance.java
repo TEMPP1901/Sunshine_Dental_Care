@@ -1,15 +1,23 @@
 package sunshine_dental_care.entities;
 
-import jakarta.persistence.*;
-import org.hibernate.annotations.ColumnDefault;
-import org.hibernate.annotations.Nationalized;
-
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.LocalDate;
 
+import org.hibernate.annotations.ColumnDefault;
+import org.hibernate.annotations.Nationalized;
+
+import jakarta.persistence.Column;
+import jakarta.persistence.Entity;
+import jakarta.persistence.GeneratedValue;
+import jakarta.persistence.GenerationType;
+import jakarta.persistence.Id;
+import jakarta.persistence.PrePersist;
+import jakarta.persistence.PreUpdate;
+
 @Entity
 public class Attendance {
+
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     @Column(name = "attendanceId", nullable = false)
@@ -34,28 +42,6 @@ public class Attendance {
     @Column(name = "checkInMethod", length = 50)
     private String checkInMethod;
 
-    @Nationalized
-    @Column(name = "deviceId", length = 120)
-    private String deviceId;
-
-    @Nationalized
-    @Column(name = "ipAddr", length = 50)
-    private String ipAddr;
-
-    @Nationalized
-    @Column(name = "ssid", length = 100)
-    private String ssid;
-
-    @Nationalized
-    @Column(name = "bssid", length = 100)
-    private String bssid;
-
-    @Column(name = "lat", precision = 9, scale = 6)
-    private BigDecimal lat;
-
-    @Column(name = "lng", precision = 9, scale = 6)
-    private BigDecimal lng;
-
     @ColumnDefault("0")
     @Column(name = "isOvertime", nullable = false)
     private Boolean isOvertime = false;
@@ -63,6 +49,36 @@ public class Attendance {
     @Nationalized
     @Column(name = "note", length = 400)
     private String note;
+
+    @Nationalized
+    @Column(name = "shiftType", length = 20)
+    private String shiftType;
+
+    @Column(name = "actualWorkHours", precision = 5, scale = 2)
+    private BigDecimal actualWorkHours;
+
+    @Column(name = "expectedWorkHours", precision = 5, scale = 2)
+    private BigDecimal expectedWorkHours;
+
+    @Column(name = "lateMinutes")
+    private Integer lateMinutes;
+
+    @Column(name = "earlyMinutes")
+    private Integer earlyMinutes;
+
+    @Column(name = "lunchBreakMinutes")
+    private Integer lunchBreakMinutes;
+
+    @Column(name = "faceMatchScore", precision = 5, scale = 4)
+    private BigDecimal faceMatchScore;
+
+    @Nationalized
+    @Column(name = "verificationStatus", length = 20)
+    private String verificationStatus;
+
+    @Nationalized
+    @Column(name = "attendanceStatus", length = 20)
+    private String attendanceStatus;
 
     @ColumnDefault("sysutcdatetime()")
     @Column(name = "createdAt", nullable = false)
@@ -72,6 +88,25 @@ public class Attendance {
     @Column(name = "updatedAt", nullable = false)
     private Instant updatedAt;
 
+    // Tự động set createdAt và updatedAt khi tạo bản ghi mới
+    @PrePersist
+    protected void onCreate() {
+        Instant now = Instant.now();
+        if (createdAt == null) {
+            createdAt = now;
+        }
+        if (updatedAt == null) {
+            updatedAt = now;
+        }
+    }
+
+    // Tự động cập nhật updatedAt khi cập nhật bản ghi
+    @PreUpdate
+    protected void onUpdate() {
+        updatedAt = Instant.now();
+    }
+
+    // Lấy id chấm công
     public Integer getId() {
         return id;
     }
@@ -128,54 +163,7 @@ public class Attendance {
         this.checkInMethod = checkInMethod;
     }
 
-    public String getDeviceId() {
-        return deviceId;
-    }
-
-    public void setDeviceId(String deviceId) {
-        this.deviceId = deviceId;
-    }
-
-    public String getIpAddr() {
-        return ipAddr;
-    }
-
-    public void setIpAddr(String ipAddr) {
-        this.ipAddr = ipAddr;
-    }
-
-    public String getSsid() {
-        return ssid;
-    }
-
-    public void setSsid(String ssid) {
-        this.ssid = ssid;
-    }
-
-    public String getBssid() {
-        return bssid;
-    }
-
-    public void setBssid(String bssid) {
-        this.bssid = bssid;
-    }
-
-    public BigDecimal getLat() {
-        return lat;
-    }
-
-    public void setLat(BigDecimal lat) {
-        this.lat = lat;
-    }
-
-    public BigDecimal getLng() {
-        return lng;
-    }
-
-    public void setLng(BigDecimal lng) {
-        this.lng = lng;
-    }
-
+    // Kiểm tra có phải ca tăng ca không
     public Boolean getIsOvertime() {
         return isOvertime;
     }
@@ -208,4 +196,83 @@ public class Attendance {
         this.updatedAt = updatedAt;
     }
 
+    // Lấy điểm nhận diện khuôn mặt
+    public BigDecimal getFaceMatchScore() {
+        return faceMatchScore;
+    }
+
+    public void setFaceMatchScore(BigDecimal faceMatchScore) {
+        this.faceMatchScore = faceMatchScore;
+    }
+
+    // Lấy trạng thái xác minh khuôn mặt
+    public String getVerificationStatus() {
+        return verificationStatus;
+    }
+
+    public void setVerificationStatus(String verificationStatus) {
+        this.verificationStatus = verificationStatus;
+    }
+
+    // Lấy trạng thái chấm công
+    public String getAttendanceStatus() {
+        return attendanceStatus;
+    }
+
+    public void setAttendanceStatus(String attendanceStatus) {
+        this.attendanceStatus = attendanceStatus;
+    }
+
+    public String getShiftType() {
+        return shiftType;
+    }
+
+    public void setShiftType(String shiftType) {
+        this.shiftType = shiftType;
+    }
+
+    // Lấy số giờ làm việc thực tế
+    public BigDecimal getActualWorkHours() {
+        return actualWorkHours;
+    }
+
+    public void setActualWorkHours(BigDecimal actualWorkHours) {
+        this.actualWorkHours = actualWorkHours;
+    }
+
+    // Lấy số giờ làm việc theo lịch
+    public BigDecimal getExpectedWorkHours() {
+        return expectedWorkHours;
+    }
+
+    public void setExpectedWorkHours(BigDecimal expectedWorkHours) {
+        this.expectedWorkHours = expectedWorkHours;
+    }
+
+    // Lấy số phút đi trễ
+    public Integer getLateMinutes() {
+        return lateMinutes;
+    }
+
+    public void setLateMinutes(Integer lateMinutes) {
+        this.lateMinutes = lateMinutes;
+    }
+
+    // Lấy số phút về sớm
+    public Integer getEarlyMinutes() {
+        return earlyMinutes;
+    }
+
+    public void setEarlyMinutes(Integer earlyMinutes) {
+        this.earlyMinutes = earlyMinutes;
+    }
+
+    // Lấy số phút nghỉ trưa
+    public Integer getLunchBreakMinutes() {
+        return lunchBreakMinutes;
+    }
+
+    public void setLunchBreakMinutes(Integer lunchBreakMinutes) {
+        this.lunchBreakMinutes = lunchBreakMinutes;
+    }
 }

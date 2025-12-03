@@ -46,10 +46,6 @@ public class DoctorSchedule {
     @JoinColumn(name = "roomId")
     private Room room;
 
-    @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "chairId")
-    private Chair chair;
-
     @Nationalized
     @Column(name = "status", length = 50)
     private String status;
@@ -120,14 +116,6 @@ public class DoctorSchedule {
 
     public void setRoom(Room room) {
         this.room = room;
-    }
-
-    public Chair getChair() {
-        return chair;
-    }
-
-    public void setChair(Chair chair) {
-        this.chair = chair;
     }
 
     public String getStatus() {

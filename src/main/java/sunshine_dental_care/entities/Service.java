@@ -5,6 +5,7 @@ import org.hibernate.annotations.ColumnDefault;
 import org.hibernate.annotations.Nationalized;
 
 import java.time.Instant;
+import java.util.List;
 
 @Entity
 @Table(name = "Services")
@@ -41,6 +42,9 @@ public class Service {
     @ColumnDefault("sysutcdatetime()")
     @Column(name = "updatedAt", nullable = false)
     private Instant updatedAt;
+
+    @OneToMany(mappedBy = "service", cascade = CascadeType.ALL, fetch = FetchType.EAGER)
+    private List<ServiceVariant> variants;
 
     public Integer getId() {
         return id;
@@ -105,5 +109,8 @@ public class Service {
     public void setUpdatedAt(Instant updatedAt) {
         this.updatedAt = updatedAt;
     }
+
+    public List<ServiceVariant> getVariants() { return variants; }
+    public void setVariants(List<ServiceVariant> variants) { this.variants = variants; }
 
 }
