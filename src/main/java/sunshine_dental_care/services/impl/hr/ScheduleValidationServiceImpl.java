@@ -14,7 +14,6 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
 import sunshine_dental_care.dto.hrDTO.CreateWeeklyScheduleRequest;
 import sunshine_dental_care.dto.hrDTO.ValidationResultDto;
 import sunshine_dental_care.entities.Clinic;
@@ -34,7 +33,6 @@ import sunshine_dental_care.services.interfaces.hr.ScheduleValidationService;
 
 @Service
 @RequiredArgsConstructor
-@Slf4j
 public class ScheduleValidationServiceImpl implements ScheduleValidationService {
 
     private final DoctorScheduleRepo doctorScheduleRepo;
@@ -44,7 +42,7 @@ public class ScheduleValidationServiceImpl implements ScheduleValidationService 
     private final RoomRepo roomRepo;
     private final UserRoleRepo userRoleRepo;
 
-    // Đây là phương thức kiểm tra tính hợp lệ của lịch làm việc hàng tuần
+    // Phương thức kiểm tra tính hợp lệ của lịch làm việc hàng tuần
     @Override
     @Transactional(readOnly = true)
     public ValidationResultDto validateSchedule(CreateWeeklyScheduleRequest request) {
@@ -72,7 +70,7 @@ public class ScheduleValidationServiceImpl implements ScheduleValidationService 
             result.addError("No daily assignments provided for the week");
         }
 
-        // Tối ưu tải dữ liệu cần trước, tránh truy vấn nhiều lần
+        // Nạp tất cả dữ liệu cần thiết vào cache để không phải query database nhiều lần
         Set<Integer> allDoctorIds = new HashSet<>();
         Set<Integer> allClinicIds = new HashSet<>();
         Set<Integer> allRoomIds = new HashSet<>();
@@ -158,7 +156,7 @@ public class ScheduleValidationServiceImpl implements ScheduleValidationService 
             }
         }
 
-        // Kiểm tra từng ngày trong 6 ngày từ thứ 2 đến thứ bảy
+        // Kiểm tra từng ngày trong tuần (từ thứ Hai đến thứ Bảy)
         for (int dayIndex = 0; dayIndex < 6; dayIndex++) {
             String dayName = days[dayIndex];
             LocalDate workDate = request.getWeekStart().plusDays(dayIndex);
@@ -178,7 +176,7 @@ public class ScheduleValidationServiceImpl implements ScheduleValidationService 
                 doctorAssignments.get(assignment.getDoctorId()).add(assignment);
             }
 
-            // Kiểm tra trùng lặp thời gian cho từng bác sĩ mỗi ngày
+            // Kiểm tra trùng thời gian cho từng bác sĩ trong ngày
             for (Map.Entry<Integer, List<CreateWeeklyScheduleRequest.DoctorAssignmentRequest>> entry : doctorAssignments.entrySet()) {
                 Integer doctorId = entry.getKey();
                 List<CreateWeeklyScheduleRequest.DoctorAssignmentRequest> assignments = entry.getValue();
@@ -193,9 +191,11 @@ public class ScheduleValidationServiceImpl implements ScheduleValidationService 
                         boolean overlaps = assignment1.getStartTime().isBefore(assignment2.getEndTime())
                                 && assignment2.getStartTime().isBefore(assignment1.getEndTime());
                         if (overlaps) {
-                            result.addError("Doctor ID " + doctorId + " has overlapping time slots on " + dayName
+                            result.addError(
+                                "Doctor ID " + doctorId + " has overlapping time slots on " + dayName
                                     + " (" + assignment1.getStartTime() + "-" + assignment1.getEndTime()
-                                    + " and " + assignment2.getStartTime() + "-" + assignment2.getEndTime() + ")");
+                                    + " and " + assignment2.getStartTime() + "-" + assignment2.getEndTime() + ")"
+                            );
                         }
                     }
                 }
@@ -220,7 +220,7 @@ public class ScheduleValidationServiceImpl implements ScheduleValidationService 
                 clinicIdsInDay.add(assignment.getClinicId());
             }
 
-            // VALIDATE 1: Phải có đúng 2 cơ sở hoạt động trong ngày
+            // Kiểm tra phải có đúng 2 cơ sở hoạt động trong ngày
             if (clinicIdsInDay.size() != 2) {
                 if (clinicIdsInDay.isEmpty()) {
                     result.addError("No clinics are active on " + dayName + ". At least 2 clinics must be active.");
@@ -235,7 +235,7 @@ public class ScheduleValidationServiceImpl implements ScheduleValidationService 
                 continue;
             }
 
-            // VALIDATE 2: Mỗi ca trong mỗi cơ sở phải có ít nhất 2 bác sĩ
+            // Kiểm tra mỗi ca trong mỗi cơ sở phải có ít nhất 2 bác sĩ
             Map<Integer, Map<String, Set<Integer>>> clinicShiftDoctors = new HashMap<>();
             for (CreateWeeklyScheduleRequest.DoctorAssignmentRequest assignment : dayAssignments) {
                 String doctorDayKey = assignment.getDoctorId() + "_" + dayName;
@@ -278,7 +278,7 @@ public class ScheduleValidationServiceImpl implements ScheduleValidationService 
                 }
             }
 
-            // VALIDATE 3: Mỗi chuyên khoa phải có bác sĩ hoạt động tại cả 2 cơ sở
+            // Kiểm tra mỗi chuyên khoa phải có bác sĩ ở cả 2 cơ sở
             Set<String> allSpecialties = new HashSet<>();
             Map<String, Map<Integer, Set<Integer>>> specialtyClinicDoctors = new HashMap<>();
 
@@ -321,7 +321,7 @@ public class ScheduleValidationServiceImpl implements ScheduleValidationService 
         return result;
     }
 
-    // Kiểm tra từng assignment hợp lệ không
+    // Kiểm tra tính hợp lệ của từng assignment
     private boolean validateAssignment(
             CreateWeeklyScheduleRequest.DoctorAssignmentRequest assignment,
             ValidationResultDto result,
@@ -336,7 +336,7 @@ public class ScheduleValidationServiceImpl implements ScheduleValidationService 
 
         boolean alreadyValidated = validatedDoctors.contains(doctorDayKey);
 
-        // 1. Kiểm tra bác sĩ tồn tại và còn hoạt động
+        // Kiểm tra bác sĩ tồn tại và còn hoạt động
         User doctor = doctorsCache.get(assignment.getDoctorId());
         if (doctor == null) {
             if (!alreadyValidated) {
@@ -354,7 +354,7 @@ public class ScheduleValidationServiceImpl implements ScheduleValidationService 
             return false;
         }
 
-        // 2. Kiểm tra bác sĩ có role DOCTOR hay không
+        // Kiểm tra bác sĩ phải có role DOCTOR
         List<UserRole> userRoles = userRolesCache.getOrDefault(doctor.getId(), new ArrayList<>());
         boolean isDoctor = userRoles.stream()
                 .anyMatch(ur -> {
@@ -374,7 +374,7 @@ public class ScheduleValidationServiceImpl implements ScheduleValidationService 
             return false;
         }
 
-        // 3. Kiểm tra có department không
+        // Kiểm tra có department không
         Department dept = doctor.getDepartment();
         if (dept == null) {
             if (!alreadyValidated) {
@@ -387,7 +387,7 @@ public class ScheduleValidationServiceImpl implements ScheduleValidationService 
 
         validatedDoctors.add(doctorDayKey);
 
-        // 4. Kiểm tra clinic hợp lệ, còn hoạt động
+        // Kiểm tra clinic hợp lệ và còn hoạt động
         Clinic clinic = clinicsCache.get(assignment.getClinicId());
         if (clinic == null) {
             result.addError("Clinic ID " + assignment.getClinicId() + " not found on " + dayName);
@@ -400,7 +400,7 @@ public class ScheduleValidationServiceImpl implements ScheduleValidationService 
             return false;
         }
 
-        // 5. Kiểm tra phòng (nếu có)
+        // Kiểm tra phòng nếu có
         if (assignment.getRoomId() != null && assignment.getRoomId() > 0) {
             Room room = roomsCache.get(assignment.getRoomId());
             if (room == null) {
@@ -414,9 +414,7 @@ public class ScheduleValidationServiceImpl implements ScheduleValidationService 
                         " (" + clinic.getClinicName() + ") on " + dayName);
                 return false;
             }
-
-            // Note: Room specialty matching is no longer required
-            // Chỉ cần chọn clinic cho bác sĩ, mỗi bác sĩ có nhiều chuyên khoa nên chỉ cần dựa vào chuyên khoa của bác sĩ để xếp
+            // Không cần kiểm tra chuyên khoa phòng nữa, chỉ kiểm tra phòng thuộc đúng cơ sở và tồn tại
         }
 
         return true;

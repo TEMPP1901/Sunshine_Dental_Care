@@ -11,6 +11,7 @@ public class AttendanceExplanationResponse {
     private String userName;
     private Integer clinicId;
     private String clinicName;
+    @com.fasterxml.jackson.annotation.JsonFormat(pattern = "yyyy-MM-dd")
     private LocalDate workDate;
     private Instant checkInTime;
     private Instant checkOutTime;
@@ -21,6 +22,7 @@ public class AttendanceExplanationResponse {
     private String explanationStatus; // PENDING, APPROVED, REJECTED
     private String adminNote; // admin's note (if any)
     private String note; // full note for parsing
+    private String shiftType; // MORNING, AFTERNOON, FULL_DAY (for doctors)
 
     // Getter và setter cho attendanceId
     public Integer getAttendanceId() {
@@ -146,5 +148,14 @@ public class AttendanceExplanationResponse {
 
     public void setNote(String note) {
         this.note = note;
+    }
+
+    // Getter và setter cho shiftType
+    public String getShiftType() {
+        return shiftType;
+    }
+
+    public void setShiftType(String shiftType) {
+        this.shiftType = shiftType;
     }
 }
