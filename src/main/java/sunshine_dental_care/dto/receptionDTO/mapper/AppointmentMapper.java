@@ -67,7 +67,13 @@ public class AppointmentMapper {
         // Ánh xạ các trường từ AppointmentService
         dto.setId(as.getId());
         dto.setServiceId(as.getService().getId());
-        dto.setServiceName(as.getService().getServiceName());
+        String displayName = as.getService().getServiceName();
+
+        // Nếu có variant (gói cụ thể), lấy tên variant
+        if (as.getServiceVariant() != null) {
+            displayName = as.getServiceVariant().getVariantName();
+        }
+        dto.setServiceName(displayName);
         dto.setQuantity(as.getQuantity());
         dto.setUnitPrice(as.getUnitPrice());
         dto.setDiscountPct(as.getDiscountPct());
@@ -76,7 +82,7 @@ public class AppointmentMapper {
     }
 
     // Helper để map Patient Entity sang DTO
-    private PatientResponse mapPatientToPatientResponse(Patient patient) {
+    public PatientResponse mapPatientToPatientResponse(Patient patient) {
         if (patient == null) return null;
         PatientResponse dto = new PatientResponse();
         dto.setId(patient.getId());
@@ -84,6 +90,12 @@ public class AppointmentMapper {
         dto.setFullName(patient.getFullName());
         dto.setPhone(patient.getPhone());
         dto.setEmail(patient.getEmail());
+
+        // Danh sách bệnh nhân (Patient List)
+        dto.setGender(patient.getGender());
+        dto.setDateOfBirth(patient.getDateOfBirth());
+        dto.setAddress(patient.getAddress());
+        dto.setIsActive(patient.getIsActive());
         return dto;
     }
 }

@@ -4,6 +4,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import sunshine_dental_care.dto.receptionDTO.bookingDto.BookingSlotRequest;
+import sunshine_dental_care.dto.receptionDTO.bookingDto.SessionAvailabilityResponse;
 import sunshine_dental_care.dto.receptionDTO.bookingDto.TimeSlotResponse;
 import sunshine_dental_care.entities.Appointment;
 import sunshine_dental_care.entities.DoctorSchedule;
@@ -13,6 +14,7 @@ import sunshine_dental_care.repositories.reception.AppointmentRepo;
 import sunshine_dental_care.repositories.reception.ServiceVariantRepo;
 import sunshine_dental_care.services.interfaces.reception.BookingService;
 
+import java.time.LocalDate;
 import java.time.LocalTime;
 import java.time.ZoneId;
 import java.util.ArrayList;
@@ -115,6 +117,47 @@ public class BookingServiceImpl implements BookingService {
         }
 
         return responseSlots;
+    }
+
+    @Override
+    public SessionAvailabilityResponse checkSessionAvailability(Integer clinicId, LocalDate date) {
+        // 1. Check Chủ Nhật (Nếu phòng khám nghỉ CN)
+        if (date.getDayOfWeek() == java.time.DayOfWeek.SUNDAY) {
+            return new SessionAvailabilityResponse(false, false, "Phòng khám nghỉ Chủ Nhật");
+        }
+
+        // 2. Check Quá khứ
+        if (date.isBefore(LocalDate.now())) {
+            return new SessionAvailabilityResponse(false, false, "Không thể chọn ngày quá khứ");
+        }
+
+        // 3. Lấy lịch làm việc của TẤT CẢ bác sĩ tại Clinic ngày hôm đó
+        List<DoctorSchedule> schedules = doctorScheduleRepo.findByClinicAndDate(clinicId, date);
+
+        if (schedules.isEmpty()) {
+            return new SessionAvailabilityResponse(false, false, "Chưa có lịch làm việc cho ngày này");
+        }
+
+        boolean hasMorning = false;
+        boolean hasAfternoon = false;
+
+        // 4. Quét xem có ai làm Sáng/Chiều không
+        // Quy ước: Sáng (08:00 - 12:00), Chiều (13:00 - 17:00)
+        LocalTime morningStart = LocalTime.of(8, 0);
+        LocalTime morningEnd = LocalTime.of(12, 0);
+        LocalTime afternoonStart = LocalTime.of(13, 0);
+        LocalTime afternoonEnd = LocalTime.of(17, 0);
+
+        for (DoctorSchedule s : schedules) {
+            // Logic giao thoa: StartCa < EndBuoi && EndCa > StartBuoi
+            if (s.getStartTime().isBefore(morningEnd) && s.getEndTime().isAfter(morningStart)) {
+                hasMorning = true;
+            }
+            if (s.getStartTime().isBefore(afternoonEnd) && s.getEndTime().isAfter(afternoonStart)) {
+                hasAfternoon = true;
+            }
+        }
+        return new SessionAvailabilityResponse(hasMorning, hasAfternoon, null);
     }
 
     /**
