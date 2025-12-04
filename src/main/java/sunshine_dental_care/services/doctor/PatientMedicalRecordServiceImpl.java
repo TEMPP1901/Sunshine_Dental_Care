@@ -11,6 +11,7 @@ import sunshine_dental_care.dto.doctorDTO.MedicalRecordDTO;
 import sunshine_dental_care.dto.doctorDTO.MedicalRecordRequest;
 import sunshine_dental_care.dto.doctorDTO.MedicalRecordImageDTO;
 import sunshine_dental_care.dto.doctorDTO.ServiceDTO;
+import sunshine_dental_care.dto.doctorDTO.ServiceVariantDTO;
 import sunshine_dental_care.entities.Appointment;
 import sunshine_dental_care.entities.Clinic;
 import sunshine_dental_care.entities.MedicalRecord;
@@ -31,6 +32,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Optional;
+import java.util.stream.Collectors;
 import java.util.Set;
 
 @Service
@@ -354,6 +356,24 @@ public class PatientMedicalRecordServiceImpl implements PatientMedicalRecordServ
         if (service == null) {
             return null;
         }
+        
+        // Map variants nếu có
+        List<ServiceVariantDTO> variantDTOs = null;
+        if (service.getVariants() != null && !service.getVariants().isEmpty()) {
+            variantDTOs = service.getVariants().stream()
+                    .filter(v -> Boolean.TRUE.equals(v.getIsActive()))
+                    .map(v -> ServiceVariantDTO.builder()
+                            .variantId(v.getId())
+                            .variantName(v.getVariantName())
+                            .duration(v.getDuration())
+                            .price(v.getPrice())
+                            .description(v.getDescription())
+                            .currency(v.getCurrency())
+                            .isActive(v.getIsActive())
+                            .build())
+                    .collect(Collectors.toList());
+        }
+        
         return ServiceDTO.builder()
                 .id(service.getId())
                 .serviceName(service.getServiceName())
@@ -363,6 +383,7 @@ public class PatientMedicalRecordServiceImpl implements PatientMedicalRecordServ
                 .isActive(service.getIsActive())
                 .createdAt(service.getCreatedAt())
                 .updatedAt(service.getUpdatedAt())
+                .variants(variantDTOs)
                 .build();
     }
 

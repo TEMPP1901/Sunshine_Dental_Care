@@ -2,10 +2,16 @@ package sunshine_dental_care.api.doctor;
 
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.*;
 import sunshine_dental_care.dto.doctorDTO.DoctorAppointmentDTO;
+import sunshine_dental_care.dto.hrDTO.DoctorScheduleDto;
+import sunshine_dental_care.security.CurrentUser;
 import sunshine_dental_care.services.doctor.DoctorAppointmentService;
+import sunshine_dental_care.services.interfaces.hr.HrService;
 
 import java.time.Instant;
 import java.time.LocalDate;
@@ -20,6 +26,9 @@ import java.util.List;
 public class DoctorController {
     @Autowired
     private final DoctorAppointmentService doctorAppointmentService;
+    
+    @Autowired
+    private final HrService hrService;
 
     @GetMapping("/appointments/{id}")
     public ResponseEntity<List<DoctorAppointmentDTO>> getAppointmentsByDoctorId(@PathVariable Integer id) {
@@ -62,7 +71,7 @@ public class DoctorController {
         Instant start = parseToInstant(startDate);
         Instant end = parseToInstant(endDate);
 
-        List<DoctorAppointmentDTO> appointments =
+        List<  DoctorAppointmentDTO> appointments =
                 doctorAppointmentService.findByDoctorIdAndStartDateTimeBetween(doctorId, start, end);
 
         return ResponseEntity.ok(appointments);
@@ -95,6 +104,24 @@ public class DoctorController {
                 );
             }
         }
+    }
+
+    /**
+     * Lấy lịch làm việc của bác sĩ hiện tại theo tuần
+     * GET /api/doctor/my-schedule/{weekStart}
+     * @param weekStart Ngày bắt đầu tuần (format: yyyy-MM-dd)
+     * @return Danh sách lịch làm việc của bác sĩ trong tuần
+     */
+    @GetMapping("/my-schedule/{weekStart}")
+    public ResponseEntity<List<DoctorScheduleDto>> getMySchedule(
+            @PathVariable @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate weekStart) {
+        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+        if (authentication == null || !(authentication.getPrincipal() instanceof CurrentUser)) {
+            return ResponseEntity.status(401).build();
+        }
+        CurrentUser currentUser = (CurrentUser) authentication.getPrincipal();
+        List<DoctorScheduleDto> schedules = hrService.getMySchedule(currentUser.userId(), weekStart);
+        return ResponseEntity.ok(schedules);
     }
 
 }
