@@ -13,6 +13,7 @@ public interface UserRepo extends JpaRepository<User, Integer> {
     Optional<User> findByEmailIgnoreCase(String email);
     Optional<User> findByUsernameIgnoreCase(String username);
     Optional<User> findByResetPasswordToken(String token);
+    Optional<User> findByPhone(String phone);
 
 
     @Query("SELECT u FROM User u LEFT JOIN FETCH u.doctorSpecialties WHERE u.id = :userId")

@@ -321,6 +321,48 @@ public class MailService {
     }
 
     // =================================================================
+    // 4. GỬI EMAIL WELCOME (CHO OFFLINE / WALK-IN)
+    // =================================================================
+    @Async
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public void sendWelcomeEmail(Patient patient, String rawPassword) {
+        String loc = "vi";
+
+        // Tìm template hoặc tạo mới nếu chưa có
+        EmailTemplate t = templateRepo.findActiveByKeyAndLocale("WELCOME_OFFLINE", loc)
+                .orElseGet(() -> {
+                    EmailTemplate nt = new EmailTemplate();
+                    nt.setKey("WELCOME_OFFLINE");
+                    nt.setLocale(loc);
+                    nt.setSubject("Chào mừng bạn đến với Sunshine Dental Care");
+                    nt.setHtmlBody("<div style='font-family: Arial, sans-serif; line-height: 1.6; color: #333;'>"
+                            + "<h2 style='color: #3366FF;'>Xin chào {{name}},</h2>"
+                            + "<p>Hồ sơ bệnh nhân của bạn đã được tạo thành công tại quầy lễ tân.</p>"
+                            + "<div style='background: #f4f6f8; padding: 15px; border-radius: 8px; margin: 20px 0;'>"
+                            + "<p><b>Mã Bệnh Nhân:</b> <span style='color: #3366FF; font-size: 18px;'>{{patientCode}}</span></p>"
+                            + "<p><b>Tài khoản đăng nhập:</b> {{username}}</p>"
+                            + "<p><b>Mật khẩu mặc định:</b> {{password}}</p>"
+                            + "</div>"
+                            + "<p>Bạn có thể sử dụng thông tin trên để đăng nhập vào website và xem lịch sử khám, đặt lịch hẹn trực tuyến.</p>"
+                            + "<p><i>Vui lòng đổi mật khẩu ngay sau khi đăng nhập lần đầu để bảo mật tài khoản.</i></p>"
+                            + "<p>Trân trọng,<br/>Đội ngũ Sunshine Dental Care</p>"
+                            + "</div>");
+                    nt.setIsActive(true);
+                    return templateRepo.save(nt);
+                });
+
+        String subject = t.getSubject();
+        String html = render(t.getHtmlBody(), Map.of(
+                "name", patient.getFullName(),
+                "patientCode", patient.getPatientCode(),
+                "username", patient.getPhone(), // Username là SĐT
+                "password", rawPassword         // Password là SĐT (hoặc chuỗi bạn truyền vào)
+        ));
+
+        createAndSendLog(patient.getEmail(), subject, html, t, patient);
+    }
+
+    // =================================================================
     // HÀM HELPER CHUNG (LOGIC GỬI MAIL AN TOÀN)
     // =================================================================
     private void sendEmailInternal(String toEmail, String fullName, String patientCode, String locale, Patient patientLink) {
