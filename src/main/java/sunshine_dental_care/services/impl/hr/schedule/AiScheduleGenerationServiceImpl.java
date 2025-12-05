@@ -17,6 +17,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import sunshine_dental_care.dto.hrDTO.CreateWeeklyScheduleRequest;
 import sunshine_dental_care.dto.hrDTO.ValidationResultDto;
+import sunshine_dental_care.repositories.auth.ClinicRepo;
 import sunshine_dental_care.services.interfaces.hr.AiScheduleGenerationService;
 import sunshine_dental_care.services.interfaces.hr.HrService;
 
@@ -30,63 +31,55 @@ public class AiScheduleGenerationServiceImpl implements AiScheduleGenerationServ
     private final PromptBuilderService promptBuilderService;
     private final GeminiApiClient geminiApiClient;
     private final HolidayService holidayService;
+    private final ClinicRepo clinicRepo;
+
     private final ObjectMapper objectMapper = new ObjectMapper();
 
-    // Tạo lập lịch hàng tuần từ mô tả tiếng Anh của user
+    // Tạo lập lịch hàng tuần từ mô tả người dùng, tự động gửi đến AI và kiểm tra lại, có retry tự động khi gặp lỗi
     @Override
     public CreateWeeklyScheduleRequest generateScheduleFromDescription(LocalDate weekStart, String description) {
         if (description == null || description.trim().isEmpty()) {
             throw new IllegalArgumentException("Description/prompt cannot be null or empty");
         }
-        
+
         int maxRetries = 3;
         String lastError = null;
-        
         for (int attempt = 1; attempt <= maxRetries; attempt++) {
             try {
                 log.info("AI Schedule Generation - Attempt {}/{}", attempt, maxRetries);
-                
-                // Bước 1: Xây dựng prompt đầy đủ cho AI từ mô tả gốc
                 String enhancedPrompt = promptBuilderService.buildEnhancedPrompt(description, weekStart);
-                
-                // Nếu đây là retry, thêm feedback về lỗi trước đó
+
+                // Nếu là retry thì bổ sung feedback cho AI về lỗi trả về ở lần trước
                 if (attempt > 1 && lastError != null) {
                     enhancedPrompt = addRetryFeedback(enhancedPrompt, lastError, attempt);
                 }
 
-                // Bước 2: Gửi prompt sang AI để lấy kết quả lịch
                 String aiResponse = geminiApiClient.generateContent(enhancedPrompt);
                 if (aiResponse == null) {
                     throw new RuntimeException("AI service is unavailable or failed to generate a response.");
                 }
 
-                // Bước 3: Parse kết quả trả về từ AI và kiểm tra hợp lệ
                 CreateWeeklyScheduleRequest request = parseAndValidateResponse(aiResponse, weekStart, description);
                 log.info("AI Schedule Generation - Success on attempt {}", attempt);
                 return request;
-                
+
             } catch (IllegalArgumentException e) {
-                // Validation failed - lưu lỗi để retry với feedback
                 lastError = e.getMessage();
                 log.warn("AI Schedule Generation - Attempt {} failed validation: {}", attempt, lastError);
-                
+
                 if (attempt == maxRetries) {
-                    // Đã hết số lần thử, throw lỗi cuối cùng
-                    throw new RuntimeException("Failed to generate valid schedule after " + maxRetries + " attempts. Last error: " + lastError, e);
+                    throw new RuntimeException("Failed to generate valid schedule after " + maxRetries
+                            + " attempts. Last error: " + lastError, e);
                 }
-                // Tiếp tục retry
             } catch (Exception e) {
-                // Lỗi khác (network, parsing, etc.) - không retry
                 log.error("AI Schedule Generation - Fatal error on attempt {}: {}", attempt, e.getMessage());
                 throw new RuntimeException("Failed to generate schedule using AI: " + e.getMessage(), e);
             }
         }
-        
-        // Không bao giờ đến đây, nhưng compiler cần return
         throw new RuntimeException("Failed to generate schedule using AI after " + maxRetries + " attempts.");
     }
-    
-    // Thêm feedback về lỗi vào prompt khi retry
+
+    // Thêm đoạn feedback về lỗi cho prompt gửi lại AI khi retry
     private String addRetryFeedback(String originalPrompt, String errorMessage, int attempt) {
         StringBuilder feedbackPrompt = new StringBuilder(originalPrompt);
         feedbackPrompt.append("\n\n");
@@ -95,45 +88,53 @@ public class AiScheduleGenerationServiceImpl implements AiScheduleGenerationServ
         feedbackPrompt.append(errorMessage).append("\n");
         feedbackPrompt.append("\n");
         feedbackPrompt.append("CRITICAL: You MUST fix these errors in this attempt:\n");
-        feedbackPrompt.append("1. If the error mentions 'Doctor ID X not found', you used an invalid ID. Check the 'AVAILABLE DOCTORS' list and use ONLY valid IDs.\n");
-        feedbackPrompt.append("2. If the error mentions 'missing schedule for [day]', you must add assignments for that day.\n");
-        feedbackPrompt.append("3. If the error mentions 'must have at least 2 doctors assigned', you must add more doctors to that shift.\n");
+        feedbackPrompt.append(
+                "1. If the error mentions 'Doctor ID X not found', you used an invalid ID. Check the 'AVAILABLE DOCTORS' list and use ONLY valid IDs.\n");
+        feedbackPrompt.append(
+                "2. If the error mentions 'missing schedule for [day]', you must add assignments for that day.\n");
+        feedbackPrompt.append(
+                "3. If the error mentions 'must have at least 2 doctors assigned', you must add more doctors to that shift.\n");
         feedbackPrompt.append("4. Ensure ALL doctors work on ALL working days (every doctor, every day).\n");
         feedbackPrompt.append("5. Verify EVERY doctorId in your JSON exists in the 'AVAILABLE DOCTORS' list.\n");
         feedbackPrompt.append("\n");
-        feedbackPrompt.append("Please regenerate the schedule with ALL errors fixed. Your response must be complete and valid.\n");
+        feedbackPrompt.append(
+                "Please regenerate the schedule with ALL errors fixed. Your response must be complete and valid.\n");
         return feedbackPrompt.toString();
     }
 
-    // Sinh lịch từ custom prompt tiếng Anh (logic giống generateScheduleFromDescription)
+    // Sinh lịch từ prompt do người dùng tự nhập (bản chất giống generateScheduleFromDescription)
     @Override
     public CreateWeeklyScheduleRequest generateScheduleFromCustomPrompt(LocalDate weekStart, String customPrompt) {
         return generateScheduleFromDescription(weekStart, customPrompt);
     }
 
-    // Parse kết quả trả về của AI, validate cứng và validate mềm
-    private CreateWeeklyScheduleRequest parseAndValidateResponse(String aiResponse, LocalDate weekStart, String originalPrompt) throws JsonProcessingException {
+    // Phân tích và kiểm tra response từ AI (gồm cả kiểm tra cứng & cảnh báo mềm)
+    private CreateWeeklyScheduleRequest parseAndValidateResponse(String aiResponse, LocalDate weekStart,
+            String originalPrompt) throws JsonProcessingException {
         String jsonText = extractJsonFromText(aiResponse);
         if (jsonText == null || jsonText.isEmpty()) {
-            throw new RuntimeException("AI did not return a valid schedule format. Please ensure the AI response contains valid JSON with 'dailyAssignments' field.");
+            throw new RuntimeException(
+                    "AI did not return a valid schedule format. Please ensure the AI response contains valid JSON with 'dailyAssignments' field.");
         }
 
         CreateWeeklyScheduleRequest request = parseJsonToRequest(jsonText, weekStart);
 
-        // Hard validation theo quy tắc nghiệp vụ
+        // Kiểm tra hợp lệ cứng (các luật bắt buộc)
         ValidationResultDto hardValidation = hrService.validateSchedule(request);
         if (!hardValidation.isValid()) {
-            throw new IllegalArgumentException("Generated schedule is invalid: " + String.join(", ", hardValidation.getErrors()));
+            throw new IllegalArgumentException(
+                    "Generated schedule is invalid: " + String.join(", ", hardValidation.getErrors()));
         }
 
-        // Soft validation kiểm tra chất lượng & cảnh báo (không ném lỗi)
+        // Kiểm tra hợp lệ mềm (gợi ý/cảnh báo, không bắt buộc dừng)
         ValidationResultDto softValidation = scheduleHeuristicsValidator.validate(request, originalPrompt);
-        // Nếu muốn attach cảnh báo vào DTO: request.setWarnings(softValidation.getWarnings());
+        // Nếu cần có thể lưu cảnh báo vào DTO (chưa sử dụng)
         return request;
     }
 
-    // Parse JSON string về CreateWeeklyScheduleRequest, kiểm tra tính hợp lệ của cấu trúc ngày và lịch
-    private CreateWeeklyScheduleRequest parseJsonToRequest(String jsonText, LocalDate weekStart) throws JsonProcessingException {
+    // Parse JSON từ response AI -> Kiểm tra các ngày làm việc & logic clinic nghỉ/làm
+    private CreateWeeklyScheduleRequest parseJsonToRequest(String jsonText, LocalDate weekStart)
+            throws JsonProcessingException {
         JsonNode rootNode = objectMapper.readTree(jsonText);
 
         List<String> availableFields = new ArrayList<>();
@@ -151,14 +152,24 @@ public class AiScheduleGenerationServiceImpl implements AiScheduleGenerationServ
             throw new IllegalArgumentException(errorMsg.toString());
         }
 
-        // Calculate expected working days (excluding holidays)
+        // Xác định danh sách ngày phải làm việc (ngoại trừ các ngày mà toàn bộ phòng khám nghỉ)
         String[] dayNames = { "monday", "tuesday", "wednesday", "thursday", "friday", "saturday" };
         List<String> expectedWorkingDays = new ArrayList<>();
-        List<String> holidayDays = holidayService.calculateHolidaysInWeek(weekStart);
-        for (int i = 0; i < dayNames.length; i++) {
-            // Only add non-holiday days to expected working days
-            if (!holidayDays.contains(dayNames[i])) {
-                expectedWorkingDays.add(dayNames[i]);
+        List<sunshine_dental_care.entities.Clinic> allClinics = clinicRepo.findAll();
+        for (int dayIndex = 0; dayIndex < dayNames.length; dayIndex++) {
+            String day = dayNames[dayIndex];
+            LocalDate workDate = weekStart.plusDays(dayIndex);
+
+            // Kiểm tra nếu tất cả phòng khám đều nghỉ ngày này thì loại khỏi workingDays
+            boolean allClinicsOnHoliday = true;
+            for (sunshine_dental_care.entities.Clinic clinic : allClinics) {
+                if (!holidayService.isHoliday(workDate, clinic.getId())) {
+                    allClinicsOnHoliday = false;
+                    break;
+                }
+            }
+            if (!allClinicsOnHoliday) {
+                expectedWorkingDays.add(day);
             }
         }
 
@@ -183,29 +194,22 @@ public class AiScheduleGenerationServiceImpl implements AiScheduleGenerationServ
             }
         });
 
-        // Validate that we have schedules for ALL expected working days
+        // Kiểm tra thiếu ngày (ngày phải làm mà không có lịch)
         List<String> missingDays = new ArrayList<>();
         for (String expectedDay : expectedWorkingDays) {
             if (!dailyAssignments.containsKey(expectedDay)) {
                 missingDays.add(expectedDay);
             }
         }
-        
-        // If we're missing any working days, that's an error
+
+        // Nếu thiếu bất kỳ ngày đang có phòng khám làm việc nào thì ném lỗi
         if (!missingDays.isEmpty()) {
             StringBuilder errorMsg = new StringBuilder("Missing schedule for working day(s): ");
             errorMsg.append(String.join(", ", missingDays)).append(". ");
-            errorMsg.append("You must schedule ALL ").append(expectedWorkingDays.size()).append(" working days: ");
+            errorMsg.append("You must schedule ALL working days where at least one clinic is active: ");
             errorMsg.append(String.join(", ", expectedWorkingDays)).append(". ");
-            
-            // Special emphasis for Friday/Saturday after holiday
-            boolean missingFriday = missingDays.contains("friday");
-            boolean missingSaturday = missingDays.contains("saturday");
-            if ((missingFriday || missingSaturday) && !holidayDays.isEmpty()) {
-                errorMsg.append("CRITICAL: If there was a holiday earlier in the week, you MUST still schedule Friday and Saturday. ");
-                errorMsg.append("A holiday does NOT end the work week.");
-            }
-            
+            errorMsg.append("Note: Days where ALL clinics are on holiday are automatically skipped.");
+
             throw new IllegalArgumentException(errorMsg.toString());
         }
 
@@ -216,7 +220,7 @@ public class AiScheduleGenerationServiceImpl implements AiScheduleGenerationServ
         return request;
     }
 
-    // Trích xuất JSON từ response thô của AI (dò từ dấu '{' đầu về '}' cuối)
+    // Tách chuỗi JSON từ response của AI dựa theo vị trí dấu ngoặc nhọn đầu/cuối
     private String extractJsonFromText(String text) {
         if (text == null || text.trim().isEmpty()) {
             return null;

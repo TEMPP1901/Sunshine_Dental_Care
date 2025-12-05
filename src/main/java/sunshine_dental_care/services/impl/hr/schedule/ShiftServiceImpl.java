@@ -28,6 +28,7 @@ public class ShiftServiceImpl implements ShiftService {
     private static final LocalTime EMPLOYEE_START_TIME = LocalTime.of(8, 0);
     private static final LocalTime EMPLOYEE_END_TIME = LocalTime.of(18, 0);
 
+    // Xác định ca làm việc (sáng/chiều) cho bác sĩ dựa vào thời gian hiện tại
     @Override
     public String determineShiftForDoctor(LocalTime currentTime) {
         if (currentTime.isBefore(LUNCH_BREAK_START)) {
@@ -35,40 +36,38 @@ public class ShiftServiceImpl implements ShiftService {
         } else if (currentTime.isAfter(LUNCH_BREAK_START) && currentTime.isBefore(LocalTime.of(18, 0))) {
             return "AFTERNOON";
         }
-        // Default fallback or throw exception?
-        // Based on existing logic, it seems we might default to AFTERNOON if late, or
-        // handle edge cases.
-        // Let's stick to the core logic: if before 11:00 -> MORNING, else AFTERNOON.
-        // But wait, what if it's 12:00?
         return "AFTERNOON";
     }
 
+    // Kiểm tra hợp lệ khi check-in đầu ca (ca chiều không thể check-in trước 13h00)
     @Override
     public void validateCheckInTime(String shiftType, LocalTime currentTime) {
         if ("AFTERNOON".equals(shiftType) && currentTime.isBefore(AFTERNOON_SHIFT_START)) {
             throw new AttendanceValidationException(
-                    String.format("Cannot check-in for AFTERNOON shift before 13:00. Current time: %s",
+                    String.format("Không thể check-in ca CHIỀU trước 13:00. Giờ hiện tại: %s",
                             currentTime));
         }
     }
 
+    // Kiểm tra hợp lệ khi check-out trong ca sáng và chiều
     @Override
     public void validateCheckOutTime(String shiftType, LocalTime currentTime) {
         if ("MORNING".equals(shiftType)) {
             if (currentTime.isBefore(LocalTime.of(8, 0))) {
                 throw new AttendanceValidationException(
-                        String.format("Cannot check-out for MORNING shift before 8:00. Current time: %s",
+                        String.format("Không thể check-out ca SÁNG trước 8:00. Giờ hiện tại: %s",
                                 currentTime));
             }
         } else if ("AFTERNOON".equals(shiftType)) {
             if (currentTime.isBefore(AFTERNOON_SHIFT_START)) {
                 throw new AttendanceValidationException(
-                        String.format("Cannot check-out for AFTERNOON shift before 13:00. Current time: %s",
+                        String.format("Không thể check-out ca CHIỀU trước 13:00. Giờ hiện tại: %s",
                                 currentTime));
             }
         }
     }
 
+    // Tìm schedule phù hợp cho user theo ca, date, clinicId
     @Override
     public Optional<DoctorSchedule> findMatchingSchedule(Integer userId, Integer clinicId, LocalDate date,
             String shiftType) {
@@ -88,11 +87,12 @@ public class ShiftServiceImpl implements ShiftService {
             }
         }
 
-        // Fallback: find earliest schedule
+        // Nếu không tìm được, trả về lịch sớm nhất
         return schedules.stream()
                 .min((s1, s2) -> s1.getStartTime().compareTo(s2.getStartTime()));
     }
 
+    // Kích hoạt lịch làm việc (status = ACTIVE) nếu chưa active
     @Override
     @Transactional
     public void activateSchedule(DoctorSchedule schedule) {
@@ -102,6 +102,7 @@ public class ShiftServiceImpl implements ShiftService {
         }
     }
 
+    // Khi check-in ca sáng, kích hoạt toàn bộ ca chiều trong ngày tương ứng
     @Override
     @Transactional
     public void activateAfternoonSchedulesIfMorningCheckIn(Integer userId, LocalDate date, String shiftType,
@@ -122,6 +123,7 @@ public class ShiftServiceImpl implements ShiftService {
         }
     }
 
+    // Lấy thời gian bắt đầu theo ca hoặc theo entity schedule nếu có
     @Override
     public LocalTime getExpectedStartTime(String shiftType, DoctorSchedule schedule) {
         if (schedule != null) {
@@ -137,6 +139,7 @@ public class ShiftServiceImpl implements ShiftService {
         }
     }
 
+    // Lấy thời gian kết thúc theo ca hoặc theo entity schedule nếu có
     @Override
     public LocalTime getExpectedEndTime(String shiftType, DoctorSchedule schedule) {
         if (schedule != null) {

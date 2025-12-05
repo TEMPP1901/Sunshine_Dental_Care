@@ -30,6 +30,7 @@ public class AttendanceStatusCalculator {
     private final AttendanceRepository attendanceRepository;
     private final DoctorScheduleRepo doctorScheduleRepo;
     private final LeaveRequestRepo leaveRequestRepo;
+    private final HolidayService holidayService;
 
     private static final LocalTime LUNCH_BREAK_START = LocalTime.of(11, 0);
 
@@ -63,7 +64,8 @@ public class AttendanceStatusCalculator {
         log.debug("User {} has been validated for attendance", userId);
     }
 
-    // Đánh giá trạng thái chấm công cho nhân viên dựa trên thời gian check-in so với giờ bắt đầu mặc định
+    // Đánh giá trạng thái chấm công cho nhân viên dựa trên thời gian check-in so
+    // với giờ bắt đầu mặc định
     public String determineAttendanceStatus(Integer userId,
             Integer clinicId,
             LocalDate workDate,
@@ -82,7 +84,8 @@ public class AttendanceStatusCalculator {
             // Nếu có đơn nghỉ phép đã duyệt, coi như APPROVED_LATE thay vì LATE
             if (hasApprovedLeave) {
                 long minutesLate = java.time.Duration.between(expectedStartTime, checkInLocalTime).toMinutes();
-                log.info("User {} checked in APPROVED_LATE with approved leave: {} minutes late (expected: {}, actual: {})",
+                log.info(
+                        "User {} checked in APPROVED_LATE with approved leave: {} minutes late (expected: {}, actual: {})",
                         userId, minutesLate, expectedStartTime, checkInLocalTime);
                 return "APPROVED_LATE";
             } else {
@@ -94,7 +97,8 @@ public class AttendanceStatusCalculator {
         }
     }
 
-    // Đánh dấu nhân viên vắng mặt nếu không có check-in và xét trạng thái đơn nghỉ phép
+    // Đánh dấu nhân viên vắng mặt nếu không có check-in và xét trạng thái đơn nghỉ
+    // phép
     public void markAbsentIfNeeded(Integer userId, Integer clinicId, LocalDate workDate) {
         Optional<Attendance> attendance = attendanceRepository
                 .findByUserIdAndClinicIdAndWorkDate(userId, clinicId, workDate);
@@ -102,6 +106,24 @@ public class AttendanceStatusCalculator {
         boolean hasCheckIn = attendance.isPresent() && attendance.get().getCheckInTime() != null;
 
         if (!hasCheckIn) {
+            // Check for holiday first
+            if (holidayService.isHoliday(workDate, clinicId)) {
+                Attendance holidayRecord = attendance.orElseGet(Attendance::new);
+                if (attendance.isEmpty()) {
+                    holidayRecord.setUserId(userId);
+                    holidayRecord.setClinicId(clinicId);
+                    holidayRecord.setWorkDate(workDate);
+                }
+                // Only update if status is not already set or is ABSENT
+                if (holidayRecord.getAttendanceStatus() == null
+                        || "ABSENT".equals(holidayRecord.getAttendanceStatus())) {
+                    holidayRecord.setAttendanceStatus("HOLIDAY");
+                    attendanceRepository.save(holidayRecord);
+                    log.info("Marked user {} as HOLIDAY at clinic {} on {}", userId, clinicId, workDate);
+                }
+                return;
+            }
+
             boolean hasApprovedLeave = leaveRequestRepo.hasApprovedLeaveOnDate(userId, workDate);
 
             Attendance absentRecord = attendance.orElseGet(Attendance::new);
@@ -123,9 +145,11 @@ public class AttendanceStatusCalculator {
         }
     }
 
-    // Đánh dấu bác sĩ vắng mặt dựa vào từng schedule và trạng thái check-in của từng ca
+    // Đánh dấu bác sĩ vắng mặt dựa vào từng schedule và trạng thái check-in của
+    // từng ca
     public void markAbsentForDoctorBasedOnSchedule(Integer userId, LocalDate workDate) {
-        // Nếu đã có đơn nghỉ phép đã duyệt thì không xét vắng mặt để tránh reset lịch INACTIVE
+        // Nếu đã có đơn nghỉ phép đã duyệt thì không xét vắng mặt để tránh reset lịch
+        // INACTIVE
         if (leaveRequestRepo.hasApprovedLeaveOnDate(userId, workDate)) {
             log.debug("Doctor {} has approved leave on {}, skipping attendance check", userId, workDate);
             return;
@@ -145,6 +169,12 @@ public class AttendanceStatusCalculator {
 
             Integer clinicId = schedule.getClinic().getId();
             if (clinicId == null) {
+                continue;
+            }
+
+            // Check for holiday
+            if (holidayService.isHoliday(workDate, clinicId)) {
+                log.debug("It is holiday at clinic {}, skipping absent check for doctor {}", clinicId, userId);
                 continue;
             }
 
@@ -168,7 +198,8 @@ public class AttendanceStatusCalculator {
             try {
                 if (!hasCheckIn) {
                     LocalTime currentTime = LocalTime.now();
-                    // Nếu quá 2 tiếng kể từ giờ ca bắt đầu mà chưa check-in thì sẽ set schedule: INACTIVE và đánh dấu ABSENT
+                    // Nếu quá 2 tiếng kể từ giờ ca bắt đầu mà chưa check-in thì sẽ set schedule:
+                    // INACTIVE và đánh dấu ABSENT
                     LocalTime inactiveThreshold = startTime.plusHours(2);
 
                     boolean shouldSetInactive = currentTime.isAfter(inactiveThreshold);
@@ -205,7 +236,8 @@ public class AttendanceStatusCalculator {
                             }
                         }
                     } else {
-                        // Nếu vẫn còn trong khoảng 2 giờ sau giờ bắt đầu ca thì giữ schedule status là ACTIVE
+                        // Nếu vẫn còn trong khoảng 2 giờ sau giờ bắt đầu ca thì giữ schedule status là
+                        // ACTIVE
                         if (schedule.getStatus() == null || !"ACTIVE".equals(schedule.getStatus())) {
                             schedule.setStatus("ACTIVE");
                             try {
@@ -282,8 +314,9 @@ public class AttendanceStatusCalculator {
     public boolean hasApprovedLeaveOnDate(Integer userId, LocalDate workDate) {
         return leaveRequestRepo.hasApprovedLeaveOnDate(userId, workDate);
     }
-    
-    // Kiểm tra user có đơn nghỉ phép đã duyệt cho ngày và ca cụ thể không (cho bác sĩ)
+
+    // Kiểm tra user có đơn nghỉ phép đã duyệt cho ngày và ca cụ thể không (cho bác
+    // sĩ)
     public boolean hasApprovedLeaveOnDateAndShift(Integer userId, LocalDate workDate, String shiftType) {
         if (shiftType == null || shiftType.isEmpty() || "FULL_DAY".equals(shiftType)) {
             // Nếu FULL_DAY hoặc null, check như bình thường
@@ -293,7 +326,8 @@ public class AttendanceStatusCalculator {
         return leaveRequestRepo.hasApprovedLeaveOnDateAndShift(userId, workDate, shiftType);
     }
 
-    // Reset trạng thái INACTIVE schedule về ACTIVE cho ngày mới (chỉ reset do vắng mặt, không reset nếu đã approved nghỉ phép)
+    // Reset trạng thái INACTIVE schedule về ACTIVE cho ngày mới (chỉ reset do vắng
+    // mặt, không reset nếu đã approved nghỉ phép)
     public void resetScheduleStatusForNewDay(LocalDate workDate) {
         List<DoctorSchedule> schedules = doctorScheduleRepo.findByWorkDate(workDate);
 
