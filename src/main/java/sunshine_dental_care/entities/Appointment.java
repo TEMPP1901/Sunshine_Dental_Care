@@ -74,9 +74,15 @@ public class Appointment {
     @Column(name = "bookingFee")
     private BigDecimal bookingFee; // Phí đặt lịch hẹn
 
+    // --- MỚI THÊM: Cờ đánh dấu đã gửi nhắc nhở chưa ---
+    @Column(name = "is_reminder_sent")
+    private Boolean isReminderSent = false;
+
     // Mỗi Lịch hẹn (Appointment) có thể chứa nhiều (Many) bản ghi Chi tiết Dịch vụ Lịch hẹn (AppointmentService).
     @OneToMany(mappedBy = "appointment", cascade = CascadeType.ALL, fetch = FetchType.LAZY)
     private List<AppointmentService> appointmentServices;
+
+    // --- GETTERS & SETTERS ---
 
     public Integer getId() {
         return id;
@@ -205,6 +211,9 @@ public class Appointment {
     public BigDecimal getBookingFee() { return bookingFee; }
     public void setBookingFee(BigDecimal bookingFee) { this.bookingFee = bookingFee; }
 
+    public Boolean getIsReminderSent() { return isReminderSent; }
+    public void setIsReminderSent(Boolean reminderSent) { isReminderSent = reminderSent; }
+
     @PrePersist
     public void prePersist() {
         if (createdAt == null) {
@@ -217,11 +226,13 @@ public class Appointment {
         if (channel == null) {
             channel = "WALK_IN";
         }
+        if (isReminderSent == null) {
+            isReminderSent = false;
+        }
     }
 
     @PreUpdate
     public void preUpdate() {
         updatedAt = Instant.now();
     }
-
 }

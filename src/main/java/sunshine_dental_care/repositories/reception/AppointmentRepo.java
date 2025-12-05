@@ -13,6 +13,7 @@ import sunshine_dental_care.entities.Appointment;
 
 @Repository
 public interface AppointmentRepo extends JpaRepository<Appointment, Integer> {
+    List<Appointment> findByPatientIdOrderByStartDateTimeDesc(Integer patientId);
 
     @Query("SELECT a FROM Appointment a " +
             "WHERE a.status IN ('CONFIRMED', 'SCHEDULED', 'PENDING') " +
@@ -30,8 +31,6 @@ public interface AppointmentRepo extends JpaRepository<Appointment, Integer> {
 
     /**
      * Lấy danh sách các lịch hẹn ĐÃ CÓ của bác sĩ trong ngày cụ thể.
-     * Dùng để tô đen các ô giờ đã bị người khác đặt.
-     * (Không cần lọc theo Clinic, vì bác sĩ bận ở đâu thì cũng là bận).
      */
     @Query("SELECT a FROM Appointment a " +
             "WHERE a.doctor.id = :doctorId " +
@@ -44,8 +43,6 @@ public interface AppointmentRepo extends JpaRepository<Appointment, Integer> {
 
     /**
      * Lấy tất cả lịch hẹn của một Clinic trong ngày cụ thể.
-     * Dùng cho Reception Dashboard.
-     * Sắp xếp theo giờ bắt đầu để hiển thị đẹp hơn.
      */
     @Query("SELECT a FROM Appointment a " +
             "WHERE a.clinic.id = :clinicId " +
@@ -55,4 +52,11 @@ public interface AppointmentRepo extends JpaRepository<Appointment, Integer> {
             @Param("clinicId") Integer clinicId,
             @Param("date") LocalDate date
     );
+
+    // --- MỚI THÊM: Query tìm lịch hẹn cần nhắc nhở ---
+    @Query("SELECT a FROM Appointment a WHERE a.status = 'CONFIRMED' " +
+            "AND (a.isReminderSent IS NULL OR a.isReminderSent = false) " +
+            "AND a.startDateTime BETWEEN :start AND :end")
+    List<Appointment> findAppointmentsToRemind(@Param("start") Instant start,
+                                               @Param("end") Instant end);
 }

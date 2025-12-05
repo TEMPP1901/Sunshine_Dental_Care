@@ -1,5 +1,6 @@
 package sunshine_dental_care.entities;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import jakarta.persistence.*;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Size;
@@ -24,6 +25,7 @@ public class ServiceVariant {
     @NotNull
     @ManyToOne(fetch = FetchType.LAZY, optional = false)
     @JoinColumn(name = "serviceId", nullable = false)
+    @JsonIgnore
     private Service service;
 
     @Size(max = 200)

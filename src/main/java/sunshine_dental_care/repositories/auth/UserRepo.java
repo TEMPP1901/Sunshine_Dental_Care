@@ -6,8 +6,10 @@ import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import sunshine_dental_care.entities.User;
+import java.util.Optional;
 
 public interface UserRepo extends JpaRepository<User, Integer> {
+    Optional<User> findByEmail(String email);
 
     // --- PHẦN CHUNG (Cả 2 đều có) ---
     Optional<User> findByEmailIgnoreCase(String email);
