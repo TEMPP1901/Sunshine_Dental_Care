@@ -1,4 +1,4 @@
-package sunshine_dental_care.services.impl.hr;
+package sunshine_dental_care.services.impl.hr.schedule;
 
 import java.time.LocalDate;
 import java.time.LocalTime;
@@ -41,9 +41,9 @@ public class ScheduleValidationServiceImpl implements ScheduleValidationService 
     private final ClinicRepo clinicRepo;
     private final RoomRepo roomRepo;
     private final UserRoleRepo userRoleRepo;
-    private final sunshine_dental_care.services.impl.hr.HolidayService holidayService;
+    private final HolidayService holidayService;
 
-    // Hàm kiểm tra hợp lệ lịch làm việc tuần cho bác sĩ (request từ CreateWeeklyScheduleRequest)
+    // validate lịch làm việc tuần cho bác sĩ
     @Override
     @Transactional(readOnly = true)
     public ValidationResultDto validateSchedule(CreateWeeklyScheduleRequest request) {  
@@ -71,7 +71,7 @@ public class ScheduleValidationServiceImpl implements ScheduleValidationService 
             result.addError("No daily assignments provided for the week");
         }
 
-        // Lưu toàn bộ id bác sĩ, phòng, cơ sở để cache dữ liệu - tối ưu truy vấn
+        // thu thập tất cả doctorId, clinicId, roomId để cache, optimize query
         Set<Integer> allDoctorIds = new HashSet<>();
         Set<Integer> allClinicIds = new HashSet<>();
         Set<Integer> allRoomIds = new HashSet<>();
@@ -89,6 +89,7 @@ public class ScheduleValidationServiceImpl implements ScheduleValidationService 
             }
         }
 
+        // cache doctor, clinic, room
         Map<Integer, User> doctorsCache = new HashMap<>();
         if (!allDoctorIds.isEmpty()) {
             List<User> allDoctors = userRepo.findAllById(allDoctorIds);
@@ -113,6 +114,7 @@ public class ScheduleValidationServiceImpl implements ScheduleValidationService 
             }
         }
 
+        // cache specialty của từng doctor
         Map<Integer, List<String>> doctorSpecialtiesCache = new HashMap<>();
         if (!allDoctorIds.isEmpty()) {
             List<DoctorSpecialty> allDoctorSpecialties = doctorSpecialtyRepo.findByDoctorIdInAndIsActiveTrue(new ArrayList<>(allDoctorIds));
@@ -134,6 +136,7 @@ public class ScheduleValidationServiceImpl implements ScheduleValidationService 
             }
         }
 
+        // cache role của từng doctor (để check phải là DOCTOR)
         Map<Integer, List<UserRole>> userRolesCache = new HashMap<>();
         if (!allDoctorIds.isEmpty()) {
             List<UserRole> allUserRoles = userRoleRepo.findActiveByUserIdIn(new ArrayList<>(allDoctorIds));
@@ -144,6 +147,7 @@ public class ScheduleValidationServiceImpl implements ScheduleValidationService 
             }
         }
 
+        // cache lịch đã tồn tại trong DB tuần này cho từng doctor + ngày (key=doctorId_ngày)
         Map<String, List<DoctorSchedule>> existingSchedulesCache = new HashMap<>();
         if (!allDoctorIds.isEmpty()) {
             List<DoctorSchedule> allExistingSchedules = doctorScheduleRepo.findByWeekRange(weekStart, weekEnd);
@@ -156,7 +160,7 @@ public class ScheduleValidationServiceImpl implements ScheduleValidationService 
             }
         }
 
-        // Vòng lặp chính từng ngày trong tuần: kiểm tra hợp lệ lịch từng ngày theo yêu cầu
+        // duyệt theo từng ngày trong tuần
         for (int dayIndex = 0; dayIndex < 6; dayIndex++) {
             String dayName = days[dayIndex];
             LocalDate workDate = request.getWeekStart().plusDays(dayIndex);
@@ -175,7 +179,7 @@ public class ScheduleValidationServiceImpl implements ScheduleValidationService 
                 doctorAssignments.get(assignment.getDoctorId()).add(assignment);
             }
 
-            // Kiểm tra trùng giờ cho từng bác sĩ trong ngày và với lịch đã tồn tại trong DB cùng ngày đó
+            // kiểm tra trùng giờ của từng bác sĩ trong cùng ngày, kể cả với lịch đã tồn tại trong DB
             for (Map.Entry<Integer, List<CreateWeeklyScheduleRequest.DoctorAssignmentRequest>> entry : doctorAssignments.entrySet()) {
                 Integer doctorId = entry.getKey();
                 List<CreateWeeklyScheduleRequest.DoctorAssignmentRequest> assignments = entry.getValue();
@@ -213,7 +217,7 @@ public class ScheduleValidationServiceImpl implements ScheduleValidationService 
                 }
             }
 
-            // Kiểm tra các ca tại cơ sở xem có rơi vào ngày nghỉ (holiday) không
+            // check có ca nào nằm vào ngày nghỉ lễ ở clinic không
             Set<Integer> holidayClinicIds = new HashSet<>();
             for (CreateWeeklyScheduleRequest.DoctorAssignmentRequest assignment : dayAssignments) {
                 Integer clinicId = assignment.getClinicId();
@@ -233,7 +237,7 @@ public class ScheduleValidationServiceImpl implements ScheduleValidationService 
                 }
             }
 
-            // Lấy danh sách cơ sở đang hoạt động ngày đó (ko nghỉ lễ)
+            // lấy danh sách các clinic active trong ngày đó
             List<Clinic> allClinics = clinicRepo.findAll();
             Set<Integer> activeClinicIds = new HashSet<>();
             for (Clinic clinic : allClinics) {
@@ -242,18 +246,17 @@ public class ScheduleValidationServiceImpl implements ScheduleValidationService 
                 }
             }
 
-            // Nếu tất cả cơ sở đều nghỉ lễ thì bỏ qua kiểm tra trong ngày (không nên có assignment nào, nếu có ở trên đã báo lỗi)
+            // nếu toàn bộ clinic đều nghỉ thì skip (trên đã báo lỗi nếu vẫn có ca)
             if (activeClinicIds.isEmpty()) {
                 continue;
             }
 
-            // Danh sách id cơ sở thực tế được assign trong ngày
             Set<Integer> clinicIdsInDay = new HashSet<>();
             for (CreateWeeklyScheduleRequest.DoctorAssignmentRequest assignment : dayAssignments) {
                 clinicIdsInDay.add(assignment.getClinicId());
             }
 
-            // Lọc ra cơ sở nào trong ngày vừa là active vừa là được assign còn tồn tại
+            // lọc ra các clinic active đã được assign ca
             Set<Integer> activeClinicIdsInDay = new HashSet<>();
             for (Integer clinicId : clinicIdsInDay) {
                 if (!holidayService.isHoliday(workDate, clinicId)) {
@@ -261,14 +264,14 @@ public class ScheduleValidationServiceImpl implements ScheduleValidationService 
                 }
             }
 
-            // Kiểm tra - phải có ít nhất 1 cơ sở hoạt động được assign, và các cơ sở được assign phải là đang hoạt động
+            // phải có ít nhất 1 clinic active assigned, và tất cả những clinic assign phải là active
             if (activeClinicIdsInDay.isEmpty()) {
                 result.addError("No active clinics are assigned on " + dayName 
                         + ". At least 1 active clinic must be assigned (clinics on holiday cannot be assigned).");
                 continue;
             }
 
-            // Kiểm tra phải đủ cả 2 cơ sở (nếu đủ active), hoặc 1 nếu hôm đó 1 cơ sở nghỉ
+            // nếu cả 2 clinic active mà chỉ assign 1 thì báo lỗi
             if (activeClinicIds.size() == 2 && activeClinicIdsInDay.size() == 1) {
                 Integer assignedClinicId = activeClinicIdsInDay.iterator().next();
                 Clinic assignedClinic = clinicsCache.get(assignedClinicId);
@@ -285,7 +288,7 @@ public class ScheduleValidationServiceImpl implements ScheduleValidationService 
                         + ". Maximum 2 clinics can be assigned.");
             }
 
-            // Kiểm tra mỗi ca sáng/chiều tại mỗi cơ sở phải có tối thiểu 2 bác sĩ
+            // kiểm tra từng ca sáng/chiều tại mỗi clinic tối thiểu 2 bác sĩ
             Map<Integer, Map<String, Set<Integer>>> clinicShiftDoctors = new HashMap<>();
             for (CreateWeeklyScheduleRequest.DoctorAssignmentRequest assignment : dayAssignments) {
                 String doctorDayKey = assignment.getDoctorId() + "_" + dayName;
@@ -313,7 +316,7 @@ public class ScheduleValidationServiceImpl implements ScheduleValidationService 
                 }
             }
 
-            // Kiểm tra mỗi ca sáng/chiều của mỗi cơ sở phải tối thiểu 2 bác sĩ
+            // kiểm tra lại số lượng bác sĩ cho từng ca
             for (Integer clinicId : clinicIdsInDay) {
                 Map<String, Set<Integer>> shiftDoctors = clinicShiftDoctors.getOrDefault(clinicId, new HashMap<>());
                 Clinic clinic = clinicsCache.get(clinicId);
@@ -334,7 +337,7 @@ public class ScheduleValidationServiceImpl implements ScheduleValidationService 
                 }
             }
 
-            // Kiểm tra mỗi chuyên khoa: phải có ở cả 2 cơ sở mỗi ngày
+            // kiểm tra mỗi specialty phải có ở cả 2 clinic trong ngày
             Set<String> allSpecialties = new HashSet<>();
             Map<String, Map<Integer, Set<Integer>>> specialtyClinicDoctors = new HashMap<>();
 
@@ -382,7 +385,7 @@ public class ScheduleValidationServiceImpl implements ScheduleValidationService 
         return result;
     }
 
-    // Hàm kiểm tra hợp lệ từng assignment giao ca/lịch cho bác sĩ cụ thể
+    // validate từng assignment giao ca cho bác sĩ
     private boolean validateAssignment(
             CreateWeeklyScheduleRequest.DoctorAssignmentRequest assignment,
             ValidationResultDto result,
@@ -397,7 +400,6 @@ public class ScheduleValidationServiceImpl implements ScheduleValidationService 
 
         boolean alreadyValidated = validatedDoctors.contains(doctorDayKey);
 
-        // Kiểm tra tồn tại và active của bác sĩ
         User doctor = doctorsCache.get(assignment.getDoctorId());
         if (doctor == null) {
             if (!alreadyValidated) {
@@ -416,7 +418,7 @@ public class ScheduleValidationServiceImpl implements ScheduleValidationService 
             return false;
         }
 
-        // Kiểm tra bác sĩ có role DOCTOR hợp lệ
+        // check phải là doctor
         List<UserRole> userRoles = userRolesCache.getOrDefault(doctor.getId(), new ArrayList<>());
         boolean isDoctor = userRoles.stream()
                 .anyMatch(ur -> {
@@ -437,7 +439,7 @@ public class ScheduleValidationServiceImpl implements ScheduleValidationService 
             return false;
         }
 
-        // Kiểm tra bác sĩ phải có phòng ban (department)
+        // check phải có department
         Department dept = doctor.getDepartment();
         if (dept == null) {
             if (!alreadyValidated) {
@@ -450,14 +452,14 @@ public class ScheduleValidationServiceImpl implements ScheduleValidationService 
 
         validatedDoctors.add(doctorDayKey);
 
-        // Kiểm tra cơ sở (clinic) có tồn tại
+        // check clinic có tồn tại
         Clinic clinic = clinicsCache.get(assignment.getClinicId());
         if (clinic == null) {
             result.addError("Clinic ID " + assignment.getClinicId() + " not found on " + dayName);
             return false;
         }
 
-        // Kiểm tra phòng (room) nếu có chỉ định phòng
+        // check room (nếu có)
         if (assignment.getRoomId() != null && assignment.getRoomId() > 0) {
             Room room = roomsCache.get(assignment.getRoomId());
             if (room == null) {

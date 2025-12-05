@@ -46,10 +46,32 @@ public class AttendanceController {
     // Chấm công vào
     @PostMapping("/check-in")
     @org.springframework.security.access.prepost.PreAuthorize("hasAnyRole('DOCTOR', 'HR', 'RECEPTION', 'ACCOUNTANT')")
-    public ResponseEntity<AttendanceResponse> checkIn(@Valid @RequestBody AttendanceCheckInRequest request) {
-        log.info("Check-in request from user {} (clinicId: {})",
+    public ResponseEntity<AttendanceResponse> checkIn(
+            @Valid @RequestBody AttendanceCheckInRequest request,
+            @AuthenticationPrincipal CurrentUser currentUser) {
+        
+        // Security: Đảm bảo userId trong request khớp với userId từ token
+        // Chỉ cho phép check-in cho chính mình (trừ HR có thể check-in cho người khác)
+        if (currentUser == null) {
+            throw new org.springframework.security.access.AccessDeniedException("User not authenticated");
+        }
+        
+        Integer authenticatedUserId = currentUser.userId();
+        boolean isHR = currentUser.roles() != null && currentUser.roles().contains("HR");
+        
+        // HR có thể check-in cho người khác, nhưng người khác chỉ được check-in cho chính mình
+        if (!isHR && !authenticatedUserId.equals(request.getUserId())) {
+            log.warn("Security violation: User {} attempted to check-in for user {}", 
+                    authenticatedUserId, request.getUserId());
+            throw new org.springframework.security.access.AccessDeniedException(
+                    "You can only check-in for yourself. User ID mismatch.");
+        }
+        
+        log.info("Check-in request from authenticated user {} for user {} (clinicId: {})",
+                authenticatedUserId,
                 request.getUserId(),
                 request.getClinicId() != null ? request.getClinicId() : "not provided, will be resolved");
+        
         AttendanceResponse response = attendanceService.checkIn(request);
         return ResponseEntity.ok(response);
     }

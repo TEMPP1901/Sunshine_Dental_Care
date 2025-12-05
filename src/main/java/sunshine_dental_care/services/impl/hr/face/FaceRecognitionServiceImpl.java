@@ -1,4 +1,4 @@
-package sunshine_dental_care.services.impl.hr;
+package sunshine_dental_care.services.impl.hr.face;
 
 import java.io.File;
 import java.io.IOException;
@@ -18,20 +18,18 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import ai.onnxruntime.OrtException;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import sunshine_dental_care.services.interfaces.hr.FaceRecognitionService;
 import sunshine_dental_care.utils.ArcFaceOnnx;
 
 @Service
-@RequiredArgsConstructor
 @Slf4j
 public class FaceRecognitionServiceImpl implements FaceRecognitionService {
 
     @Value("${app.face-recognition.model-path:models/arcface.onnx}")
     private String modelPath;
 
-    @Value("${app.face-recognition.similarity-threshold:0.8}")
+    @Value("${app.face-recognition.similarity-threshold:0.70}")
     private double similarityThreshold;
 
     private final ObjectMapper objectMapper = new ObjectMapper();
@@ -40,7 +38,6 @@ public class FaceRecognitionServiceImpl implements FaceRecognitionService {
     private Path modelFilePath;
     private boolean deleteModelOnCleanup = false;
 
-    // Khởi tạo model ArcFace khi ứng dụng khởi động
     @PostConstruct
     public void init() {
         try {
@@ -55,19 +52,18 @@ public class FaceRecognitionServiceImpl implements FaceRecognitionService {
             log.info("Model file exists: {}", modelFilePath != null && java.nio.file.Files.exists(modelFilePath));
             if (modelFilePath != null && java.nio.file.Files.exists(modelFilePath)) {
                 long fileSize = java.nio.file.Files.size(modelFilePath);
-                log.info("Model file size: {} bytes ({} MB)", fileSize, String.format("%.2f", fileSize / (1024.0 * 1024.0)));
+                log.info("Model file size: {} bytes ({} MB)", fileSize,
+                        String.format("%.2f", fileSize / (1024.0 * 1024.0)));
             }
-            
             log.info("Initializing ArcFace ONNX model from: {}", modelFilePath);
             arcFaceOnnx = new ArcFaceOnnx(modelFilePath.toString());
             log.info("=== ArcFace Model Initialization Complete ===");
         } catch (Exception e) {
             log.error("Failed to initialize ArcFace ONNX model: {}", e.getMessage(), e);
-            // Không ném exception để ứng dụng vẫn chạy, chỉ cảnh báo model chưa được load
+            // Chỉ cảnh báo khi model chưa được load
         }
     }
 
-    // Dọn dẹp tài nguyên và file tạm khi ứng dụng shutdown
     @PreDestroy
     public void cleanup() {
         try {
@@ -88,7 +84,6 @@ public class FaceRecognitionServiceImpl implements FaceRecognitionService {
         }
     }
 
-    // Trích xuất embedding khuôn mặt từ ảnh upload (MultipartFile)
     @Override
     public String extractEmbedding(MultipartFile imageFile) throws Exception {
         log.info("Extracting face embedding from image file: {}", imageFile.getOriginalFilename());
@@ -103,7 +98,8 @@ public class FaceRecognitionServiceImpl implements FaceRecognitionService {
         try {
             Files.copy(imageFile.getInputStream(), tempFile, StandardCopyOption.REPLACE_EXISTING);
             String embedding = extractEmbeddingFromPath(tempFile.toString());
-            // extractEmbeddingFromPath đã validate rồi, chỉ cần validate format JSON
+            // Chỉ cần validate format JSON ở đây (extractEmbeddingFromPath đã validate
+            // trước đó)
             validateEmbeddingFormat(embedding);
             log.info("Face embedding extracted and validated from uploaded file: {}", imageFile.getOriginalFilename());
             return embedding;
@@ -112,11 +108,9 @@ public class FaceRecognitionServiceImpl implements FaceRecognitionService {
         }
     }
 
-    // Trích xuất embedding khuôn mặt từ đường dẫn ảnh trên ổ cứng
     @Override
     public String extractEmbeddingFromPath(String imagePath) throws Exception {
         log.info("Extracting face embedding from image path: {}", imagePath);
-
         File imageFile = new File(imagePath);
         if (!imageFile.exists() || !imageFile.isFile()) {
             throw new IOException("Image file not found: " + imagePath);
@@ -125,25 +119,19 @@ public class FaceRecognitionServiceImpl implements FaceRecognitionService {
             throw new IllegalStateException("ArcFace ONNX model not loaded. Please check model path: " + modelPath);
         }
         try {
-            // Log thông tin file ảnh để debug
+            // Debug thông tin file ảnh và embedding đầu ra
             File imgFile = new File(imagePath);
             long fileSize = imgFile.length();
             log.info("Extracting embedding from image: {} (size: {} bytes)", imagePath, fileSize);
-            
             float[] embedding = arcFaceOnnx.getEmbeddingFromImagePath(imagePath);
-            
-            // Validate embedding array trước khi convert sang JSON
             validateEmbeddingArray(embedding, "extracted from image");
-            
-            // Log sample embedding values để debug
-            log.debug("Embedding sample (first 5): [{}, {}, {}, {}, {}]", 
+            log.debug("Embedding sample (first 5): [{}, {}, {}, {}, {}]",
                     embedding[0], embedding[1], embedding[2], embedding[3], embedding[4]);
-            log.debug("Embedding sample (last 5): [{}, {}, {}, {}, {}]", 
+            log.debug("Embedding sample (last 5): [{}, {}, {}, {}, {}]",
                     embedding[507], embedding[508], embedding[509], embedding[510], embedding[511]);
-            
             String embeddingJson = ArcFaceOnnx.embeddingToJson(embedding);
             validateEmbeddingFormat(embeddingJson);
-            log.info("Face embedding extracted successfully. Dimensions: {}, JSON length: {} chars, validated: OK", 
+            log.info("Face embedding extracted successfully. Dimensions: {}, JSON length: {} chars, validated: OK",
                     embedding.length, embeddingJson.length());
             return embeddingJson;
         } catch (OrtException e) {
@@ -155,11 +143,9 @@ public class FaceRecognitionServiceImpl implements FaceRecognitionService {
         }
     }
 
-    // So khớp 2 embedding khuôn mặt và xác thực, trả về kết quả (cosine similarity & status)
     @Override
     public FaceVerificationResult verifyFace(String inputEmbeddingJson, String storedEmbeddingJson) throws Exception {
         log.debug("Verifying face: comparing embeddings");
-
         if (inputEmbeddingJson == null || inputEmbeddingJson.trim().isEmpty()) {
             return new FaceVerificationResult(false, 0.0, "Input embedding is empty");
         }
@@ -168,12 +154,8 @@ public class FaceRecognitionServiceImpl implements FaceRecognitionService {
         }
         float[] inputEmbedding = parseEmbeddingJson(inputEmbeddingJson);
         float[] storedEmbedding = parseEmbeddingJson(storedEmbeddingJson);
-
-        // Validate cả 2 embedding arrays trước khi so sánh
         validateEmbeddingArray(inputEmbedding, "input embedding from check-in");
         validateEmbeddingArray(storedEmbedding, "stored embedding from registration");
-        
-        // Log chi tiết để debug
         log.info("=== FACE VERIFICATION DEBUG ===");
         log.info("Input embedding sample (first 10): [{}, {}, {}, {}, {}, {}, {}, {}, {}, {}]",
                 inputEmbedding[0], inputEmbedding[1], inputEmbedding[2], inputEmbedding[3], inputEmbedding[4],
@@ -181,8 +163,6 @@ public class FaceRecognitionServiceImpl implements FaceRecognitionService {
         log.info("Stored embedding sample (first 10): [{}, {}, {}, {}, {}, {}, {}, {}, {}, {}]",
                 storedEmbedding[0], storedEmbedding[1], storedEmbedding[2], storedEmbedding[3], storedEmbedding[4],
                 storedEmbedding[5], storedEmbedding[6], storedEmbedding[7], storedEmbedding[8], storedEmbedding[9]);
-        
-        // Tính norm và kiểm tra sự khác biệt
         double inputNorm = 0.0;
         double storedNorm = 0.0;
         double diffSum = 0.0;
@@ -199,73 +179,57 @@ public class FaceRecognitionServiceImpl implements FaceRecognitionService {
         inputNorm = Math.sqrt(inputNorm);
         storedNorm = Math.sqrt(storedNorm);
         double avgDiff = diffSum / inputEmbedding.length;
-        
-        log.info("Input embedding norm: {}, Stored embedding norm: {}", 
+        log.info("Input embedding norm: {}, Stored embedding norm: {}",
                 String.format("%.4f", inputNorm), String.format("%.4f", storedNorm));
-        log.info("Average absolute difference: {}, Different values (>0.01): {}/512", 
+        log.info("Average absolute difference: {}, Different values (>0.01): {}/512",
                 String.format("%.4f", avgDiff), diffCount);
-        
-        // Kiểm tra nếu embedding quá giống nhau (có thể là cùng một embedding)
         if (avgDiff < 0.001) {
-            log.error("WARNING: Embeddings are almost identical! Average diff: {}. This may indicate the same embedding is being compared.", avgDiff);
+            log.error(
+                    "WARNING: Embeddings are almost identical! Average diff: {}. This may indicate the same embedding is being compared.",
+                    avgDiff);
         }
-
         double similarity = calculateCosineSimilarity(inputEmbedding, storedEmbedding);
-        
         log.info("Calculated cosine similarity: {}", String.format("%.4f", similarity));
-        
-        // Validation: Kiểm tra similarity không phải là NaN hoặc Infinity
         if (Double.isNaN(similarity) || Double.isInfinite(similarity)) {
             log.error("Invalid similarity calculation result: {}", similarity);
             throw new IllegalArgumentException("Similarity calculation resulted in invalid value: " + similarity);
         }
-
-        // Đảm bảo similarity là giá trị hợp lệ (0.0 - 1.0)
+        // Kiểm tra vùng giá trị similarity
         if (similarity < 0.0 || similarity > 1.0) {
             log.error("Invalid similarity score: {}. Expected range: 0.0 - 1.0", similarity);
             throw new IllegalArgumentException("Invalid similarity score: " + similarity);
         }
-        
-       
-        // Chỉ log cảnh báo cho các pattern không hợp lý, không force adjust similarity
+        // Cảnh báo nghi vấn khi similarity và avgDiff xung đột nhau
         if (similarity >= 0.85 && similarity < 0.95 && avgDiff > 0.15) {
-            log.warn("Suspicious pattern: Similarity ({}) is high but average difference ({}) is also large. This may indicate model issue, but allowing verification to proceed.",
+            log.warn(
+                    "Suspicious pattern: Similarity ({}) is high but average difference ({}) is also large. This may indicate model issue, but allowing verification to proceed.",
                     String.format("%.4f", similarity), String.format("%.4f", avgDiff));
         }
-        
-        // Log info cho trường hợp similarity trong khoảng hợp lý (0.80-0.95) với avgDiff nhỏ (<0.03)
-        // Đây là pattern hợp lý cho cùng một người với điều kiện chụp khác nhau
         if (similarity >= 0.80 && similarity < 0.95 && avgDiff < 0.03) {
-            log.info("Similarity ({}) with avgDiff ({}) is within acceptable range for same person with different capture conditions.",
+            log.info(
+                    "Similarity ({}) with avgDiff ({}) is within acceptable range for same person with different capture conditions.",
                     String.format("%.4f", similarity), String.format("%.4f", avgDiff));
         }
-        
-        // CRITICAL CHECK: Nếu similarity cao (>0.95) nhưng embedding khác nhau đáng kể
-        // Điều này không hợp lý - cùng một người nên có avgDiff nhỏ
         if (similarity > 0.95 && avgDiff > 0.1) {
-            log.error("SUSPICIOUS: Very high similarity ({}) but large average difference ({})! This may indicate model issue or invalid embeddings being compared.",
+            log.error(
+                    "SUSPICIOUS: Very high similarity ({}) but large average difference ({})! This may indicate model issue or invalid embeddings being compared.",
                     String.format("%.4f", similarity), String.format("%.4f", avgDiff));
         }
-        
-        // CRITICAL CHECK: Nếu similarity RẤT cao (>0.98) và avgDiff RẤT nhỏ (<0.01)
-        // Có thể đang so sánh cùng một embedding hoặc embedding gần như giống hệt
         if (similarity > 0.98 && avgDiff < 0.01) {
             log.warn("Very high similarity ({}) with very small difference ({})! Embeddings are nearly identical.",
                     String.format("%.4f", similarity), String.format("%.4f", avgDiff));
         }
-
         boolean verified = similarity >= similarityThreshold;
-
         String message = verified
                 ? String.format("Face verified with similarity: %.4f", similarity)
-                : String.format("Face verification failed. Similarity: %.4f (threshold: %.4f)", similarity, similarityThreshold);
-
+                : String.format("Face verification failed. Similarity: %.4f (threshold: %.4f)", similarity,
+                        similarityThreshold);
         log.info("Face verification result: verified={}, similarity={}, threshold={}, message={}",
                 verified, String.format("%.4f", similarity), String.format("%.4f", similarityThreshold), message);
-
-        // Log cảnh báo cho các trường hợp đáng ngờ
+        // Cảnh báo các trường hợp similarity thấp hoặc khó xác thực
         if (similarity < 0.1) {
-            log.warn("Very low similarity score ({}). This indicates a completely different person or invalid face data.",
+            log.warn(
+                    "Very low similarity score ({}). This indicates a completely different person or invalid face data.",
                     String.format("%.4f", similarity));
         } else if (similarity >= 0.1 && similarity < 0.5) {
             log.warn("Low similarity score ({}). This is likely a different person, not just lighting/angle issues.",
@@ -274,11 +238,10 @@ public class FaceRecognitionServiceImpl implements FaceRecognitionService {
             log.warn("Similarity score ({}) is below threshold ({}). Face does not match registered face.",
                     String.format("%.4f", similarity), String.format("%.4f", similarityThreshold));
         }
-        
         return new FaceVerificationResult(verified, similarity, message);
     }
 
-    // Kiểm tra định dạng chuỗi embedding phải là JSON array
+    // Kiểm tra định dạng embedding phải là JSON array
     private void validateEmbeddingFormat(String embeddingJson) throws IllegalArgumentException {
         if (embeddingJson == null || embeddingJson.trim().isEmpty()) {
             throw new IllegalArgumentException("Embedding is null or empty");
@@ -288,26 +251,23 @@ public class FaceRecognitionServiceImpl implements FaceRecognitionService {
             throw new IllegalArgumentException("Embedding must be a JSON array format: [0.123, 0.456, ...]");
         }
     }
-    
-    // Validate embedding array: kiểm tra không phải mảng rỗng, không có NaN/Infinity, có giá trị hợp lệ
+
+    // Validate embedding array: check dimensions, giá trị NaN/Infinity, toàn số 0
     private void validateEmbeddingArray(float[] embedding, String context) throws IllegalArgumentException {
         if (embedding == null) {
             throw new IllegalArgumentException("Embedding array is null (" + context + ")");
         }
         if (embedding.length != 512) {
             throw new IllegalArgumentException(
-                String.format("Invalid embedding dimensions (%s). Expected 512, got %d", context, embedding.length));
+                    String.format("Invalid embedding dimensions (%s). Expected 512, got %d", context,
+                            embedding.length));
         }
-        
-        // Kiểm tra embedding không phải là mảng toàn số 0
         boolean allZeros = true;
         boolean hasNaN = false;
         boolean hasInfinity = false;
         double sumSquared = 0.0;
-        
         for (int i = 0; i < embedding.length; i++) {
             float value = embedding[i];
-            
             if (Float.isNaN(value)) {
                 hasNaN = true;
                 allZeros = false;
@@ -319,35 +279,35 @@ public class FaceRecognitionServiceImpl implements FaceRecognitionService {
                 sumSquared += value * value;
             }
         }
-        
         if (allZeros) {
-            log.error("Invalid embedding (%s): array contains only zeros. This indicates no face was detected or extraction failed.", context);
-            throw new IllegalArgumentException("Embedding array contains only zeros (" + context + "). No face detected or extraction failed.");
+            log.error(
+                    "Invalid embedding (%s): array contains only zeros. This indicates no face was detected or extraction failed.",
+                    context);
+            throw new IllegalArgumentException(
+                    "Embedding array contains only zeros (" + context + "). No face detected or extraction failed.");
         }
-        
         if (hasNaN) {
             log.error("Invalid embedding (%s): array contains NaN values.", context);
             throw new IllegalArgumentException("Embedding array contains NaN values (" + context + ")");
         }
-        
         if (hasInfinity) {
             log.error("Invalid embedding (%s): array contains Infinity values.", context);
             throw new IllegalArgumentException("Embedding array contains Infinity values (" + context + ")");
         }
-        
-        // Kiểm tra norm của vector (sau khi normalize, norm nên gần bằng 1.0)
+        // Kiểm tra norm bất thường
         double norm = Math.sqrt(sumSquared);
         if (norm < 0.1) {
-            log.warn("Embedding (%s) has very low norm: {}. This may indicate poor quality face detection.", context, norm);
+            log.warn("Embedding (%s) has very low norm: {}. This may indicate poor quality face detection.", context,
+                    norm);
         }
         if (norm > 10.0) {
             log.warn("Embedding (%s) has very high norm: {}. This may indicate normalization issue.", context, norm);
         }
-        
-        log.debug("Embedding validation passed (%s): dimensions=512, norm={}, hasValidValues=true", context, String.format("%.4f", norm));
+        log.debug("Embedding validation passed (%s): dimensions=512, norm={}, hasValidValues=true", context,
+                String.format("%.4f", norm));
     }
 
-    // Parse chuỗi embedding JSON và kiểm tra dimension phải đúng 512
+    // Parse JSON array sang float[] và kiểm tra độ dài
     private float[] parseEmbeddingJson(String json) throws Exception {
         validateEmbeddingFormat(json);
         try {
@@ -364,7 +324,7 @@ public class FaceRecognitionServiceImpl implements FaceRecognitionService {
         }
     }
 
-    // Tính cosine similarity giữa hai vector embedding khuôn mặt
+    // Tính cosine similarity hai vector embedding
     private double calculateCosineSimilarity(float[] vec1, float[] vec2) {
         if (vec1.length != vec2.length) {
             throw new IllegalArgumentException("Vectors must have same length");
@@ -384,7 +344,7 @@ public class FaceRecognitionServiceImpl implements FaceRecognitionService {
         return dotProduct / denominator;
     }
 
-    // Tải model ArcFace từ classpath hoặc file hệ thống, copy ra file tạm nếu cần
+    // Tải model từ file hệ thống hoặc classpath, copy ra file tạm nếu cần
     private void resolveModelFile() throws IOException {
         if (modelPath == null || modelPath.trim().isEmpty()) {
             log.warn("app.face-recognition.model-path is empty");

@@ -1,4 +1,4 @@
-package sunshine_dental_care.services.impl.hr;
+package sunshine_dental_care.services.impl.hr.schedule;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -21,10 +21,11 @@ import sunshine_dental_care.dto.hrDTO.ValidationResultDto;
 @Slf4j
 public class ScheduleHeuristicsValidator {
 
-    private static final double WORKLOAD_IMBALANCE_THRESHOLD = 0.20; // 20% chênh lệch
+    // ngưỡng lệch % ca làm cho phép giữa các bác sĩ
+    private static final double WORKLOAD_IMBALANCE_THRESHOLD = 0.20;
+    // tối thiểu số bác sĩ/phòng khám/ngày
     private static final int MIN_DOCTORS_PER_CLINIC_PER_DAY = 1;
 
-    // Phương thức xác thực lịch theo các tiêu chí heuristic (không chặn lưu nếu cảnh báo)
     public ValidationResultDto validate(CreateWeeklyScheduleRequest request, String userDescription) {
         ValidationResultDto result = new ValidationResultDto();
         result.setValid(true);
@@ -33,14 +34,11 @@ public class ScheduleHeuristicsValidator {
             return result;
         }
 
-        // Kiểm tra độ bao phủ phòng khám
-        checkClinicCoverage(request, result);
+        checkClinicCoverage(request, result);             // cảnh báo nếu có phòng khám không có bác sĩ trực ca
+        checkWorkloadDistribution(request, result);       // cảnh báo nếu phân phối số ca không đều
 
-        // Kiểm tra tính công bằng phân ca
-        checkWorkloadDistribution(request, result);
-
-        // Kiểm tra yêu cầu về tính luân phiên nếu user đề cập
-        if (userDescription != null && (userDescription.toLowerCase().contains("xen kẽ") 
+        // kiểm tra yêu cầu luân phiên nếu user có đề cập
+        if (userDescription != null && (userDescription.toLowerCase().contains("xen kẽ")
                 || userDescription.toLowerCase().contains("luân phiên")
                 || userDescription.toLowerCase().contains("rotation"))) {
             checkRotation(request, result);
@@ -49,11 +47,11 @@ public class ScheduleHeuristicsValidator {
         return result;
     }
 
-    // Kiểm tra: Có ngày nào phòng khám không có bác sĩ làm việc không?
     private void checkClinicCoverage(CreateWeeklyScheduleRequest request, ValidationResultDto result) {
-        Map<String, List<CreateWeeklyScheduleRequest.DoctorAssignmentRequest>> dailyAssignments = 
+        Map<String, List<CreateWeeklyScheduleRequest.DoctorAssignmentRequest>> dailyAssignments =
             request.getDailyAssignments();
 
+        // tập hợp tất cả clinicId thực sự được xếp ca
         Set<Integer> allClinicIds = new HashSet<>();
         for (List<CreateWeeklyScheduleRequest.DoctorAssignmentRequest> assignments : dailyAssignments.values()) {
             for (CreateWeeklyScheduleRequest.DoctorAssignmentRequest assignment : assignments) {
@@ -68,6 +66,7 @@ public class ScheduleHeuristicsValidator {
             return;
         }
 
+        // với từng ngày, kiểm tra đủ bác sĩ cho mỗi clinic
         for (Map.Entry<String, List<CreateWeeklyScheduleRequest.DoctorAssignmentRequest>> entry : dailyAssignments.entrySet()) {
             String day = entry.getKey();
             List<CreateWeeklyScheduleRequest.DoctorAssignmentRequest> assignments = entry.getValue();
@@ -79,7 +78,7 @@ public class ScheduleHeuristicsValidator {
                     clinicDoctorCount.put(clinicId, clinicDoctorCount.getOrDefault(clinicId, 0) + 1);
                 }
             }
-
+            // cảnh báo nếu có clinic không bác sĩ trong ngày này
             for (Integer clinicId : allClinicIds) {
                 int doctorCount = clinicDoctorCount.getOrDefault(clinicId, 0);
                 if (doctorCount < MIN_DOCTORS_PER_CLINIC_PER_DAY) {
@@ -92,9 +91,9 @@ public class ScheduleHeuristicsValidator {
         }
     }
 
-    // Kiểm tra: Phân phối số ca làm cho bác sĩ có chênh lệch lớn không?
+    // cảnh báo nếu phân công ca chênh lệch nhiều giữa các bác sĩ
     private void checkWorkloadDistribution(CreateWeeklyScheduleRequest request, ValidationResultDto result) {
-        Map<String, List<CreateWeeklyScheduleRequest.DoctorAssignmentRequest>> dailyAssignments = 
+        Map<String, List<CreateWeeklyScheduleRequest.DoctorAssignmentRequest>> dailyAssignments =
             request.getDailyAssignments();
 
         Map<Integer, Integer> doctorShiftCount = new HashMap<>();
@@ -133,6 +132,7 @@ public class ScheduleHeuristicsValidator {
             }
         }
 
+        // cảnh báo gap workload lớn nhất - nhỏ nhất quá cao
         Optional<Map.Entry<Integer, Integer>> maxEntry = doctorShiftCount.entrySet().stream()
             .max(Map.Entry.comparingByValue());
         Optional<Map.Entry<Integer, Integer>> minEntry = doctorShiftCount.entrySet().stream()
@@ -153,9 +153,9 @@ public class ScheduleHeuristicsValidator {
         }
     }
 
-    // Kiểm tra: Một bác sĩ có nhiều ngày nghỉ liền nhau không (không đảm bảo tính luân phiên)?
+    // cảnh báo bác sĩ có nhiều ngày nghỉ liền nhau (không luân phiên)
     private void checkRotation(CreateWeeklyScheduleRequest request, ValidationResultDto result) {
-        Map<String, List<CreateWeeklyScheduleRequest.DoctorAssignmentRequest>> dailyAssignments = 
+        Map<String, List<CreateWeeklyScheduleRequest.DoctorAssignmentRequest>> dailyAssignments =
             request.getDailyAssignments();
 
         Set<Integer> allDoctorIds = new HashSet<>();
@@ -173,9 +173,9 @@ public class ScheduleHeuristicsValidator {
             List<String> offDays = new ArrayList<>();
 
             for (String day : dayOrder) {
-                List<CreateWeeklyScheduleRequest.DoctorAssignmentRequest> assignments = 
+                List<CreateWeeklyScheduleRequest.DoctorAssignmentRequest> assignments =
                     dailyAssignments.getOrDefault(day, Collections.emptyList());
-                
+
                 boolean isWorking = assignments.stream()
                     .anyMatch(a -> a.getDoctorId() != null && a.getDoctorId().equals(doctorId));
 
@@ -184,6 +184,7 @@ public class ScheduleHeuristicsValidator {
                 }
             }
 
+            // nếu nghỉ >=2 ngày, check xem có chuỗi nghỉ liên tiếp >=3 không
             if (offDays.size() >= 2) {
                 int maxConsecutiveOffDays = findMaxConsecutiveDays(offDays, dayOrder);
                 if (maxConsecutiveOffDays >= 3) {
@@ -196,15 +197,13 @@ public class ScheduleHeuristicsValidator {
         }
     }
 
-    // Tìm số ngày nghỉ liên tiếp lớn nhất cho một bác sĩ
+    // trả về số ngày nghỉ liên tiếp lớn nhất của 1 bác sĩ
     private int findMaxConsecutiveDays(List<String> offDays, String[] dayOrder) {
         if (offDays.isEmpty()) {
             return 0;
         }
-
         int maxConsecutive = 1;
         int currentConsecutive = 1;
-
         for (int i = 0; i < dayOrder.length; i++) {
             if (offDays.contains(dayOrder[i])) {
                 if (i < dayOrder.length - 1 && offDays.contains(dayOrder[i + 1])) {
@@ -217,7 +216,6 @@ public class ScheduleHeuristicsValidator {
                 currentConsecutive = 1;
             }
         }
-
         return maxConsecutive;
     }
 }

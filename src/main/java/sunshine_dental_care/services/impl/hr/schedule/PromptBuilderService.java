@@ -1,4 +1,4 @@
-package sunshine_dental_care.services.impl.hr;
+package sunshine_dental_care.services.impl.hr.schedule;
 
 import java.time.LocalDate;
 import java.util.ArrayList;
@@ -32,7 +32,7 @@ public class PromptBuilderService {
     private final DoctorScheduleRepo doctorScheduleRepo;
     private final HolidayService holidayService;
 
-    // Tạo prompt chính cho AI dựa trên mô tả và ngày bắt đầu tuần
+    // Build prompt cho AI dựa trên mô tả người dùng và ngày bắt đầu tuần
     public String buildEnhancedPrompt(String userDescription, LocalDate weekStart) {
         StringBuilder prompt = new StringBuilder();
         appendHeader(prompt);
@@ -76,7 +76,7 @@ public class PromptBuilderService {
         prompt.append("\n");
     }
 
-    // BLOCK 0: DATA RESOURCES
+    // Lấy resource data cơ bản cho prompt AI (doctors, clinics, holidays, workingDays...)
     private List<String> appendDataResources(StringBuilder prompt, LocalDate weekStart) {
         prompt.append("=== BLOCK 0: DATA RESOURCES ===\n");
 
@@ -93,7 +93,6 @@ public class PromptBuilderService {
         List<Integer> doctorIds = doctors.stream().map(User::getId).sorted().collect(Collectors.toList());
         prompt.append(doctorIds.toString()).append("\n\n");
 
-        // Chỉ lấy active clinics để hiển thị - clinic inactive do holiday sẽ không hiển thị
         List<sunshine_dental_care.entities.Clinic> activeClinics = getActiveClinics();
         List<sunshine_dental_care.entities.Room> rooms = getActiveRooms();
         Map<Integer, List<sunshine_dental_care.entities.Room>> roomsByClinic = rooms.stream()
@@ -119,7 +118,7 @@ public class PromptBuilderService {
         prompt.append("If a clinic is NOT in the list above, it means that clinic is INACTIVE and you CANNOT assign to it.\n");
         prompt.append("\n");
 
-        // Check holiday cho tất cả clinics (kể cả inactive) để cảnh báo AI
+        // Duyệt tất cả clinic để thống kê ngày holiday, dùng để AI không phân công nhầm
         List<sunshine_dental_care.entities.Clinic> allClinics = clinicRepo.findAll();
         prompt.append("=== CRITICAL: CLINIC HOLIDAYS (MANDATORY - DO NOT SCHEDULE) ===\n");
         prompt.append("ABSOLUTE RULE: DO NOT SCHEDULE ANY DOCTOR FOR ANY SHIFT AT THESE CLINICS ON THESE DATES:\n");
@@ -131,7 +130,6 @@ public class PromptBuilderService {
         prompt.append("- If a clinic has holiday on a date, you CANNOT and MUST NOT assign anyone to that clinic on that date.\n");
         prompt.append("- Example: If Clinic 1 has holiday from Dec 29 to Jan 2, it is INACTIVE on Dec 29-30-31 and Jan 1-2, but ACTIVE on Dec 28 and Jan 3+.\n\n");
         boolean hasHolidays = false;
-        // Check holiday cho tất cả clinics (kể cả inactive) để hiển thị đầy đủ
         for (var clinic : allClinics) {
             List<String> clinicHolidays = new ArrayList<>();
             for (int i = 0; i < 6; i++) {
@@ -145,7 +143,6 @@ public class PromptBuilderService {
             if (!clinicHolidays.isEmpty()) {
                 hasHolidays = true;
                 boolean isActive = activeClinics.stream().anyMatch(c -> c.getId().equals(clinic.getId()));
-                // Check if clinic has holiday on any day of the week
                 boolean hasHolidayThisWeek = false;
                 for (int i = 0; i < 6; i++) {
                     LocalDate date = weekStart.plusDays(i);
@@ -156,7 +153,6 @@ public class PromptBuilderService {
                 }
                 
                 if (hasHolidayThisWeek && !isActive) {
-                    // Clinic is inactive due to holiday this week
                     prompt.append(String.format("Clinic ID %d (%s) - INACTIVE due to holidays this week\n", 
                             clinic.getId(), clinic.getClinicName()));
                     prompt.append(String.format("   HOLIDAY DATES THIS WEEK: %s\n", String.join(", ", clinicHolidays)));
@@ -164,14 +160,12 @@ public class PromptBuilderService {
                     prompt.append(String.format("   → DO NOT assign ANY doctor to Clinic %d on these holiday dates.\n", clinic.getId()));
                     prompt.append(String.format("   → You CANNOT assign to this clinic because it is inactive during holidays.\n"));
                 } else if (hasHolidayThisWeek && isActive) {
-                    // Clinic is active but has some holidays this week (holiday might be on specific days only)
                     prompt.append(String.format(" Clinic ID %d (%s) - ACTIVE but has holidays on specific dates\n", 
                             clinic.getId(), clinic.getClinicName()));
                     prompt.append(String.format("   HOLIDAY DATES THIS WEEK: %s\n", String.join(", ", clinicHolidays)));
                     prompt.append(String.format("   → DO NOT assign ANY doctor to Clinic %d on these specific holiday dates.\n", clinic.getId()));
                     prompt.append(String.format("   → You CAN assign doctors to Clinic %d on other dates (non-holiday dates) this week.\n", clinic.getId()));
                 } else {
-                    // Clinic has holidays but not this week
                     prompt.append(String.format(" Clinic ID %d (%s) - Has holidays but NOT this week\n", 
                             clinic.getId(), clinic.getClinicName()));
                     prompt.append(String.format("   → This clinic is available for scheduling this week.\n"));
@@ -185,12 +179,10 @@ public class PromptBuilderService {
 
         LocalDate weekEnd = weekStart.plusDays(5);
         String[] dayNames = { "monday", "tuesday", "wednesday", "thursday", "friday", "saturday" };
-
         List<String> workingDays = new ArrayList<>();
         prompt.append("WORKING DAYS (MUST SCHEDULE - Only days with at least 1 active clinic):\n");
         for (int i = 0; i < dayNames.length; i++) {
             LocalDate date = weekStart.plusDays(i);
-            // Check if ALL clinics have holiday on this day
             boolean allClinicsOnHoliday = true;
             for (sunshine_dental_care.entities.Clinic clinic : allClinics) {
                 if (!holidayService.isHoliday(date, clinic.getId())) {
@@ -198,19 +190,15 @@ public class PromptBuilderService {
                     break;
                 }
             }
-            
-            // Only add to workingDays if at least one clinic is active (not all on holiday)
             if (!allClinicsOnHoliday) {
                 workingDays.add(dayNames[i]);
                 String dayName = dayNames[i].toUpperCase();
                 String emphasis = "";
-                // Special emphasis for Friday/Saturday
                 if (dayName.equals("FRIDAY") || dayName.equals("SATURDAY")) {
                     emphasis += " - WORKING DAY (MUST schedule)";
                 }
                 prompt.append(String.format("  - %s (%s)%s\n", dayName, date, emphasis));
             } else {
-                // All clinics on holiday - skip this day
                 String dayName = dayNames[i].toUpperCase();
                 prompt.append(String.format("  - %s (%s) - SKIPPED (ALL clinics on holiday - DO NOT create schedule for this day)\n", dayName, date));
             }
@@ -253,7 +241,7 @@ public class PromptBuilderService {
         return workingDays;
     }
 
-    // BLOCK 1: HARD CONSTRAINTS
+    // Yêu cầu cứng của lịch (luật bắt buộc)
     private void appendHardConstraints(StringBuilder prompt) {
         prompt.append("=== BLOCK 1: HARD CONSTRAINTS (MUST FOLLOW) ===\n");
         prompt.append("Violating these = REJECTION\n\n");
@@ -281,7 +269,7 @@ public class PromptBuilderService {
 
     }
 
-    // BLOCK 2: SOFT CONSTRAINTS
+    // Yêu cầu mềm (ưu tiên nếu có thể)
     private void appendSoftConstraints(StringBuilder prompt) {
         prompt.append("=== BLOCK 2: SOFT CONSTRAINTS (PREFERRED) ===\n");
         prompt.append("These improve quality but won't cause rejection if violated.\n");
@@ -300,7 +288,7 @@ public class PromptBuilderService {
         prompt.append("   - Exception: If USER REQUEST specifies different distribution, follow that request.\n\n");
     }
 
-    // BLOCK 3: FORBIDDEN MISTAKES
+    // Các lỗi cấm tuyệt đối
     private void appendForbiddenMistakes(StringBuilder prompt) {
         prompt.append("=== BLOCK 3: FORBIDDEN MISTAKES ===\n");
         prompt.append("Common errors that cause rejection:\n\n");
@@ -317,7 +305,7 @@ public class PromptBuilderService {
         prompt.append("8. DOUBLE BOOKING: Assigning the same doctor to multiple slots at the same time.\n\n");
     }
 
-    // BLOCK 4: OUTPUT FORMAT
+    // Chỉ cần ví dụ output format JSON và chú thích giải thích mẫu nào là đúng 
     private void appendOutputFormat(StringBuilder prompt, List<String> workingDays) {
         prompt.append("=== BLOCK 4: OUTPUT FORMAT ===\n");
         prompt.append("Return valid JSON only.\n\n");
@@ -330,8 +318,6 @@ public class PromptBuilderService {
         prompt.append("  \"dailyAssignments\": {\n");
 
         if (workingDays != null && !workingDays.isEmpty()) {
-            // Show complete example for ALL working days to make pattern clear
-            // Especially important for Friday/Saturday
             boolean hasFriday = workingDays.stream().anyMatch(d -> d.equalsIgnoreCase("friday"));
             boolean hasSaturday = workingDays.stream().anyMatch(d -> d.equalsIgnoreCase("saturday"));
 
@@ -341,29 +327,24 @@ public class PromptBuilderService {
 
                 prompt.append("    \"").append(day).append("\": [\n");
 
-                // Show full example for first day, and also for Friday/Saturday if they exist
-                // This ensures AI sees the pattern for ALL days
+                // Ghi chi tiết ví dụ cho ngày đầu tuần và thứ 6, 7 nếu có
                 if (i == 0 || (isFridayOrSaturday && (hasFriday || hasSaturday))) {
                     if (isFridayOrSaturday) {
                         prompt.append("      // ").append(day.toUpperCase())
                                 .append(" IS A WORKING DAY - MUST INCLUDE\n");
                     }
-                    // Morning shift - Clinic 1 (2 doctors minimum)
                     prompt.append(
                             "      {\"doctorId\": 21, \"clinicId\": 1, \"roomId\": 1, \"startTime\": \"08:00\", \"endTime\": \"11:00\"},\n");
                     prompt.append(
                             "      {\"doctorId\": 22, \"clinicId\": 1, \"roomId\": 2, \"startTime\": \"08:00\", \"endTime\": \"11:00\"},\n");
-                    // Morning shift - Clinic 2 (2 doctors minimum)
                     prompt.append(
                             "      {\"doctorId\": 23, \"clinicId\": 2, \"roomId\": 5, \"startTime\": \"08:00\", \"endTime\": \"11:00\"},\n");
                     prompt.append(
                             "      {\"doctorId\": 24, \"clinicId\": 2, \"roomId\": 6, \"startTime\": \"08:00\", \"endTime\": \"11:00\"},\n");
-                    // Afternoon shift - Clinic 1 (2 doctors minimum)
                     prompt.append(
                             "      {\"doctorId\": 25, \"clinicId\": 1, \"roomId\": 1, \"startTime\": \"13:00\", \"endTime\": \"18:00\"},\n");
                     prompt.append(
                             "      {\"doctorId\": 26, \"clinicId\": 1, \"roomId\": 2, \"startTime\": \"13:00\", \"endTime\": \"18:00\"},\n");
-                    // Afternoon shift - Clinic 2 (2 doctors minimum)
                     prompt.append(
                             "      {\"doctorId\": 27, \"clinicId\": 2, \"roomId\": 5, \"startTime\": \"13:00\", \"endTime\": \"18:00\"},\n");
                     prompt.append(
@@ -388,6 +369,7 @@ public class PromptBuilderService {
         prompt.append("}\n\n");
     }
 
+    // Nhấn mạnh logic kiểm tra trước khi tạo JSON cuối cùng
     private void appendThoughtProcess(StringBuilder prompt, List<String> workingDays) {
         prompt.append("=== BLOCK 5: LOGIC STEPS ===\n");
         prompt.append("1. Read USER REQUEST first - understand what the user wants EXACTLY:\n");
@@ -460,7 +442,6 @@ public class PromptBuilderService {
             boolean hasFriday = workingDays.stream().anyMatch(d -> d.equalsIgnoreCase("friday"));
             boolean hasSaturday = workingDays.stream().anyMatch(d -> d.equalsIgnoreCase("saturday"));
 
-            // Special check for Friday/Saturday
             if (hasFriday || hasSaturday) {
                 if (hasFriday) {
                     prompt.append("   b. Do you have 'friday' key? If NO, add it.\n");
@@ -513,6 +494,7 @@ public class PromptBuilderService {
         prompt.append("        - CRITICAL: Count the days user mentioned. DO NOT add extra days off.\n\n");
     }
 
+    // Lệnh cuối kiểm tra đầy đủ trước khi trả JSON
     private void appendFinalInstructions(StringBuilder prompt, List<String> workingDays) {
         prompt.append("=== FINAL INSTRUCTION ===\n");
         prompt.append("Generate the JSON now. Priority order:\n");
@@ -559,7 +541,7 @@ public class PromptBuilderService {
         }
     }
 
-    // Lấy danh sách bác sĩ đang hoạt động
+    // Trả về danh sách bác sĩ đang hoạt động
     private List<User> getActiveDoctors() {
         return userRoleRepo.findAll().stream()
                 .filter(ur -> ur.getIsActive() && ur.getRole() != null && ur.getRole().getId() == 3)
@@ -569,19 +551,19 @@ public class PromptBuilderService {
                 .collect(Collectors.toList());
     }
 
-    // Lấy danh sách phòng khám đang hoạt động
+    // Trả về danh sách phòng khám đang hoạt động
     private List<sunshine_dental_care.entities.Clinic> getActiveClinics() {
         return clinicRepo.findAll().stream()
                 .filter(c -> c.getIsActive() != null && c.getIsActive())
                 .collect(Collectors.toList());
     }
 
-    // Lấy danh sách các phòng đang hoạt động
+    // Trả về danh sách phòng đang hoạt động
     private List<sunshine_dental_care.entities.Room> getActiveRooms() {
         return roomRepo.findByIsActiveTrueOrderByRoomNameAsc();
     }
 
-    // Lấy map doctorId -> list chuyên môn đang hoạt động của bác sĩ
+    // Map doctorId -> list chuyên môn của bác sĩ (chỉ chuyên môn đang active)
     private Map<Integer, List<String>> getDoctorSpecialtiesMap(List<User> doctors) {
         if (doctors.isEmpty())
             return new HashMap<>();
@@ -595,7 +577,7 @@ public class PromptBuilderService {
         return result;
     }
 
-    // Lấy map doctorId -> các ngày nghỉ của bác sĩ trong tuần đó (theo ca)
+    // Map doctorId -> các ngày nghỉ của bác sĩ trong tuần đó (bao gồm loại ca)
     private Map<Integer, Map<String, String>> getDoctorLeaveDaysWithShiftMap(List<User> doctors, LocalDate weekStart,
             LocalDate weekEnd,
             String[] dayNames) {
@@ -607,11 +589,10 @@ public class PromptBuilderService {
         Map<Integer, Map<String, String>> result = new HashMap<>();
         for (var leave : leaveRequests) {
             Integer doctorId = leave.getUser().getId();
-            String shiftType = leave.getShiftType(); // MORNING, AFTERNOON, FULL_DAY, or null
+            String shiftType = leave.getShiftType();
 
             for (LocalDate date = leave.getStartDate(); !date.isAfter(leave.getEndDate()); date = date.plusDays(1)) {
                 if (!date.isBefore(weekStart) && !date.isAfter(weekEnd)) {
-                    // Tìm dayName tương ứng với date
                     for (int i = 0; i < dayNames.length; i++) {
                         if (weekStart.plusDays(i).equals(date)) {
                             String dayName = dayNames[i];

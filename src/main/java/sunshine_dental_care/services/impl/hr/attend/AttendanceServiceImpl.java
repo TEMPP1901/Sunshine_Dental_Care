@@ -1,4 +1,4 @@
-package sunshine_dental_care.services.impl.hr;
+package sunshine_dental_care.services.impl.hr.attend;
 
 import java.math.BigDecimal;
 import java.time.Duration;
@@ -45,7 +45,9 @@ import sunshine_dental_care.repositories.auth.UserRepo;
 import sunshine_dental_care.repositories.auth.UserRoleRepo;
 import sunshine_dental_care.repositories.hr.AttendanceRepository;
 import sunshine_dental_care.repositories.hr.EmployeeFaceProfileRepo;
-import sunshine_dental_care.services.impl.hr.AttendanceVerificationService.VerificationResult;
+import sunshine_dental_care.services.impl.hr.ClinicResolutionService;
+import sunshine_dental_care.services.impl.hr.wifi.WiFiHelperService;
+import sunshine_dental_care.services.impl.hr.attend.AttendanceVerificationService.VerificationResult;
 import sunshine_dental_care.services.impl.notification.NotificationService;
 import sunshine_dental_care.services.interfaces.hr.AttendanceService;
 import sunshine_dental_care.services.interfaces.hr.FaceRecognitionService.FaceVerificationResult;
@@ -72,7 +74,6 @@ public class AttendanceServiceImpl implements AttendanceService {
     private final NotificationService notificationService;
     private final ShiftService shiftService;
 
-    // Helpers
     private final AttendanceCalculationHelper calculationHelper;
     private final AttendanceValidationHelper validationHelper;
 
@@ -89,12 +90,10 @@ public class AttendanceServiceImpl implements AttendanceService {
         LocalDate today = LocalDate.now();
         validationHelper.validateCheckInAllowed(today);
         attendanceStatusCalculator.validateUserRoleForAttendance(request.getUserId());
-
         Integer clinicId = clinicResolutionService.resolveClinicId(request.getUserId(), request.getClinicId());
 
         List<UserRole> userRoles = userRoleRepo.findActiveByUserId(request.getUserId());
-        boolean isDoctor = userRoles != null && userRoles.stream()
-                .anyMatch(ur -> attendanceStatusCalculator.isDoctorRole(ur));
+        boolean isDoctor = userRoles != null && userRoles.stream().anyMatch(ur -> attendanceStatusCalculator.isDoctorRole(ur));
 
         LocalTime currentTime = LocalTime.now(ZoneId.systemDefault());
         Instant checkInTime = Instant.now();
@@ -106,7 +105,6 @@ public class AttendanceServiceImpl implements AttendanceService {
         if (isDoctor) {
             shiftType = shiftService.determineShiftForDoctor(currentTime);
             shiftService.validateCheckInTime(shiftType, currentTime);
-
             validationHelper.validateUniqueCheckInForDoctor(request.getUserId(), clinicId, today, shiftType);
 
             String finalShiftType = shiftType;
@@ -157,12 +155,11 @@ public class AttendanceServiceImpl implements AttendanceService {
         }
         attendance.setFaceMatchScore(BigDecimal.valueOf(faceResult.getSimilarityScore()));
 
-        // Calculate Late Minutes
+        // Tính số phút đi trễ
         LocalTime expectedStartTime = EMPLOYEE_START_TIME;
         if (isDoctor && shiftType != null) {
             Optional<DoctorSchedule> matchedSchedule = shiftService.findMatchingSchedule(
                     request.getUserId(), clinicId, today, shiftType);
-
             if (matchedSchedule.isPresent()) {
                 DoctorSchedule schedule = matchedSchedule.get();
                 shiftService.activateSchedule(schedule);
@@ -175,12 +172,11 @@ public class AttendanceServiceImpl implements AttendanceService {
         }
 
         attendance.setLateMinutes(calculationHelper.calculateLateMinutes(checkInLocalTime, expectedStartTime));
-
         boolean faceVerified = faceResult.isVerified();
         boolean wifiValid = wifiResult.isValid();
         attendance.setVerificationStatus(faceVerified && wifiValid ? "VERIFIED" : "FAILED");
 
-        // Determine Attendance Status
+        // Xác định trạng thái điểm danh 
         String currentStatus = attendance.getAttendanceStatus();
         String currentNote = attendance.getNote();
         boolean hasApprovedExplanation = currentNote != null && currentNote.contains("[APPROVED]");
@@ -192,8 +188,7 @@ public class AttendanceServiceImpl implements AttendanceService {
         if (currentStatus == null || !isApprovedStatus) {
             String attendanceStatus = (isDoctor && shiftType != null)
                     ? determineAttendanceStatusForDoctor(request.getUserId(), clinicId, today, checkInTime, shiftType)
-                    : attendanceStatusCalculator.determineAttendanceStatus(request.getUserId(), clinicId, today,
-                            checkInTime);
+                    : attendanceStatusCalculator.determineAttendanceStatus(request.getUserId(), clinicId, today, checkInTime);
             attendance.setAttendanceStatus(attendanceStatus);
         }
         attendance = attendanceRepo.save(attendance);
@@ -240,8 +235,7 @@ public class AttendanceServiceImpl implements AttendanceService {
 
         WiFiHelperService.WiFiInfo wifiInfo = wifiHelperService.resolveWiFiInfo(request.getSsid(), request.getBssid());
         VerificationResult verification = attendanceVerificationService.verify(
-                attendance.getUserId(), attendance.getClinicId(), request.getFaceEmbedding(), wifiInfo.getSsid(),
-                wifiInfo.getBssid());
+                attendance.getUserId(), attendance.getClinicId(), request.getFaceEmbedding(), wifiInfo.getSsid(), wifiInfo.getBssid());
 
         EmployeeFaceProfile faceProfile = verification.getFaceProfile();
         FaceVerificationResult faceResult = verification.getFaceResult();
@@ -250,7 +244,7 @@ public class AttendanceServiceImpl implements AttendanceService {
         Instant checkOutTime = Instant.now();
         attendance.setCheckOutTime(checkOutTime);
 
-        // Calculate Work Hours
+        // Tính thời gian làm việc thực tế
         LocalTime checkInLocalTime = attendance.getCheckInTime().atZone(ZoneId.systemDefault()).toLocalTime();
         LocalTime checkOutLocalTime = checkOutTime.atZone(ZoneId.systemDefault()).toLocalTime();
 
@@ -262,14 +256,13 @@ public class AttendanceServiceImpl implements AttendanceService {
             Optional<DoctorSchedule> matchedSchedule = shiftService.findMatchingSchedule(
                     attendance.getUserId(), attendance.getClinicId(), attendance.getWorkDate(), shiftType);
             DoctorSchedule schedule = matchedSchedule.orElse(null);
-
             expectedStartTime = shiftService.getExpectedStartTime(shiftType, schedule);
             expectedEndTime = shiftService.getExpectedEndTime(shiftType, schedule);
             expectedWorkHours = calculationHelper.calculateExpectedWorkHours(expectedStartTime, expectedEndTime);
         }
         attendance.setExpectedWorkHours(expectedWorkHours);
 
-        // Late Minutes Logic
+        // Xử lý số phút đi trễ và về sớm
         String currentStatus = attendance.getAttendanceStatus();
         boolean isApprovedLate = "APPROVED_LATE".equals(currentStatus);
         boolean hasApprovedExplanation = attendance.getNote() != null && attendance.getNote().contains("[APPROVED]");
@@ -280,9 +273,9 @@ public class AttendanceServiceImpl implements AttendanceService {
             attendance.setLateMinutes(calculationHelper.calculateLateMinutes(checkInLocalTime, expectedStartTime));
         }
 
-        // Early Minutes Logic
         attendance.setEarlyMinutes(calculationHelper.calculateEarlyMinutes(checkOutLocalTime, expectedEndTime));
 
+        // Trừ giờ ăn trưa nếu là nhân viên và chấm công trước 11h, về sau 13h
         long lunchBreakMinutes = (!isDoctor && checkInLocalTime.isBefore(LocalTime.of(11, 0))
                 && checkOutLocalTime.isAfter(LocalTime.of(13, 0))) ? 120 : 0;
         attendance.setLunchBreakMinutes((int) lunchBreakMinutes);
@@ -293,21 +286,19 @@ public class AttendanceServiceImpl implements AttendanceService {
         if (request.getNote() != null && !request.getNote().trim().isEmpty()) {
             attendance.setNote((attendance.getNote() != null ? attendance.getNote() + " | " : "") + request.getNote());
         }
-
         if (attendance.getFaceMatchScore() == null
                 || faceResult.getSimilarityScore() > attendance.getFaceMatchScore().doubleValue()) {
             attendance.setFaceMatchScore(BigDecimal.valueOf(faceResult.getSimilarityScore()));
         }
-
         boolean faceVerified = faceResult.isVerified();
         boolean wifiValid = wifiResult.isValid();
         attendance.setVerificationStatus(faceVerified && wifiValid ? "VERIFIED" : "FAILED");
 
         attendance = attendanceRepo.save(attendance);
 
+        // Kiểm tra trường hợp thiếu checkin (đảm bảo an toàn)
         if (attendance.getCheckInTime() == null) {
-            // Handle absent if checkin is null (should not happen here due to validation
-            // but good for safety)
+            // Có thể xử lý checkin bị null ở đây nếu cần
         }
 
         User user = userRepo.findById(attendance.getUserId())
@@ -315,21 +306,19 @@ public class AttendanceServiceImpl implements AttendanceService {
         Clinic clinic = clinicRepo.findById(attendance.getClinicId())
                 .orElseThrow(() -> new AttendanceNotFoundException("Clinic not found"));
 
-        sendCheckOutNotification(attendance.getUserId(), clinic.getClinicName(), attendance.getActualWorkHours(),
-                attendance.getId());
+        sendCheckOutNotification(attendance.getUserId(), clinic.getClinicName(), attendance.getActualWorkHours(), attendance.getId());
 
         return attendanceMapper.mapToAttendanceResponse(attendance, user, clinic, faceProfile, faceResult, wifiResult,
                 expectedStartTime, expectedEndTime);
     }
 
+    // Lấy trạng thái điểm danh cho bác sĩ
     private String determineAttendanceStatusForDoctor(Integer userId, Integer clinicId, LocalDate workDate,
             Instant checkInTime, String shiftType) {
-        // Logic này có thể chuyển sang Calculator nếu cần, nhưng hiện tại giữ ở đây
-        // hoặc Calculator
-        // Vì nó gọi Calculator rồi
         return attendanceStatusCalculator.determineAttendanceStatus(userId, clinicId, workDate, checkInTime);
     }
 
+    // Gửi thông báo checkin
     private void sendCheckInNotification(Integer userId, String clinicName, Instant checkInTime, Integer attendanceId) {
         try {
             NotificationRequest notiRequest = NotificationRequest.builder()
@@ -349,8 +338,8 @@ public class AttendanceServiceImpl implements AttendanceService {
         }
     }
 
-    private void sendCheckOutNotification(Integer userId, String clinicName, BigDecimal workHours,
-            Integer attendanceId) {
+    // Gửi thông báo checkout
+    private void sendCheckOutNotification(Integer userId, String clinicName, BigDecimal workHours, Integer attendanceId) {
         try {
             NotificationRequest notiRequest = NotificationRequest.builder()
                     .userId(userId)
@@ -369,18 +358,12 @@ public class AttendanceServiceImpl implements AttendanceService {
         }
     }
 
-    // ... (Keep other methods like getTodayAttendance, getAttendanceHistory, etc.
-    // as they delegate to ReportService or are simple queries)
-
     @Override
     @Transactional(readOnly = true)
     public AttendanceResponse getTodayAttendance(Integer userId) {
-        // ... (Logic giữ nguyên hoặc tối ưu sau)
-        // Để ngắn gọn, tôi sẽ giữ nguyên logic cũ nhưng viết lại cho sạch
         LocalDate today = LocalDate.now();
         List<UserRole> userRoles = userRoleRepo.findActiveByUserId(userId);
-        boolean isDoctor = userRoles != null
-                && userRoles.stream().anyMatch(ur -> attendanceStatusCalculator.isDoctorRole(ur));
+        boolean isDoctor = userRoles != null && userRoles.stream().anyMatch(ur -> attendanceStatusCalculator.isDoctorRole(ur));
 
         if (isDoctor) {
             List<Attendance> attendances = attendanceRepo.findAllByUserIdAndWorkDate(userId, today);
@@ -389,7 +372,7 @@ public class AttendanceServiceImpl implements AttendanceService {
 
             Attendance att = attendances.stream()
                     .min((a1, a2) -> {
-                        // Logic sort giữ nguyên
+                        // Sắp xếp lấy ca đầu tiên của bác sĩ ngày hôm nay
                         if (a1.getCheckInTime() != null && a2.getCheckInTime() != null) {
                             return a1.getCheckInTime().compareTo(a2.getCheckInTime());
                         }
@@ -409,9 +392,7 @@ public class AttendanceServiceImpl implements AttendanceService {
     public List<AttendanceResponse> getTodayAttendanceList(Integer userId) {
         LocalDate today = LocalDate.now();
         List<UserRole> userRoles = userRoleRepo.findActiveByUserId(userId);
-        boolean isDoctor = userRoles != null && userRoles.stream()
-                .anyMatch(ur -> attendanceStatusCalculator.isDoctorRole(ur));
-
+        boolean isDoctor = userRoles != null && userRoles.stream().anyMatch(ur -> attendanceStatusCalculator.isDoctorRole(ur));
         if (isDoctor) {
             return attendanceRepo.findAllByUserIdAndWorkDate(userId, today).stream()
                     .map(this::mapToResponseWithLookups)
@@ -430,7 +411,6 @@ public class AttendanceServiceImpl implements AttendanceService {
             int page, int size) {
         Pageable pageable = PageRequest.of(page, size);
         Page<Attendance> attendances;
-
         if (userId != null) {
             if (clinicId != null) {
                 attendances = attendanceRepo.findByUserIdAndClinicIdAndWorkDateBetweenOrderByWorkDateDesc(
@@ -445,7 +425,6 @@ public class AttendanceServiceImpl implements AttendanceService {
         } else {
             attendances = attendanceRepo.findAll(pageable);
         }
-
         return attendances.map(this::mapToResponseWithLookups);
     }
 
@@ -453,8 +432,7 @@ public class AttendanceServiceImpl implements AttendanceService {
     @Transactional(readOnly = true)
     public Map<String, Object> getAttendanceStatistics(
             Integer userId, Integer clinicId, LocalDate startDate, LocalDate endDate) {
-        // Delegate to ReportService logic or keep here if simple
-        // For now, keeping logic here but simplified
+        // Tổng hợp thống kê chấm công cho dashboard
         List<Attendance> attendances;
         if (userId != null && clinicId != null) {
             attendances = attendanceRepo.findByUserIdAndClinicIdAndWorkDateBetweenOrderByWorkDateDesc(
@@ -469,8 +447,6 @@ public class AttendanceServiceImpl implements AttendanceService {
             attendances = attendanceRepo.findByWorkDateBetween(startDate, endDate);
         }
 
-        // ... (Calculation logic same as before, omitted for brevity in this refactor
-        // step if not critical, but I will include it to ensure functionality)
         int totalRecords = attendances.size();
         int presentCount = 0;
         int lateCount = 0;
@@ -545,8 +521,7 @@ public class AttendanceServiceImpl implements AttendanceService {
 
         List<Attendance> attendances;
         if (clinicId != null && normalizedStatus != null) {
-            attendances = attendanceRepo.findByClinicIdAndWorkDateAndAttendanceStatus(clinicId, targetDate,
-                    normalizedStatus);
+            attendances = attendanceRepo.findByClinicIdAndWorkDateAndAttendanceStatus(clinicId, targetDate, normalizedStatus);
         } else if (clinicId != null) {
             attendances = attendanceRepo.findByClinicIdAndWorkDate(clinicId, targetDate);
         } else if (normalizedStatus != null) {
@@ -554,19 +529,17 @@ public class AttendanceServiceImpl implements AttendanceService {
         } else {
             attendances = attendanceRepo.findByWorkDate(targetDate);
         }
-
         return attendances.stream().map(this::mapToResponseWithLookups).collect(Collectors.toList());
     }
 
     @Override
     @Transactional
-    public AttendanceResponse updateAttendanceStatus(Integer attendanceId, String newStatus, String adminNote,
-            Integer adminUserId) {
+    public AttendanceResponse updateAttendanceStatus(Integer attendanceId, String newStatus, String adminNote, Integer adminUserId) {
         Attendance attendance = attendanceRepo.findById(attendanceId)
                 .orElseThrow(() -> new AttendanceNotFoundException(attendanceId));
 
         attendance.setAttendanceStatus(newStatus);
-        // ... (Note update logic)
+        // Ghi chú của admin vào note
         if (adminNote != null && !adminNote.trim().isEmpty()) {
             attendance.setNote(
                     (attendance.getNote() != null ? attendance.getNote() + " | " : "") + "[Admin: " + adminNote + "]");
@@ -601,21 +574,19 @@ public class AttendanceServiceImpl implements AttendanceService {
         return mapToResponseWithLookups(attendance);
     }
 
-    // Private helper to map response
+    // map thông tin lookup (user, clinic, profile) + giờ ca làm cho attendance
     private AttendanceResponse mapToResponseWithLookups(Attendance attendance) {
         User user = userRepo.findById(attendance.getUserId()).orElse(null);
         Clinic clinic = clinicRepo.findById(attendance.getClinicId()).orElse(null);
         EmployeeFaceProfile faceProfile = faceProfileRepo.findByUserId(attendance.getUserId()).orElse(null);
         LocalTime[] times = resolveScheduledTimes(attendance);
-        return attendanceMapper.mapToAttendanceResponse(attendance, user, clinic, faceProfile, null, null, times[0],
-                times[1]);
+        return attendanceMapper.mapToAttendanceResponse(attendance, user, clinic, faceProfile, null, null, times[0], times[1]);
     }
 
+    // Xác định thời gian ca dự kiến dựa theo ca làm
     private LocalTime[] resolveScheduledTimes(Attendance attendance) {
-        // Logic to resolve expected start/end times based on shift
         LocalTime start = EMPLOYEE_START_TIME;
         LocalTime end = EMPLOYEE_END_TIME;
-        // ... (Simplified for now, can be expanded if needed)
         return new LocalTime[] { start, end };
     }
 }

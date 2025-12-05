@@ -1,4 +1,4 @@
-package sunshine_dental_care.services.impl.hr;
+package sunshine_dental_care.services.impl.hr.schedule;
 
 import java.time.LocalDate;
 import java.util.List;
@@ -17,17 +17,16 @@ public class HolidayService {
         this.holidayRepo = holidayRepo;
     }
 
-    // kiểm tra ngày và clinic có phải là ngày nghỉ lễ không
+    // Kiểm tra một ngày có phải là ngày nghỉ lễ tại một clinic
     public boolean isHoliday(LocalDate date, Integer clinicId) {
         List<sunshine_dental_care.entities.Holiday> dbHolidays = holidayRepo.findAll();
         for (sunshine_dental_care.entities.Holiday h : dbHolidays) {
             LocalDate start = h.getDate();
-            // xử lý holiday lặp lại hàng năm
             if (Boolean.TRUE.equals(h.getIsRecurring())) {
                 try {
                     start = start.withYear(date.getYear());
                 } catch (Exception e) {
-                    // trường hợp ngày không hợp lệ (ví dụ 29/2 cho năm không nhuận)
+                    // Bỏ qua nếu ngày không hợp lệ cho năm hiện tại
                     continue;
                 }
             }
@@ -35,11 +34,11 @@ public class HolidayService {
             LocalDate end = start.plusDays(duration - 1);
 
             if (!date.isBefore(start) && !date.isAfter(end)) {
-                // holiday áp dụng cho toàn bộ clinic
+                // holiday cho toàn bộ hệ thống
                 if (h.getClinicId() == null) {
                     return true;
                 }
-                // holiday áp dụng cho clinic cụ thể
+                // holiday chỉ cho clinic cụ thể
                 if (clinicId != null && h.getClinicId().equals(clinicId)) {
                     return true;
                 }
@@ -48,16 +47,16 @@ public class HolidayService {
         return false;
     }
 
-    // lấy tên ngày nghỉ lễ cho clinic cụ thể hoặc toàn hệ thống
+    // Lấy tên ngày nghỉ lễ cho một ngày ở một clinic (nếu có)
     public String getHolidayName(LocalDate date, Integer clinicId) {
         List<sunshine_dental_care.entities.Holiday> dbHolidays = holidayRepo.findAll();
         for (sunshine_dental_care.entities.Holiday h : dbHolidays) {
             LocalDate start = h.getDate();
-            // holiday lặp lại mỗi năm (ví dụ Tết, Quốc Khánh...)
             if (Boolean.TRUE.equals(h.getIsRecurring())) {
                 try {
                     start = start.withYear(date.getYear());
                 } catch (Exception e) {
+                    // Bỏ qua nếu ngày không hợp lệ cho năm hiện tại
                     continue;
                 }
             }
@@ -65,11 +64,9 @@ public class HolidayService {
             LocalDate end = start.plusDays(duration - 1);
 
             if (!date.isBefore(start) && !date.isAfter(end)) {
-                // holiday cho toàn bộ clinic
                 if (h.getClinicId() == null) {
                     return h.getName();
                 }
-                // holiday cho clinic cụ thể
                 if (clinicId != null && h.getClinicId().equals(clinicId)) {
                     return h.getName();
                 }

@@ -20,6 +20,7 @@ public class EmployeeResponse {
     private String roleAtClinic;
     private String specialty;         // Specialty for doctors (backward compatibility)
     private List<String> specialties;  // Multiple specialties for doctors
+    private Boolean hasApprovedResignation; // Có đơn nghỉ việc đã được duyệt không
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
     private LocalDateTime lastLoginAt;
@@ -202,5 +203,13 @@ public class EmployeeResponse {
 
     public void setSpecialties(List<String> specialties) {
         this.specialties = specialties;
+    }
+
+    public Boolean getHasApprovedResignation() {
+        return hasApprovedResignation;
+    }
+
+    public void setHasApprovedResignation(Boolean hasApprovedResignation) {
+        this.hasApprovedResignation = hasApprovedResignation;
     }
 }

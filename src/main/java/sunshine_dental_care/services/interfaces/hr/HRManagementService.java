@@ -20,5 +20,8 @@ public interface HRManagementService {
     
     // Lấy danh sách tất cả Rooms (active)
     List<RoomResponse> getAllRooms();
+    
+    // Lấy danh sách tất cả Holidays (read-only for HR)
+    List<sunshine_dental_care.entities.Holiday> getAllHolidays();
 }
 

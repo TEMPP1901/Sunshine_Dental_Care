@@ -1,4 +1,4 @@
-package sunshine_dental_care.services.impl.hr;
+package sunshine_dental_care.services.impl.hr.schedule;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -45,6 +45,7 @@ public class GeminiApiClient {
             return null;
         }
 
+        // thử từng model theo thứ tự ưu tiên (nếu model lỗi/quota exceeded thì thử tiếp model khác)
         for (String modelName : availableModels) {
             try {
                 log.info("Trying Gemini model: {}", modelName);
@@ -78,27 +79,26 @@ public class GeminiApiClient {
         try {
             ResponseEntity<String> response = restTemplate.exchange(apiUrl, HttpMethod.POST, requestEntity, String.class);
             String responseBody = response.getBody();
-            
+
             if (responseBody == null) {
                 log.error("Gemini API returned null response body");
                 return null;
             }
-            
-            // ✅ Parse Gemini response format to extract the actual text content
-            // Gemini response format: {"candidates": [{"content": {"parts": [{"text": "..."}]}}]}
+
             try {
                 JsonNode rootNode = objectMapper.readTree(responseBody);
                 JsonNode candidates = rootNode.path("candidates");
-                
+
                 if (candidates.isArray() && candidates.size() > 0) {
                     JsonNode firstCandidate = candidates.get(0);
                     JsonNode content = firstCandidate.path("content");
                     JsonNode parts = content.path("parts");
-                    
+
+                    // lấy text ở phần content/parts đầu tiên
                     if (parts.isArray() && parts.size() > 0) {
                         JsonNode firstPart = parts.get(0);
                         String text = firstPart.path("text").asText();
-                        
+
                         if (text != null && !text.isEmpty()) {
                             log.debug("Extracted text from Gemini response (length: {})", text.length());
                             return text;
@@ -111,35 +111,34 @@ public class GeminiApiClient {
                 } else {
                     log.warn("Gemini response has no candidates or empty candidates array");
                 }
-                
-                // Fallback: return raw response if parsing fails
+
+                // Nếu parse không ra thì trả về raw response string
                 log.warn("Failed to parse Gemini response format, returning raw response");
                 return responseBody;
-                
+
             } catch (JsonProcessingException e) {
                 log.error("Failed to parse Gemini API response as JSON: {}", e.getMessage());
                 log.debug("Raw response: {}", responseBody);
-                // Return raw response as fallback
                 return responseBody;
             }
-            
+
         } catch (ResourceAccessException e) {
             log.error("Network error calling Gemini API: {}", e.getMessage());
-            throw e; // Re-throw to be caught by the main loop if needed
+            throw e;
         }
     }
 
     private Map<String, Object> buildRequestBody(String prompt) {
         Map<String, Object> requestBody = new HashMap<>();
-        
-        // Content
+
+        // build content cho request
         Map<String, Object> part = new HashMap<>();
         part.put("text", prompt);
         Map<String, Object> content = new HashMap<>();
         content.put("parts", List.of(part));
         requestBody.put("contents", List.of(content));
 
-        // Generation Config
+        // cấu hình gen (khuyến khích trả về JSON output)
         Map<String, Object> generationConfig = new HashMap<>();
         generationConfig.put("temperature", 0.0);
         generationConfig.put("responseMimeType", "application/json");
@@ -153,10 +152,11 @@ public class GeminiApiClient {
         try {
             ResponseEntity<String> response = restTemplate.getForEntity(listModelsUrl, String.class);
             JsonNode root = objectMapper.readTree(response.getBody());
-            
+
             String[] preferredModels = {"gemini-1.5-flash-latest", "gemini-1.5-pro-latest", "gemini-pro"};
             List<String> supportedModels = new ArrayList<>();
-            
+
+            // lấy danh sách model hỗ trợ generateContent
             StreamSupport.stream(root.path("models").spliterator(), false)
                 .filter(model -> model.path("name").asText().contains("gemini"))
                 .filter(model -> !model.path("name").asText().contains("embedding"))
@@ -168,6 +168,7 @@ public class GeminiApiClient {
                     }
                 });
 
+            // ưu tiên thử theo thứ tự preferredModels trước
             List<String> orderedModels = new ArrayList<>();
             for (String preferred : preferredModels) {
                 if (supportedModels.contains(preferred)) {
@@ -182,7 +183,8 @@ public class GeminiApiClient {
 
         } catch (HttpClientErrorException | JsonProcessingException e) {
             log.warn("Failed to list available Gemini models: {}", e.getMessage());
-            return List.of("gemini-1.5-flash-latest"); // Fallback to a default model
+            // fallback về model default nếu gọi list lỗi
+            return List.of("gemini-1.5-flash-latest");
         }
     }
 }

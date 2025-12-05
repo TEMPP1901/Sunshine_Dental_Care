@@ -15,40 +15,33 @@ import sunshine_dental_care.repositories.auth.ClinicRepo;
 import sunshine_dental_care.repositories.auth.UserRoleRepo;
 import sunshine_dental_care.repositories.hr.UserClinicAssignmentRepo;
 
-/**
- * Service để resolve clinicId cho user khi không được cung cấp trong request.
- * Logic: UserClinicAssignment (primary) → UserRole.clinic → Fallback (first clinic)
- */
 @Service
 @RequiredArgsConstructor
 @Slf4j
 public class ClinicResolutionService {
-
     private final UserClinicAssignmentRepo userClinicAssignmentRepo;
     private final UserRoleRepo userRoleRepo;
     private final ClinicRepo clinicRepo;
 
     public Integer resolveClinicId(Integer userId, Integer providedClinicId) {
         if (providedClinicId != null) {
-            return providedClinicId;
+            return providedClinicId; // đã có clinicId truyền vào
         }
 
-        // Bước 1: Tìm từ UserClinicAssignment (ưu tiên primary)
+        // lấy clinic từ UserClinicAssignment (ưu tiên assignment primary)
         List<UserClinicAssignment> assignments = userClinicAssignmentRepo.findByUserId(userId);
         if (assignments != null && !assignments.isEmpty()) {
             Optional<UserClinicAssignment> primaryAssignment = assignments.stream()
                     .filter(a -> a != null && Boolean.TRUE.equals(a.getIsPrimary()))
                     .findFirst();
-
             UserClinicAssignment selectedAssignment = primaryAssignment.orElse(assignments.get(0));
             Clinic clinic = selectedAssignment.getClinic();
-            
             if (clinic != null && clinic.getId() != null) {
                 return clinic.getId();
             }
         }
 
-        // Bước 2: Tìm từ UserRole.clinic
+        // lấy clinic từ userRole (nếu có)
         List<UserRole> userRoles = userRoleRepo.findActiveByUserId(userId);
         if (userRoles != null && !userRoles.isEmpty()) {
             for (UserRole userRole : userRoles) {
@@ -59,12 +52,12 @@ public class ClinicResolutionService {
                         return clinic.getId();
                     }
                 } catch (Exception e) {
-                    // Skip invalid role
+                    // bỏ qua role lỗi hoặc không có clinic
                 }
             }
         }
 
-        // Bước 3: Fallback - dùng clinic đầu tiên trong hệ thống
+        // fallback: chọn clinic đầu tiên trong hệ thống
         try {
             List<Clinic> allClinics = clinicRepo.findAll();
             if (allClinics != null && !allClinics.isEmpty() && allClinics.get(0).getId() != null) {
@@ -79,4 +72,3 @@ public class ClinicResolutionService {
                 userId));
     }
 }
-

@@ -1,4 +1,4 @@
-package sunshine_dental_care.services.impl.hr;
+package sunshine_dental_care.services.impl.hr.schedule;
 
 import java.time.LocalDate;
 import java.time.LocalTime;
@@ -35,13 +35,11 @@ public class AiScheduleGenerationServiceImpl implements AiScheduleGenerationServ
 
     private final ObjectMapper objectMapper = new ObjectMapper();
 
-    // Tạo lập lịch hàng tuần từ mô tả người dùng, tự động gửi đến AI và kiểm tra lại, có retry tự động khi gặp lỗi
     @Override
     public CreateWeeklyScheduleRequest generateScheduleFromDescription(LocalDate weekStart, String description) {
         if (description == null || description.trim().isEmpty()) {
             throw new IllegalArgumentException("Description/prompt cannot be null or empty");
         }
-
         int maxRetries = 3;
         String lastError = null;
         for (int attempt = 1; attempt <= maxRetries; attempt++) {
@@ -49,7 +47,7 @@ public class AiScheduleGenerationServiceImpl implements AiScheduleGenerationServ
                 log.info("AI Schedule Generation - Attempt {}/{}", attempt, maxRetries);
                 String enhancedPrompt = promptBuilderService.buildEnhancedPrompt(description, weekStart);
 
-                // Nếu là retry thì bổ sung feedback cho AI về lỗi trả về ở lần trước
+                // feedback cho AI khi retry
                 if (attempt > 1 && lastError != null) {
                     enhancedPrompt = addRetryFeedback(enhancedPrompt, lastError, attempt);
                 }
@@ -66,7 +64,6 @@ public class AiScheduleGenerationServiceImpl implements AiScheduleGenerationServ
             } catch (IllegalArgumentException e) {
                 lastError = e.getMessage();
                 log.warn("AI Schedule Generation - Attempt {} failed validation: {}", attempt, lastError);
-
                 if (attempt == maxRetries) {
                     throw new RuntimeException("Failed to generate valid schedule after " + maxRetries
                             + " attempts. Last error: " + lastError, e);
@@ -79,7 +76,7 @@ public class AiScheduleGenerationServiceImpl implements AiScheduleGenerationServ
         throw new RuntimeException("Failed to generate schedule using AI after " + maxRetries + " attempts.");
     }
 
-    // Thêm đoạn feedback về lỗi cho prompt gửi lại AI khi retry
+    // Tạo prompt feedback khi retry
     private String addRetryFeedback(String originalPrompt, String errorMessage, int attempt) {
         StringBuilder feedbackPrompt = new StringBuilder(originalPrompt);
         feedbackPrompt.append("\n\n");
@@ -102,13 +99,13 @@ public class AiScheduleGenerationServiceImpl implements AiScheduleGenerationServ
         return feedbackPrompt.toString();
     }
 
-    // Sinh lịch từ prompt do người dùng tự nhập (bản chất giống generateScheduleFromDescription)
     @Override
     public CreateWeeklyScheduleRequest generateScheduleFromCustomPrompt(LocalDate weekStart, String customPrompt) {
+        // method giống generateScheduleFromDescription
         return generateScheduleFromDescription(weekStart, customPrompt);
     }
 
-    // Phân tích và kiểm tra response từ AI (gồm cả kiểm tra cứng & cảnh báo mềm)
+    // validate và phân tích kết quả từ AI (cả validate cứng - mềm)
     private CreateWeeklyScheduleRequest parseAndValidateResponse(String aiResponse, LocalDate weekStart,
             String originalPrompt) throws JsonProcessingException {
         String jsonText = extractJsonFromText(aiResponse);
@@ -119,20 +116,18 @@ public class AiScheduleGenerationServiceImpl implements AiScheduleGenerationServ
 
         CreateWeeklyScheduleRequest request = parseJsonToRequest(jsonText, weekStart);
 
-        // Kiểm tra hợp lệ cứng (các luật bắt buộc)
         ValidationResultDto hardValidation = hrService.validateSchedule(request);
         if (!hardValidation.isValid()) {
             throw new IllegalArgumentException(
                     "Generated schedule is invalid: " + String.join(", ", hardValidation.getErrors()));
         }
 
-        // Kiểm tra hợp lệ mềm (gợi ý/cảnh báo, không bắt buộc dừng)
+        // soft validation: chỉ cảnh báo
         ValidationResultDto softValidation = scheduleHeuristicsValidator.validate(request, originalPrompt);
-        // Nếu cần có thể lưu cảnh báo vào DTO (chưa sử dụng)
         return request;
     }
 
-    // Parse JSON từ response AI -> Kiểm tra các ngày làm việc & logic clinic nghỉ/làm
+    // Chuyển jsonText sang CreateWeeklyScheduleRequest, kiểm tra các ngày có lịch hợp lệ
     private CreateWeeklyScheduleRequest parseJsonToRequest(String jsonText, LocalDate weekStart)
             throws JsonProcessingException {
         JsonNode rootNode = objectMapper.readTree(jsonText);
@@ -152,15 +147,13 @@ public class AiScheduleGenerationServiceImpl implements AiScheduleGenerationServ
             throw new IllegalArgumentException(errorMsg.toString());
         }
 
-        // Xác định danh sách ngày phải làm việc (ngoại trừ các ngày mà toàn bộ phòng khám nghỉ)
+        // lấy ra các ngày phải làm việc (loại ngày nghỉ toàn bộ clinic)
         String[] dayNames = { "monday", "tuesday", "wednesday", "thursday", "friday", "saturday" };
         List<String> expectedWorkingDays = new ArrayList<>();
         List<sunshine_dental_care.entities.Clinic> allClinics = clinicRepo.findAll();
         for (int dayIndex = 0; dayIndex < dayNames.length; dayIndex++) {
             String day = dayNames[dayIndex];
             LocalDate workDate = weekStart.plusDays(dayIndex);
-
-            // Kiểm tra nếu tất cả phòng khám đều nghỉ ngày này thì loại khỏi workingDays
             boolean allClinicsOnHoliday = true;
             for (sunshine_dental_care.entities.Clinic clinic : allClinics) {
                 if (!holidayService.isHoliday(workDate, clinic.getId())) {
@@ -194,7 +187,7 @@ public class AiScheduleGenerationServiceImpl implements AiScheduleGenerationServ
             }
         });
 
-        // Kiểm tra thiếu ngày (ngày phải làm mà không có lịch)
+        // kiểm tra có thiếu ngày không
         List<String> missingDays = new ArrayList<>();
         for (String expectedDay : expectedWorkingDays) {
             if (!dailyAssignments.containsKey(expectedDay)) {
@@ -202,7 +195,6 @@ public class AiScheduleGenerationServiceImpl implements AiScheduleGenerationServ
             }
         }
 
-        // Nếu thiếu bất kỳ ngày đang có phòng khám làm việc nào thì ném lỗi
         if (!missingDays.isEmpty()) {
             StringBuilder errorMsg = new StringBuilder("Missing schedule for working day(s): ");
             errorMsg.append(String.join(", ", missingDays)).append(". ");
@@ -220,7 +212,7 @@ public class AiScheduleGenerationServiceImpl implements AiScheduleGenerationServ
         return request;
     }
 
-    // Tách chuỗi JSON từ response của AI dựa theo vị trí dấu ngoặc nhọn đầu/cuối
+    // Lấy JSON đầu tiên trong response AI
     private String extractJsonFromText(String text) {
         if (text == null || text.trim().isEmpty()) {
             return null;

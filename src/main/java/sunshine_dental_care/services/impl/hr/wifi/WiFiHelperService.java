@@ -1,4 +1,4 @@
-package sunshine_dental_care.services.impl.hr;
+package sunshine_dental_care.services.impl.hr.wifi;
 
 import org.springframework.stereotype.Service;
 
@@ -10,7 +10,7 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 public class WiFiHelperService {
 
-    // Xử lý: lấy thông tin wifi từ request, nếu là máy ảo hoặc không có wifi thì sẽ trả về thông tin wifi máy thật
+    // Lấy thông tin WiFi thực khi chạy trên emulator hoặc không gửi WiFi
     public WiFiInfo resolveWiFiInfo(String ssid, String bssid) {
         boolean isEmulatorWiFi = isEmulatorWiFi(ssid, bssid);
         boolean hasNoWiFi = (ssid == null || ssid.trim().isEmpty()) && (bssid == null || bssid.trim().isEmpty());
@@ -22,7 +22,7 @@ public class WiFiHelperService {
         return new WiFiInfo(ssid, bssid);
     }
 
-    // Kiểm tra: wifi gửi từ máy ảo/emulator hay không
+    // true nếu là WiFi emulator hoặc chuỗi nhận diện máy ảo
     private boolean isEmulatorWiFi(String ssid, String bssid) {
         return (ssid != null && (ssid.trim().equalsIgnoreCase("AndroidWifi") ||
                 ssid.trim().equalsIgnoreCase("AndroidAP") ||
@@ -30,7 +30,7 @@ public class WiFiHelperService {
                 (bssid != null && bssid.trim().startsWith("00:13:10"));
     }
 
-    // Lấy thông tin wifi của máy host (case chạy test, emulator)
+    // Lấy WiFi từ máy host, fallback khi dùng máy ảo hoặc không xác định được WiFi
     private WiFiInfo getWiFiFromHostMachine(String originalSsid, String originalBssid) {
         String ssid = originalSsid;
         String bssid = originalBssid;
@@ -52,7 +52,7 @@ public class WiFiHelperService {
         return new WiFiInfo(ssid, bssid);
     }
 
-    // DTO lưu thông tin WiFi (SSID, BSSID)
+    // Data class thông tin WiFi (SSID, BSSID)
     public static class WiFiInfo {
         private final String ssid;
         private final String bssid;

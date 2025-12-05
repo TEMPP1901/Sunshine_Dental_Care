@@ -27,6 +27,7 @@ import sunshine_dental_care.repositories.auth.ClinicRepo;
 import sunshine_dental_care.repositories.auth.UserRepo;
 import sunshine_dental_care.repositories.hr.DoctorScheduleRepo;
 import sunshine_dental_care.repositories.hr.RoomRepo;
+import sunshine_dental_care.services.impl.hr.schedule.HolidayService;
 import sunshine_dental_care.services.interfaces.hr.HrService;
 import sunshine_dental_care.services.interfaces.hr.ScheduleValidationService;
 
@@ -41,17 +42,16 @@ public class HrServiceImpl implements HrService {
     private final RoomRepo roomRepo;
     private final ScheduleValidationService scheduleValidationService;
     private final sunshine_dental_care.repositories.hr.LeaveRequestRepo leaveRequestRepo;
+    private final HolidayService holidayService;
 
     private static final LocalTime LUNCH_BREAK_START = LocalTime.of(11, 0);
 
     @Override
     @Transactional
-    // PHƯƠNG THỨC QUAN TRỌNG: Tạo phân lịch cho 1 tuần, xác thực theo luật cho
-    // trước
+    // Tạo phân lịch cho nhiều bác sĩ trong 1 tuần, xác thực theo luật trước khi tạo
     public List<DoctorScheduleDto> createWeeklySchedule(CreateWeeklyScheduleRequest request) {
         log.info("Creating weekly schedule for week starting: {}", request.getWeekStart());
 
-        // Xác thực request trước khi tạo lịch
         ValidationResultDto validation = scheduleValidationService.validateSchedule(request);
         if (!validation.isValid()) {
             log.warn("Schedule validation failed: {}", validation.getErrors());
@@ -70,9 +70,14 @@ public class HrServiceImpl implements HrService {
 
             if (dayAssignments != null) {
                 for (CreateWeeklyScheduleRequest.DoctorAssignmentRequest assignment : dayAssignments) {
-                    // CHECK: Nếu bác sĩ có leave request approved trong ngày và ca này → không tạo
-                    // schedule
-                    // Xác định shiftType dựa vào startTime
+                    // Bỏ qua tạo lịch nếu là ngày nghỉ lễ tại clinic
+                    if (holidayService.isHoliday(workDate, assignment.getClinicId())) {
+                        log.info("Skipping schedule creation for doctor {} on {} at clinic {} - it is a holiday",
+                                assignment.getDoctorId(), workDate, assignment.getClinicId());
+                        continue;
+                    }
+
+                    // Không tạo lịch nếu bác sĩ đã được duyệt nghỉ cho ca (shift) này - hoặc cả ngày nếu không xác định ca
                     String shiftType = null;
                     if (assignment.getStartTime() != null) {
                         LocalTime startTime = assignment.getStartTime();
@@ -83,7 +88,6 @@ public class HrServiceImpl implements HrService {
                         }
                     }
 
-                    // Check leave request theo ca (nếu có shiftType) hoặc theo ngày (nếu không có)
                     boolean hasApprovedLeave;
                     if (shiftType != null) {
                         hasApprovedLeave = leaveRequestRepo.hasApprovedLeaveOnDateAndShift(
@@ -97,12 +101,12 @@ public class HrServiceImpl implements HrService {
                         log.info(
                                 "Skipping schedule creation for doctor {} on {} shift {} - has approved leave request for this shift",
                                 assignment.getDoctorId(), workDate, shiftType != null ? shiftType : "FULL_DAY");
-                        continue; // Bỏ qua, không tạo schedule cho ca nghỉ
+                        continue;
                     }
 
+                    // Khởi tạo entity với id để tránh lỗi serialize proxy Hibernate
                     DoctorSchedule schedule = new DoctorSchedule();
 
-                    // ÁNH XẠ THÔNG TIN CƠ BẢN: tạo entity với id để tránh lỗi serialize proxy
                     User doctor = new User();
                     doctor.setId(assignment.getDoctorId());
                     schedule.setDoctor(doctor);
@@ -134,12 +138,10 @@ public class HrServiceImpl implements HrService {
 
         List<DoctorSchedule> savedSchedules = doctorScheduleRepo.saveAll(schedules);
 
-        // Sau khi lưu schedule: Nếu có schedule MORNING → Set ACTIVE cho tất cả
-        // schedule AFTERNOON của doctor trong ngày
+        // Nếu một bác sĩ có ca sáng, đảm bảo các ca chiều trạng thái ACTIVE cho cùng ngày
         for (int dayIndex = 0; dayIndex < 6; dayIndex++) {
             LocalDate workDate = request.getWeekStart().plusDays(dayIndex);
 
-            // Nhóm schedule theo doctor
             Map<Integer, List<DoctorSchedule>> schedulesByDoctor = savedSchedules.stream()
                     .filter(s -> s.getWorkDate().equals(workDate))
                     .collect(Collectors.groupingBy(s -> s.getDoctor().getId()));
@@ -148,16 +150,12 @@ public class HrServiceImpl implements HrService {
                 Integer doctorId = entry.getKey();
                 List<DoctorSchedule> doctorSchedules = entry.getValue();
 
-                // Kiểm tra xem có schedule MORNING không
                 boolean hasMorningSchedule = doctorSchedules.stream()
                         .anyMatch(s -> s.getStartTime() != null && s.getStartTime().isBefore(LUNCH_BREAK_START));
 
                 if (hasMorningSchedule) {
-                    // Nếu có schedule MORNING → Set ACTIVE cho tất cả schedule AFTERNOON của doctor
-                    // trong ngày
                     for (DoctorSchedule schedule : doctorSchedules) {
                         if (schedule.getStartTime() != null && schedule.getStartTime().isAfter(LUNCH_BREAK_START)) {
-                            // Đây là schedule AFTERNOON
                             if (schedule.getStatus() == null || !"ACTIVE".equals(schedule.getStatus())) {
                                 schedule.setStatus("ACTIVE");
                                 doctorScheduleRepo.save(schedule);
@@ -235,7 +233,7 @@ public class HrServiceImpl implements HrService {
     @Override
     @Transactional(readOnly = true)
     public List<DoctorScheduleDto> getMySchedule(Integer userId, LocalDate weekStart) {
-        LocalDate weekEnd = weekStart.plusDays(5); // Monday to Saturday
+        LocalDate weekEnd = weekStart.plusDays(5); // Tuần làm việc từ thứ 2 đến thứ 7
         List<DoctorSchedule> schedules = doctorScheduleRepo.findByDoctorIdAndDateRange(userId, weekStart, weekEnd);
         log.debug("Fetching my schedule for user {} from {} to {}, found {} schedules", userId, weekStart, weekEnd,
                 schedules.size());
@@ -244,10 +242,7 @@ public class HrServiceImpl implements HrService {
                 .collect(Collectors.toList());
     }
 
-    // validateSchedule và validateAssignment đã được chuyển sang
-    // ScheduleValidationServiceImpl
-
-    // CHUYỂN ĐỔI ENTITY SANG DTO, LẤY ĐẦY ĐỦ THÔNG TIN LIÊN QUAN
+    // Convert entity DoctorSchedule sang dto đầy đủ thông tin liên quan
     private DoctorScheduleDto convertToDto(DoctorSchedule schedule) {
         DoctorScheduleDto dto = new DoctorScheduleDto();
         dto.setId(schedule.getId());
@@ -262,8 +257,8 @@ public class HrServiceImpl implements HrService {
                         doctor.getPhone(),
                         doctor.getAvatarUrl(),
                         doctor.getCode(),
-                        doctor.getSpecialty(), // Specialty
-                        null, // DepartmentResponse (Cần phải map nếu muốn truyền)
+                        doctor.getSpecialty(),
+                        null, // Chưa lấy thông tin khoa/phòng ban
                         List.of());
                 dto.setDoctor(doctorDto);
             }

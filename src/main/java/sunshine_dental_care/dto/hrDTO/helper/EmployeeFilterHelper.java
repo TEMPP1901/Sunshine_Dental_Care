@@ -28,14 +28,24 @@ public class EmployeeFilterHelper {
     );
 
     // Lọc bắt buộc: chỉ lấy nhân viên có các vai trò thuộc danh sách cho phép
-    public Stream<User> applyMandatoryRoleFilter(Stream<User> userStream) {
-        log.debug("Applying mandatory role filter (RECEPTION, ACCOUNTANT, DOCTOR, HR)");
+    // Lưu ý: Khi filter nhân viên đã xóa (isActive=false), cần lấy cả UserRole inactive
+    public Stream<User> applyMandatoryRoleFilter(Stream<User> userStream, Boolean isActive) {
+        log.debug("Applying mandatory role filter (RECEPTION, ACCOUNTANT, DOCTOR, HR), isActive: {}", isActive);
         return userStream.filter(u -> {
             if (u == null || u.getId() == null) {
                 return false;
             }
             try {
-                List<sunshine_dental_care.entities.UserRole> userRoles = userRoleRepo.findActiveByUserId(u.getId());
+                // Nếu filter nhân viên đã xóa, lấy cả UserRole inactive
+                List<sunshine_dental_care.entities.UserRole> userRoles;
+                if (Boolean.FALSE.equals(isActive)) {
+                    // Lấy tất cả UserRole (kể cả inactive) cho nhân viên đã xóa
+                    userRoles = userRoleRepo.findByUserId(u.getId());
+                } else {
+                    // Lấy chỉ UserRole active cho nhân viên đang hoạt động
+                    userRoles = userRoleRepo.findActiveByUserId(u.getId());
+                }
+                
                 if (userRoles == null || userRoles.isEmpty()) {
                     return false;
                 }
@@ -101,8 +111,11 @@ public class EmployeeFilterHelper {
         }
         return userStream.filter(u -> {
             Boolean userIsActive = u.getIsActive();
-            boolean matches = isActive.equals(userIsActive);
-            return matches;
+            // Xử lý trường hợp null: null được coi là false (inactive)
+            if (userIsActive == null) {
+                return !isActive; // Nếu user.isActive là null và filter là false thì match
+            }
+            return isActive.equals(userIsActive);
         });
     }
 
@@ -125,13 +138,21 @@ public class EmployeeFilterHelper {
     }
 
     // Lọc nhân viên theo vai trò được chọn bổ sung (ngoài filter mặc định)
-    public Stream<User> applyRoleFilter(Stream<User> userStream, Integer roleId) {
+    // Lưu ý: Khi filter nhân viên đã xóa (isActive=false), cần lấy cả UserRole inactive
+    public Stream<User> applyRoleFilter(Stream<User> userStream, Integer roleId, Boolean isActive) {
         if (roleId == null) {
             return userStream;
         }
         return userStream.filter(u -> {
             try {
-                List<sunshine_dental_care.entities.UserRole> userRoles = userRoleRepo.findActiveByUserId(u.getId());
+                // Nếu filter nhân viên đã xóa, lấy cả UserRole inactive
+                List<sunshine_dental_care.entities.UserRole> userRoles;
+                if (Boolean.FALSE.equals(isActive)) {
+                    userRoles = userRoleRepo.findByUserId(u.getId());
+                } else {
+                    userRoles = userRoleRepo.findActiveByUserId(u.getId());
+                }
+                
                 if (userRoles == null || userRoles.isEmpty()) {
                     return false;
                 }
