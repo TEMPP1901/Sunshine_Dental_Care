@@ -106,12 +106,7 @@ public class DoctorController {
         }
     }
 
-    /**
-     * Lấy lịch làm việc của bác sĩ hiện tại theo tuần
-     * GET /api/doctor/my-schedule/{weekStart}
-     * @param weekStart Ngày bắt đầu tuần (format: yyyy-MM-dd)
-     * @return Danh sách lịch làm việc của bác sĩ trong tuần
-     */
+
     @GetMapping("/my-schedule/{weekStart}")
     public ResponseEntity<List<DoctorScheduleDto>> getMySchedule(
             @PathVariable @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate weekStart) {
