@@ -23,6 +23,11 @@ public class MonthlyAttendanceListItemResponse {
     private Long totalWorkedMinutes;  // Tổng phút làm việc
     private String totalWorkedDisplay; // "176 hr 30 min"
     
+    // Thông tin cho tính lương theo giờ
+    private Integer totalLateMinutes;   // Tổng số phút đi trễ trong tháng
+    private Integer totalEarlyMinutes; // Tổng số phút ra sớm trong tháng
+    private Integer actualWorkedDays;  // Số ngày đi làm thực tế (có check-in)
+    
     // Getters and Setters
     public Integer getUserId() {
         return userId;
@@ -126,6 +131,30 @@ public class MonthlyAttendanceListItemResponse {
     
     public void setTotalWorkedDisplay(String totalWorkedDisplay) {
         this.totalWorkedDisplay = totalWorkedDisplay;
+    }
+    
+    public Integer getTotalLateMinutes() {
+        return totalLateMinutes;
+    }
+    
+    public void setTotalLateMinutes(Integer totalLateMinutes) {
+        this.totalLateMinutes = totalLateMinutes;
+    }
+    
+    public Integer getTotalEarlyMinutes() {
+        return totalEarlyMinutes;
+    }
+    
+    public void setTotalEarlyMinutes(Integer totalEarlyMinutes) {
+        this.totalEarlyMinutes = totalEarlyMinutes;
+    }
+    
+    public Integer getActualWorkedDays() {
+        return actualWorkedDays;
+    }
+    
+    public void setActualWorkedDays(Integer actualWorkedDays) {
+        this.actualWorkedDays = actualWorkedDays;
     }
 }
 

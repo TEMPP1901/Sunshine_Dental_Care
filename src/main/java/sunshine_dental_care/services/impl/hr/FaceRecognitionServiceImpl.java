@@ -23,7 +23,6 @@ import lombok.extern.slf4j.Slf4j;
 import sunshine_dental_care.services.interfaces.hr.FaceRecognitionService;
 import sunshine_dental_care.utils.ArcFaceOnnx;
 
-// Implementation of FaceRecognitionService using ArcFace ONNX model
 @Service
 @RequiredArgsConstructor
 @Slf4j
@@ -41,7 +40,7 @@ public class FaceRecognitionServiceImpl implements FaceRecognitionService {
     private Path modelFilePath;
     private boolean deleteModelOnCleanup = false;
 
-    // Khởi tạo model khi khởi động ứng dụng
+    // Khởi tạo model ArcFace khi ứng dụng khởi động
     @PostConstruct
     public void init() {
         try {
@@ -55,11 +54,11 @@ public class FaceRecognitionServiceImpl implements FaceRecognitionService {
             log.info("ArcFace ONNX model initialized successfully");
         } catch (Exception e) {
             log.error("Failed to initialize ArcFace ONNX model: {}", e.getMessage(), e);
-            // Không ném exception để ứng dụng vẫn chạy nhưng face recognition sẽ bị tắt
+            // Không ném exception để ứng dụng vẫn chạy, chỉ cảnh báo model chưa được load
         }
     }
 
-    // Dọn dẹp tài nguyên khi đóng ứng dụng
+    // Dọn dẹp tài nguyên và file tạm khi ứng dụng shutdown
     @PreDestroy
     public void cleanup() {
         try {
@@ -80,7 +79,7 @@ public class FaceRecognitionServiceImpl implements FaceRecognitionService {
         }
     }
 
-    // Trích xuất embedding từ MultipartFile ảnh khuôn mặt
+    // Trích xuất embedding khuôn mặt từ ảnh upload (MultipartFile)
     @Override
     public String extractEmbedding(MultipartFile imageFile) throws Exception {
         log.info("Extracting face embedding from image file: {}", imageFile.getOriginalFilename());
@@ -102,7 +101,7 @@ public class FaceRecognitionServiceImpl implements FaceRecognitionService {
         }
     }
 
-    // Trích xuất embedding từ file path ảnh trên ổ cứng
+    // Trích xuất embedding khuôn mặt từ đường dẫn ảnh trên ổ cứng
     @Override
     public String extractEmbeddingFromPath(String imagePath) throws Exception {
         log.info("Extracting face embedding from image path: {}", imagePath);
@@ -129,7 +128,7 @@ public class FaceRecognitionServiceImpl implements FaceRecognitionService {
         }
     }
 
-    // So khớp embedding nhận diện khuôn mặt giữa input và dữ liệu đã lưu
+    // So khớp 2 embedding khuôn mặt và xác thực, trả về kết quả (cosine similarity & status)
     @Override
     public FaceVerificationResult verifyFace(String inputEmbeddingJson, String storedEmbeddingJson) throws Exception {
         log.debug("Verifying face: comparing embeddings");
@@ -161,11 +160,9 @@ public class FaceRecognitionServiceImpl implements FaceRecognitionService {
                 ? String.format("Face verified with similarity: %.4f", similarity)
                 : String.format("Face verification failed. Similarity: %.4f (threshold: %.4f)", similarity, similarityThreshold);
 
-        // Log chi tiết kết quả so khớp khuôn mặt
         log.info("Face verification result: verified={}, similarity={}, threshold={}, message={}",
                 verified, String.format("%.4f", similarity), String.format("%.4f", similarityThreshold), message);
 
-        // Cảnh báo nếu điểm similarity quá thấp
         if (similarity < 0.1) {
             log.warn("Very low similarity score ({}). Possible causes: different camera/lighting/angle, or different person.",
                     String.format("%.4f", similarity));
@@ -173,7 +170,7 @@ public class FaceRecognitionServiceImpl implements FaceRecognitionService {
         return new FaceVerificationResult(verified, similarity, message);
     }
 
-    // Kiểm tra định dạng chuỗi embedding trả về phải là mảng JSON
+    // Kiểm tra định dạng chuỗi embedding phải là JSON array
     private void validateEmbeddingFormat(String embeddingJson) throws IllegalArgumentException {
         if (embeddingJson == null || embeddingJson.trim().isEmpty()) {
             throw new IllegalArgumentException("Embedding is null or empty");
@@ -184,7 +181,7 @@ public class FaceRecognitionServiceImpl implements FaceRecognitionService {
         }
     }
 
-    // Chuyển đổi chuỗi JSON thành mảng float embedding và validate kích thước
+    // Parse chuỗi embedding JSON và kiểm tra dimension phải đúng 512
     private float[] parseEmbeddingJson(String json) throws Exception {
         validateEmbeddingFormat(json);
         try {
@@ -221,7 +218,7 @@ public class FaceRecognitionServiceImpl implements FaceRecognitionService {
         return dotProduct / denominator;
     }
 
-    // Tải model từ đường dẫn cấu hình/thư mục classpath
+    // Tải model ArcFace từ classpath hoặc file hệ thống, copy ra file tạm nếu cần
     private void resolveModelFile() throws IOException {
         if (modelPath == null || modelPath.trim().isEmpty()) {
             log.warn("app.face-recognition.model-path is empty");

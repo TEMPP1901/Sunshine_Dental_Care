@@ -17,14 +17,14 @@ import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 
 import lombok.extern.slf4j.Slf4j;
+import sunshine_dental_care.exceptions.auth.DuplicateEmailException;
+import sunshine_dental_care.exceptions.auth.DuplicateUsernameException;
 import sunshine_dental_care.exceptions.hr.AttendanceExceptions.AlreadyCheckedInException;
 import sunshine_dental_care.exceptions.hr.AttendanceExceptions.AttendanceException;
 import sunshine_dental_care.exceptions.hr.AttendanceExceptions.AttendanceNotFoundException;
 import sunshine_dental_care.exceptions.hr.AttendanceExceptions.AttendanceValidationException;
 import sunshine_dental_care.exceptions.hr.AttendanceExceptions.FaceVerificationFailedException;
 import sunshine_dental_care.exceptions.hr.AttendanceExceptions.WiFiValidationFailedException;
-import sunshine_dental_care.exceptions.auth.DuplicateEmailException;
-import sunshine_dental_care.exceptions.auth.DuplicateUsernameException;
 import sunshine_dental_care.exceptions.hr.DoctorNotAvailableException;
 import sunshine_dental_care.exceptions.hr.EmployeeExceptions.EmployeeException;
 import sunshine_dental_care.exceptions.hr.EmployeeExceptions.EmployeeNotFoundException;
@@ -34,6 +34,7 @@ import sunshine_dental_care.exceptions.hr.HRManagementExceptions.DepartmentNotFo
 import sunshine_dental_care.exceptions.hr.HRManagementExceptions.HRManagementException;
 import sunshine_dental_care.exceptions.hr.ScheduleException;
 import sunshine_dental_care.exceptions.hr.ScheduleValidationException;
+import sunshine_dental_care.exceptions.huy_bro_checkoutLog.CheckoutValidationException;
 
 
 @RestControllerAdvice
@@ -105,19 +106,19 @@ public class GlobalExceptionHandler {
         return ResponseEntity.badRequest().body(response);
     }
 
-    @ExceptionHandler(BadCredentialsException.class)
-    public ResponseEntity<Map<String, Object>> handleBadCredentialsException(BadCredentialsException ex) {
-        Map<String, Object> response = new HashMap<>();
-        response.put("timestamp", LocalDateTime.now());
-        response.put("status", HttpStatus.UNAUTHORIZED.value());
-        response.put("error", "Authentication Failed");
-        response.put("message", ex.getMessage());
-
-        log.warn("Bad credentials: {}", ex.getMessage());
-        return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
-                .contentType(MediaType.APPLICATION_JSON)
-                .body(response);
-    }
+//    @ExceptionHandler(BadCredentialsException.class)
+//    public ResponseEntity<Map<String, Object>> handleBadCredentialsException(BadCredentialsException ex) {
+//        Map<String, Object> response = new HashMap<>();
+//        response.put("timestamp", LocalDateTime.now());
+//        response.put("status", HttpStatus.UNAUTHORIZED.value());
+//        response.put("error", "Authentication Failed");
+//        response.put("message", ex.getMessage());
+//
+//        log.warn("Bad credentials: {}", ex.getMessage());
+//        return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+//                .contentType(MediaType.APPLICATION_JSON)
+//                .body(response);
+//    }
 
     // Xử lý trường hợp không có quyền
     @ExceptionHandler(AccessDeniedException.class)
@@ -149,6 +150,10 @@ public class GlobalExceptionHandler {
                 .body(response);
     }
 
+    /*
+     Xử lý IllegalArgumentException
+     Tác dụng: Xử lý các lỗi argument không hợp lệ
+     */
     @ExceptionHandler(IllegalArgumentException.class)
     public ResponseEntity<Map<String, Object>> handleIllegalArgumentException(IllegalArgumentException ex) {
         Map<String, Object> response = new HashMap<>();
@@ -161,6 +166,26 @@ public class GlobalExceptionHandler {
         return ResponseEntity.badRequest().body(response);
     }
 
+    /*
+     Xử lý IllegalStateException
+     Tác dụng: Xử lý các lỗi state không hợp lệ (ví dụ: missing role, missing patient sequence)
+     */
+    @ExceptionHandler(IllegalStateException.class)
+    public ResponseEntity<Map<String, Object>> handleIllegalStateException(IllegalStateException ex) {
+        Map<String, Object> response = new HashMap<>();
+        response.put("timestamp", LocalDateTime.now());
+        response.put("status", HttpStatus.INTERNAL_SERVER_ERROR.value());
+        response.put("error", "Configuration Error");
+        response.put("message", ex.getMessage());
+
+        log.error("Illegal state: {}", ex.getMessage(), ex);
+        return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(response);
+    }
+
+    /*
+     Xử lý Employee Not Found Exception
+     Tác dụng: Trả về lỗi 404 khi không tìm thấy nhân viên
+     */
     // Xử lý lỗi không tìm thấy nhân viên
     @ExceptionHandler(EmployeeNotFoundException.class)
     public ResponseEntity<Map<String, Object>> handleEmployeeNotFoundException(EmployeeNotFoundException ex) {
@@ -321,7 +346,10 @@ public class GlobalExceptionHandler {
         return ResponseEntity.badRequest().body(response);
     }
 
-    // Xử lý catch-all mọi exception chưa biết để tránh leak lỗi ra ngoài (trả về JSON cho FE)
+    /*
+     Xử lý tất cả exceptions khác
+     Tác dụng: Catch-all để đảm bảo không có exception nào bị leak
+     */
     @ExceptionHandler(Exception.class)
     public ResponseEntity<Map<String, Object>> handleGenericException(Exception ex) {
         Map<String, Object> response = new HashMap<>();
@@ -393,5 +421,35 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(DuplicateUsernameException.class)
     public ResponseEntity<Map<String, Object>> handleDuplicateUsername(DuplicateUsernameException ex) {
         return buildConflictResponse("username", ex.getMessage());
+    }
+
+    // Xử lí validation BadCredentialsException cho phương thức login bên ServiceImp
+    @ExceptionHandler(BadCredentialsException.class)
+    public ResponseEntity<Map<String, Object>> handleBadCredentials(BadCredentialsException ex) {
+        Map<String, Object> body = new HashMap<>();
+        body.put("timestamp", LocalDateTime.now());
+        body.put("status", HttpStatus.UNAUTHORIZED.value());
+        body.put("error", "Unauthorized");
+        body.put("message", ex.getMessage()); // "Invalid email or password" | "Account is disabled"
+
+        Map<String, String> errors = new HashMap<>();
+        String m = ex.getMessage() != null ? ex.getMessage() : "Invalid email or password";
+        errors.put("email", m);
+        errors.put("password", m);
+        body.put("errors", errors);
+
+        return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(body);
+    }
+
+    // Log validate không áp dụng validation springboot -> chuyển sang log linh hoạt hơn
+    @ExceptionHandler(CheckoutValidationException.class)
+    public ResponseEntity<Map<String, Object>> handleCheckoutValidation(CheckoutValidationException ex) {
+        Map<String, Object> response = new HashMap<>();
+        response.put("timestamp", LocalDateTime.now());
+        response.put("status", HttpStatus.BAD_REQUEST.value());
+        response.put("error", "Validation Failed");
+        response.put("message", "Validation failed");
+        response.put("fieldErrors", ex.getFieldErrors()); // Trả về Map lỗi chi tiết: field -> message
+        return ResponseEntity.badRequest().body(response);
     }
 }

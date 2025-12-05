@@ -24,7 +24,7 @@ public class HRManagementController {
     
     // Lấy danh sách tất cả Departments
     @GetMapping("/departments")
-    @PreAuthorize("hasAnyRole('DOCTOR', 'HR', 'RECEPTIONIST', 'ACCOUNTANT')")
+    @PreAuthorize("hasAnyRole('DOCTOR', 'HR', 'RECEPTION', 'ACCOUNTANT')")
     public ResponseEntity<List<DepartmentResponse>> getDepartments() {
         List<DepartmentResponse> departments = hrManagementService.getAllDepartments();
         return ResponseEntity.ok(departments);

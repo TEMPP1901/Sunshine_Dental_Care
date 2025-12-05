@@ -80,21 +80,21 @@ public class User {
     @Column(name = "failedLoginAttempts")
     private Integer failedLoginAttempts = 0;
 
-    // --- TOKEN RESET PASSWORD ---
+    // --- TOKEN RESET PASSWORD (Cả 2 đều có) ---
     @Column(name = "resetPasswordToken", length = 64)
     private String resetPasswordToken;
 
     @Column(name = "resetPasswordTokenExpiry")
     private Instant resetPasswordTokenExpiry;
 
-    // --- TOKEN XÁC THỰC TÀI KHOẢN (EMAIL) ---
+    // --- [CỦA TUẤN] TOKEN XÁC THỰC TÀI KHOẢN (EMAIL) ---
     @Column(name = "verificationToken", length = 64)
     private String verificationToken;
 
     @Column(name = "verificationTokenExpiry")
     private Instant verificationTokenExpiry;
 
-    // --- [MỚI] MÃ OTP ĐỂ ĐĂNG NHẬP SĐT ---
+    // --- [CỦA TUẤN] MÃ OTP ĐỂ ĐĂNG NHẬP SĐT ---
     @Column(name = "otpCode", length = 10)
     private String otpCode;
 
@@ -127,8 +127,12 @@ public class User {
     @OneToMany(mappedBy = "doctor", cascade = CascadeType.ALL, fetch = FetchType.LAZY, orphanRemoval = true)
     private List<DoctorSpecialty> doctorSpecialties;
 
+    // --- [CỦA LONG] DANH SÁCH QUYỀN (ROLE) ---
+    @OneToMany(mappedBy = "user", fetch = FetchType.LAZY)
+    private List<UserRole> userRoles;
+
     // =================================================================
-    // GETTERS & SETTERS
+    // GETTERS & SETTERS (Đã gộp đầy đủ)
     // =================================================================
 
     public Integer getId() { return id; }
@@ -177,14 +181,14 @@ public class User {
     public Instant getResetPasswordTokenExpiry() { return resetPasswordTokenExpiry; }
     public void setResetPasswordTokenExpiry(Instant resetPasswordTokenExpiry) { this.resetPasswordTokenExpiry = resetPasswordTokenExpiry; }
 
-    // Verify Account (Email)
+    // Verify Account (Email) - [CỦA TUẤN]
     public String getVerificationToken() { return verificationToken; }
     public void setVerificationToken(String verificationToken) { this.verificationToken = verificationToken; }
 
     public Instant getVerificationTokenExpiry() { return verificationTokenExpiry; }
     public void setVerificationTokenExpiry(Instant verificationTokenExpiry) { this.verificationTokenExpiry = verificationTokenExpiry; }
 
-    // [MỚI] OTP Login (Phone)
+    // OTP Login (Phone) - [CỦA TUẤN]
     public String getOtpCode() { return otpCode; }
     public void setOtpCode(String otpCode) { this.otpCode = otpCode; }
 
@@ -210,6 +214,10 @@ public class User {
 
     public List<DoctorSpecialty> getDoctorSpecialties() { return doctorSpecialties; }
     public void setDoctorSpecialties(List<DoctorSpecialty> doctorSpecialties) { this.doctorSpecialties = doctorSpecialties; }
+
+    // [CỦA LONG] - Getter Setter cho UserRoles
+    public List<UserRole> getUserRoles() { return userRoles; }
+    public void setUserRoles(List<UserRole> userRoles) { this.userRoles = userRoles; }
 
     @PrePersist
     void prePersist() {

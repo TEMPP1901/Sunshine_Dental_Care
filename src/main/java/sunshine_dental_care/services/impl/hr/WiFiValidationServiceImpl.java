@@ -8,10 +8,6 @@ import sunshine_dental_care.config.WiFiConfig;
 import sunshine_dental_care.dto.hrDTO.WiFiValidationResult;
 import sunshine_dental_care.services.interfaces.hr.WiFiValidationService;
 
-/**
- * Implementation của WiFiValidationService
- * Validate SSID và BSSID theo config trong properties
- */
 @Service
 @RequiredArgsConstructor
 @Slf4j
@@ -19,22 +15,20 @@ public class WiFiValidationServiceImpl implements WiFiValidationService {
 
     private final WiFiConfig wifiConfig;
 
+    // Hàm validate SSID và BSSID cho 1 clinic cụ thể
     @Override
     public WiFiValidationResult validateWiFi(String ssid, String bssid, Integer clinicId) {
         log.info("Validating WiFi for clinic {}: SSID={}, BSSID={}", clinicId, ssid, bssid);
 
-        // Validate WiFi theo clinic cụ thể
         boolean isValid = wifiConfig.isWiFiAllowedForClinic(ssid, bssid, clinicId);
 
-        // Check từng phần để có message chi tiết
         boolean ssidValid = wifiConfig.isSsidAllowed(ssid);
         boolean bssidValid = wifiConfig.isBssidAllowed(bssid);
 
-        // Nếu có config riêng cho clinic, check lại
+        // Nếu có cấu hình wifi riêng cho clinic, sẽ kiểm tra lại với danh sách cấu hình riêng
         WiFiConfig.ClinicWiFiConfig clinicConfig = wifiConfig.getClinic().get(String.valueOf(clinicId));
         if (clinicConfig != null) {
             log.debug("Found clinic-specific WiFi config for clinic {}", clinicId);
-            // Có config riêng cho clinic, validate theo config đó
             java.util.List<String> allowedSsids = parseList(clinicConfig.getSsids());
             java.util.List<String> allowedBssids = parseList(clinicConfig.getBssids());
 
@@ -52,19 +46,19 @@ public class WiFiValidationServiceImpl implements WiFiValidationService {
         if (isValid) {
             message = String.format("WiFi validated successfully for clinic %d", clinicId);
         } else {
-            message = String.format("WiFi validation failed for clinic %d. SSID or BSSID not in whitelist. SSID valid: %s, BSSID valid: %s",
+            message = String.format(
+                    "WiFi validation failed for clinic %d. SSID or BSSID not in whitelist. SSID valid: %s, BSSID valid: %s",
                     clinicId, ssidValid, bssidValid);
         }
 
-        log.info("WiFi validation result for clinic {}: valid={}, SSID valid={}, BSSID valid={}, SSID={}, BSSID={}",
+        log.info(
+                "WiFi validation result for clinic {}: valid={}, SSID valid={}, BSSID valid={}, SSID={}, BSSID={}",
                 clinicId, isValid, ssidValid, bssidValid, ssid, bssid);
 
         return new WiFiValidationResult(isValid, ssidValid, bssidValid, ssid, bssid, clinicId, message);
     }
 
-    /**
-     * Parse comma-separated string thành List
-     */
+    // Hàm tách chuỗi thành List<String> từ chuỗi phân cách bởi dấu phẩy
     private java.util.List<String> parseList(String value) {
         if (value == null || value.trim().isEmpty()) {
             return java.util.List.of();

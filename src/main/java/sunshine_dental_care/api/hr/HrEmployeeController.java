@@ -1,5 +1,6 @@
 package sunshine_dental_care.api.hr;
 
+import java.util.List;
 import java.util.Map;
 
 import org.springframework.data.domain.Page;
@@ -127,5 +128,13 @@ public class HrEmployeeController {
         Map<String, String> response = new java.util.HashMap<>();
         response.put("message", "Employee deleted successfully");
         return ResponseEntity.ok(response);
+    }
+    
+    // 8. LẤY DANH SÁCH BÁC SĨ (public - cho phép authenticated users)
+    @GetMapping("/doctors")
+    public ResponseEntity<List<EmployeeResponse>> getAllDoctors() {
+        log.info("Getting all doctors (public endpoint)");
+        List<EmployeeResponse> doctors = hrEmployeeService.getAllDoctors();
+        return ResponseEntity.ok(doctors);
     }
 }

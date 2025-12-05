@@ -126,11 +126,13 @@ public class EmployeeStatisticsHelper {
             return userRoles.stream()
                 .anyMatch(ur -> {
                     String roleName = ur.getRole() != null ? ur.getRole().getRoleName() : "";
-                    return roleName != null && (
-                        roleName.toUpperCase().contains("RECEPTIONIST") ||
-                        roleName.toUpperCase().contains("ACCOUNTANT") ||
-                        roleName.toUpperCase().contains("DOCTOR") ||
-                        roleName.toUpperCase().contains("HR")
+                    if (roleName == null) return false;
+                    String roleUpper = roleName.toUpperCase();
+                    return (
+                        roleUpper.contains("RECEPTION") ||  // ✅ Bao gồm cả RECEPTION và RECEPTIONIST
+                        roleUpper.contains("ACCOUNTANT") ||
+                        roleUpper.contains("DOCTOR") ||
+                        roleUpper.contains("HR")
                     );
                 });
         });
