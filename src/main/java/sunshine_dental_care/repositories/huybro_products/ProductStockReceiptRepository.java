@@ -8,6 +8,7 @@ import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 import sunshine_dental_care.entities.huybro_product_inventories.ProductStockReceipt;
 
+import java.math.BigDecimal;
 import java.util.Optional;
 
 @Repository
@@ -16,4 +17,7 @@ public interface ProductStockReceiptRepository extends JpaRepository<ProductStoc
     Optional<ProductStockReceipt> findTopByProduct_IdOrderByCreatedAtDesc(@Param("productId") Integer productId);
 
     Page<ProductStockReceipt> findByProductId(Integer productId, Pageable pageable);
+
+    @Query("SELECT MAX(r.newRetailPrice) FROM ProductStockReceipt r WHERE r.product.id = :productId")
+    BigDecimal findMaxRetailPriceByProductId(@Param("productId") Integer productId);
 }

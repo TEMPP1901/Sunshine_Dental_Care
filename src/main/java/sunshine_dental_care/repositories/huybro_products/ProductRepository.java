@@ -55,4 +55,30 @@ public interface ProductRepository extends JpaRepository<Product, Integer> {
     @Query("SELECT COALESCE(MAX(p.id), 0) FROM Product p")
     Integer findMaxId();
     List<Product> findByIsActiveTrue();
+
+    /**
+     * Tìm sản phẩm gợi ý:
+     * 1. Khác ID hiện tại.
+     * 2. Cùng Brand.
+     * 3. Có chung ít nhất 1 Type trong danh sách typeNames truyền vào.
+     */
+    @Query("""
+        SELECT DISTINCT p 
+        FROM Product p
+        JOIN ProductsProductType ppt ON ppt.product = p
+        JOIN ppt.type t
+        WHERE p.id <> :currentId
+          AND p.brand = :brand
+          AND t.typeName IN :typeNames
+          AND p.isActive = true
+    """)
+    List<Product> findRelatedProducts(
+            @Param("currentId") Integer currentId,
+            @Param("brand") String brand,
+            @Param("typeNames") List<String> typeNames,
+            Pageable pageable
+    );
+
+    // Fallback: Nếu sản phẩm không có Type nào, thì chỉ tìm theo Brand
+    List<Product> findTop4ByBrandAndIdNotAndIsActiveTrue(String brand, Integer id);
 }

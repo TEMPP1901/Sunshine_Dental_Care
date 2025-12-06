@@ -23,4 +23,9 @@ public class ProductDto {
     private List<String> typeNames;
     private BigDecimal latestImportPrice;
     private BigDecimal latestProfitMargin;
+    // --- [NEW FIELDS FOR CLIENT VIEW] ---
+    private Integer soldCount;                 // Tổng số lượng đã bán
+    private Integer discountPercentage;        // % Giảm giá (nếu có)
+    private List<ProductPurchaseHistoryDto> recentPurchases; // Danh sách người vừa mua
+    private List<ProductDto> relatedProducts;  // Sản phẩm gợi ý
 }

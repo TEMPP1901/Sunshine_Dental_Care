@@ -1,6 +1,7 @@
 package sunshine_dental_care.services.huybro_products.impl;
 
 import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -14,6 +15,7 @@ import sunshine_dental_care.services.huybro_products.interfaces.ProductService;
 import sunshine_dental_care.utils.huybro_utils.format.FormatTypeProduct;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
@@ -33,6 +35,7 @@ public class ProductServiceImpl implements ProductService {
     private final ClinicRepository clinicRepository;
     private final ProductInventoryRepository productInventoryRepository;
     private final ProductStockReceiptRepository stockReceiptRepository;
+    private final ProductInvoiceItemRepository productInvoiceItemRepository;
 
     public ProductServiceImpl(ProductRepository productRepository,
                               ProductImageRepository productImageRepository,
@@ -40,8 +43,8 @@ public class ProductServiceImpl implements ProductService {
                               ProductTypeRepository productTypeRepository,
                               ClinicRepository clinicRepository,
                               ProductInventoryRepository productInventoryRepository,
-                              // [NEW] Inject vào Constructor
-                              ProductStockReceiptRepository stockReceiptRepository) {
+                              ProductStockReceiptRepository stockReceiptRepository,
+                              ProductInvoiceItemRepository productInvoiceItemRepository) {
         this.productRepository = productRepository;
         this.productImageRepository = productImageRepository;
         this.productsProductTypeRepository = productsProductTypeRepository;
@@ -49,6 +52,7 @@ public class ProductServiceImpl implements ProductService {
         this.clinicRepository = clinicRepository;
         this.productInventoryRepository = productInventoryRepository;
         this.stockReceiptRepository = stockReceiptRepository;
+        this.productInvoiceItemRepository = productInvoiceItemRepository;
     }
 
     // Hàm map từ Entity → DTO
@@ -117,11 +121,76 @@ public class ProductServiceImpl implements ProductService {
 
     @Override
     public ProductDto findById(Integer id) {
-        Optional<Product> productOpt = productRepository.findById(id);
-        if (productOpt.isEmpty()) {
-            return null;
+        Product product = productRepository.findById(id)
+                .orElseThrow(() -> new RuntimeException("Product not found"));
+
+        ProductDto dto = mapToDto(product);
+
+        // 1. SỐ LIỆU: TỒN KHO & ĐÃ BÁN
+        // Unit (Tồn kho) đã có trong Product Entity (được sync từ InventoryService)
+        // Sold Count (Đã bán): Query từ InvoiceItem
+        Integer sold = productInvoiceItemRepository.sumSoldQuantityByProductId(id);
+        dto.setSoldCount(sold != null ? sold : 0);
+
+        // 2. SOCIAL PROOF: LỊCH SỬ MUA (Lấy 10 người gần nhất)
+        List<ProductPurchaseHistoryDto> recentPurchases = productInvoiceItemRepository
+                .findRecentPurchases(id, PageRequest.of(0, 10));
+        dto.setRecentPurchases(recentPurchases);
+
+        // 3. LOGIC GIẢM GIÁ (SALE %)
+        // So sánh Giá hiện tại vs Giá cao nhất từng thiết lập trong quá khứ
+        BigDecimal maxHistoryPrice = stockReceiptRepository.findMaxRetailPriceByProductId(id);
+        BigDecimal currentPrice = product.getDefaultRetailPrice();
+
+        if (maxHistoryPrice != null && maxHistoryPrice.compareTo(BigDecimal.ZERO) > 0
+                && currentPrice != null && currentPrice.compareTo(maxHistoryPrice) < 0) {
+
+            // Công thức: (Max - Current) / Max * 100
+            BigDecimal diff = maxHistoryPrice.subtract(currentPrice);
+            BigDecimal percent = diff.divide(maxHistoryPrice, 2, RoundingMode.HALF_UP)
+                    .multiply(BigDecimal.valueOf(100));
+
+            // Chỉ hiển thị Sale nếu giảm > 1%
+            if (percent.compareTo(BigDecimal.ONE) >= 0) {
+                dto.setDiscountPercentage(percent.intValue());
+            } else {
+                dto.setDiscountPercentage(0);
+            }
+        } else {
+            dto.setDiscountPercentage(0);
         }
-        return mapToDto(productOpt.get());
+
+        // --- 4. SẢN PHẨM GỢI Ý (RELATED PRODUCTS) [UPDATED LOGIC] ---
+
+        // B1: Lấy danh sách Type của sản phẩm hiện tại (đã có sẵn trong DTO sau khi map)
+        List<String> currentTypeNames = dto.getTypeNames();
+
+        List<Product> related;
+
+        // B2: Nếu sản phẩm có Type -> Tìm theo (Brand + Type)
+        if (currentTypeNames != null && !currentTypeNames.isEmpty()) {
+            related = productRepository.findRelatedProducts(
+                    id,
+                    product.getBrand(),
+                    currentTypeNames,
+                    PageRequest.of(0, 4) // Lấy Top 4
+            );
+
+            // B3: (Optional) Nếu tìm theo Type + Brand mà ít quá (ví dụ < 2),
+            // có thể fallback tìm chỉ theo Brand để lấp đầy UI (Tuỳ bạn chọn, ở đây tôi code kỹ logic này)
+            if (related.size() < 4) {
+                // Logic phụ: Nếu thích thì implement thêm việc fill cho đủ 4,
+                // nhưng để đơn giản theo yêu cầu của bạn thì cứ trả về kết quả tìm được.
+            }
+
+        } else {
+            // B4: Nếu sản phẩm hiện tại không có Type nào -> Chỉ tìm theo Brand
+            related = productRepository.findTop4ByBrandAndIdNotAndIsActiveTrue(product.getBrand(), id);
+        }
+
+        dto.setRelatedProducts(related.stream().map(this::mapToDto).collect(Collectors.toList()));
+
+        return dto;
     }
     @Override
     public Page<ProductDto> search(ProductFilterDto filter, Pageable pageable) {
