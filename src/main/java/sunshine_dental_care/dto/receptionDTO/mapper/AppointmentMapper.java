@@ -48,6 +48,8 @@ public class AppointmentMapper {
         }
         response.setCreatedAt(appointment.getCreatedAt());
         response.setUpdatedAt(appointment.getUpdatedAt());
+        response.setAppointmentType(appointment.getAppointmentType());
+        response.setBookingFee(appointment.getBookingFee());
 
         // Map Service Items
         // Entity Appointment cần có List<AppointmentService>

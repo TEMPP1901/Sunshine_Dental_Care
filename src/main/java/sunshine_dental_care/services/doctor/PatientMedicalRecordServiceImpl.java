@@ -11,6 +11,7 @@ import sunshine_dental_care.dto.doctorDTO.MedicalRecordDTO;
 import sunshine_dental_care.dto.doctorDTO.MedicalRecordRequest;
 import sunshine_dental_care.dto.doctorDTO.MedicalRecordImageDTO;
 import sunshine_dental_care.dto.doctorDTO.ServiceDTO;
+import sunshine_dental_care.dto.doctorDTO.ServiceVariantDTO;
 import sunshine_dental_care.entities.Appointment;
 import sunshine_dental_care.entities.Clinic;
 import sunshine_dental_care.entities.MedicalRecord;
@@ -31,10 +32,20 @@ import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Optional;
+import java.util.stream.Collectors;
+import java.util.Set;
 
 @Service
 @RequiredArgsConstructor
 public class PatientMedicalRecordServiceImpl implements PatientMedicalRecordService {
+
+    private static final long MAX_IMAGE_BYTES = 5 * 1024 * 1024; // 5MB
+    private static final Set<String> ALLOWED_CONTENT_TYPES = Set.of(
+            "image/jpeg",
+            "image/png",
+            "image/jpg",
+            "image/webp"
+    );
 
     private final MedicalRecordRepository medicalRecordRepository;
     private final PatientRepo patientRepo;
@@ -131,6 +142,8 @@ public class PatientMedicalRecordServiceImpl implements PatientMedicalRecordServ
     @Override
     @Transactional
     public MedicalRecordImageDTO uploadImage(Integer patientId, Integer recordId, MultipartFile file, String description, String aiTag) {
+        validateImage(file);
+
         // Lấy hồ sơ cần đính kèm ảnh, nếu không có thì báo lỗi
         MedicalRecord record = getRecord(patientId, recordId);
 
@@ -192,6 +205,20 @@ public class PatientMedicalRecordServiceImpl implements PatientMedicalRecordServ
             }
             record.setUpdatedAt(Instant.now());
             medicalRecordRepository.save(record);
+        }
+    }
+
+    private void validateImage(MultipartFile file) {
+        if (file == null || file.isEmpty()) {
+            throw new IllegalArgumentException("Image file is required");
+        }
+        if (file.getSize() > MAX_IMAGE_BYTES) {
+            throw new IllegalArgumentException("Image size must be <= 5MB");
+        }
+
+        String contentType = file.getContentType();
+        if (contentType == null || !ALLOWED_CONTENT_TYPES.contains(contentType.toLowerCase())) {
+            throw new IllegalArgumentException("Unsupported image type. Allowed: jpeg, jpg, png, webp");
         }
     }
 
@@ -329,6 +356,24 @@ public class PatientMedicalRecordServiceImpl implements PatientMedicalRecordServ
         if (service == null) {
             return null;
         }
+        
+        // Map variants nếu có
+        List<ServiceVariantDTO> variantDTOs = null;
+        if (service.getVariants() != null && !service.getVariants().isEmpty()) {
+            variantDTOs = service.getVariants().stream()
+                    .filter(v -> Boolean.TRUE.equals(v.getIsActive()))
+                    .map(v -> ServiceVariantDTO.builder()
+                            .variantId(v.getId())
+                            .variantName(v.getVariantName())
+                            .duration(v.getDuration())
+                            .price(v.getPrice())
+                            .description(v.getDescription())
+                            .currency(v.getCurrency())
+                            .isActive(v.getIsActive())
+                            .build())
+                    .collect(Collectors.toList());
+        }
+        
         return ServiceDTO.builder()
                 .id(service.getId())
                 .serviceName(service.getServiceName())
@@ -338,6 +383,7 @@ public class PatientMedicalRecordServiceImpl implements PatientMedicalRecordServ
                 .isActive(service.getIsActive())
                 .createdAt(service.getCreatedAt())
                 .updatedAt(service.getUpdatedAt())
+                .variants(variantDTOs)
                 .build();
     }
 
