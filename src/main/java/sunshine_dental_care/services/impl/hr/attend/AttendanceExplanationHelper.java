@@ -428,7 +428,8 @@ public class AttendanceExplanationHelper {
 
     // Kiểm tra attendance có nằm trong nhóm các trường hợp cần giải trình không
     public boolean needsExplanation(Attendance att) {
-        if (hasPendingExplanation(att) || hasProcessedExplanation(att)) {
+        // Không cho phép nếu đang có explanation đang chờ xử lý
+        if (hasPendingExplanation(att)) {
             return false;
         }
 
@@ -444,12 +445,32 @@ public class AttendanceExplanationHelper {
             return false;
         }
 
+        // o phép tạo explanation mới cho MISSING_CHECK_OUT 
+        //    ngay cả khi đã approve LATE (APPROVED_LATE)
+        //    ếu status là APPROVED_LATE và chưa có check-out, 
+        //    thì cho phép tạo explanation mới cho MISSING_CHECK_OUT
+        boolean isApprovedLate = "APPROVED_LATE".equals(status);
+        boolean needsMissingCheckOut = hasCheckIn && !hasCheckOut;
+        
+        if (isApprovedLate && needsMissingCheckOut) {
+            // Kiểm tra xem đã có explanation đã được xử lý (approve/reject)
+            // Nếu có và status là APPROVED_LATE, cho phép tạo explanation mới cho MISSING_CHECK_OUT
+            if (hasProcessedExplanation(att)) {
+                return true;  // Cho phép tạo explanation mới cho MISSING_CHECK_OUT
+            }
+        }
+
+        // Nếu đã xử lý explanation khác (không phải trường hợp APPROVED_LATE + MISSING_CHECK_OUT)
+        if (hasProcessedExplanation(att)) {
+            return false;
+        }
+
         return "LATE".equals(status) ||
                 "ABSENT".equals(status) ||
                 (hasCheckIn && !hasCheckOut) ||
                 (!hasCheckIn && hasCheckOut);
     }
-
+    
     // Kiểm tra attendance đang chờ xử lý giải trình hay không
     public boolean hasPendingExplanation(Attendance att) {
         String note = att.getNote();
