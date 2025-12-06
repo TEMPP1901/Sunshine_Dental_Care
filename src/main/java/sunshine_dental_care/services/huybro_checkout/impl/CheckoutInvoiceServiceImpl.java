@@ -14,16 +14,21 @@ import sunshine_dental_care.dto.huybro_cart.CartViewDto;
 import sunshine_dental_care.dto.huybro_checkout.CheckoutCreateRequestDto;
 import sunshine_dental_care.dto.huybro_checkout.CheckoutInvoiceDto;
 import sunshine_dental_care.dto.huybro_checkout.CheckoutInvoiceItemDto;
+import sunshine_dental_care.entities.Clinic;
 import sunshine_dental_care.entities.User;
-import sunshine_dental_care.entities.huybro_product_invoice.ProductInvoice;
-import sunshine_dental_care.entities.huybro_product_invoice.ProductInvoiceItem;
+import sunshine_dental_care.entities.huybro_product_invoices.ProductInvoice;
+import sunshine_dental_care.entities.huybro_product_invoices.ProductInvoiceItem;
 import sunshine_dental_care.entities.huybro_products.Product;
+import sunshine_dental_care.entities.huybro_product_inventories.ProductInventory;
 import sunshine_dental_care.exceptions.huy_bro_checkoutLog.CheckoutValidationException;
+import sunshine_dental_care.repositories.huybro_custom.ClinicRepository; // [IMPORT MỚI]
 import sunshine_dental_care.repositories.huybro_custom.UserCustomRepository;
+import sunshine_dental_care.repositories.huybro_products.ProductInventoryRepository; // [IMPORT MỚI]
 import sunshine_dental_care.repositories.huybro_products.ProductInvoiceItemRepository;
 import sunshine_dental_care.repositories.huybro_products.ProductInvoiceRepository;
 import sunshine_dental_care.repositories.huybro_products.ProductRepository;
 import sunshine_dental_care.security.CurrentUser;
+import sunshine_dental_care.services.huybro_cart.impl.CurrencyRateInternalService;
 import sunshine_dental_care.services.huybro_cart.interfaces.CartService;
 import sunshine_dental_care.services.huybro_checkout.interfaces.CheckoutInvoiceService;
 
@@ -45,6 +50,13 @@ public class CheckoutInvoiceServiceImpl implements CheckoutInvoiceService {
     private final ProductInvoiceRepository productInvoiceRepository;
     private final ProductInvoiceItemRepository productInvoiceItemRepository;
     private final UserCustomRepository userRepository;
+    private final CurrencyRateInternalService currencyRateService;
+    private final ProductInventoryRepository productInventoryRepository;
+    private final ClinicRepository clinicRepository;
+
+    // [CONFIG HARDCODE] Theo yêu cầu: Q9 ưu tiên, Q1 dự phòng
+    private static final Integer ID_Q1 = 1; // Kho Khám
+    private static final Integer ID_Q9 = 2; // Kho Bán (Ưu tiên)
 
     @Override
     @Transactional
@@ -61,21 +73,27 @@ public class CheckoutInvoiceServiceImpl implements CheckoutInvoiceService {
         }
         String finalCurrency = cartView.getCurrency();
 
+        // BƯỚC 1: Tạo hộp, bỏ số 1 vào trước (Giả định là USD)
+        BigDecimal exchangeRate = BigDecimal.ONE;
+
+        // BƯỚC 2: Kiểm tra xem có phải VND không?
+        if ("VND".equalsIgnoreCase(finalCurrency)) {
+            // Nếu là VND -> Gọi API lấy số 25000 -> Bỏ vào hộp (Đè lên số 1 cũ)
+            exchangeRate = currencyRateService.getRate("USD", "VND");
+        }
+
         // 2. Identify User & Create Item Note Tag
         boolean isLoggedIn = false;
         User currentUser = null;
-        String itemNoteTag; // Biến này để lưu vào ProductInvoiceItem
-
+        String itemNoteTag;
         Authentication auth = SecurityContextHolder.getContext().getAuthentication();
         if (auth != null && auth.isAuthenticated() && auth.getPrincipal() instanceof CurrentUser currentUserPrincipal) {
             Integer userId = currentUserPrincipal.userId();
             currentUser = userRepository.findById(userId)
                     .orElseThrow(() -> new IllegalStateException("User not found"));
             isLoggedIn = true;
-            // Tag cho Member
             itemNoteTag = String.format("[MEMBER: ID #%d]", userId);
         } else {
-            // Tag cho Guest
             itemNoteTag = "[POTENTIAL]";
         }
 
@@ -101,12 +119,7 @@ public class CheckoutInvoiceServiceImpl implements CheckoutInvoiceService {
         }
 
         // 4. Customer Info
-        String customerFullName;
-        String customerEmail;
-        String customerPhone;
-        String shippingAddress = trimToNull(request.getShippingAddress());
-        String invoiceUserNote = trimToNull(request.getNote());
-
+        String customerFullName, customerEmail, customerPhone, shippingAddress = trimToNull(request.getShippingAddress()), invoiceUserNote = trimToNull(request.getNote());
         if (isLoggedIn) {
             customerFullName = trimToNull(currentUser.getFullName());
             customerEmail = trimToNull(currentUser.getEmail());
@@ -119,20 +132,13 @@ public class CheckoutInvoiceServiceImpl implements CheckoutInvoiceService {
         }
 
         // 5. Validation Logic
-        if (shippingAddress == null || shippingAddress.length() < 3) {
-            errors.put("shippingAddress", "Shipping address is required (min 3 chars)");
+        if (shippingAddress == null || shippingAddress.length() < 3) errors.put("shippingAddress", "Shipping address is required (min 3 chars)");
+        if (!isLoggedIn && "BANK_TRANSFER".equals(paymentType)) {
+            if (customerFullName == null) errors.put("customerFullName", "Full name is required");
+            if (customerEmail == null) errors.put("customerEmail", "Email is required");
+            if (customerPhone == null) errors.put("customerPhone", "Phone number is required");
         }
-        if (!isLoggedIn) {
-            if ("BANK_TRANSFER".equals(paymentType)) {
-                if (customerFullName == null) errors.put("customerFullName", "Full name is required");
-                if (customerEmail == null) errors.put("customerEmail", "Email is required");
-                if (customerPhone == null) errors.put("customerPhone", "Phone number is required");
-            }
-        }
-
-        if (!errors.isEmpty()) {
-            throw new CheckoutValidationException(errors);
-        }
+        if (!errors.isEmpty()) throw new CheckoutValidationException(errors);
 
         // =========================================================
         // CREATE INVOICE
@@ -142,12 +148,18 @@ public class CheckoutInvoiceServiceImpl implements CheckoutInvoiceService {
         BigDecimal totalAfterTax = cartView.getTotals().getTotalAfterTax();
         BigDecimal taxTotal = totalAfterTax.subtract(subTotal).max(BigDecimal.ZERO);
 
+        // [LOGIC MỚI] Gắn Clinic xuất hàng (Mặc định là Q9 - Nơi bán online chính)
+        Clinic saleClinic = clinicRepository.findById(ID_Q9)
+                .orElseThrow(() -> new RuntimeException("Config Error: Clinic Q9 not found"));
+
         ProductInvoice invoice = new ProductInvoice();
+        invoice.setClinic(saleClinic); // Gắn Clinic
         invoice.setInvoiceCode(cartView.getInvoiceCode());
         invoice.setSubTotal(subTotal.setScale(2, RoundingMode.HALF_UP));
         invoice.setTaxTotal(taxTotal.setScale(2, RoundingMode.HALF_UP));
         invoice.setTotalAmount(totalAfterTax.setScale(2, RoundingMode.HALF_UP));
         invoice.setCurrency(finalCurrency);
+        invoice.setExchangeRate(exchangeRate);
 
         invoice.setPaymentMethod(paymentType);
         invoice.setPaymentChannel(paymentChannel);
@@ -164,17 +176,63 @@ public class CheckoutInvoiceServiceImpl implements CheckoutInvoiceService {
         invoice.setUpdatedAt(now);
 
         ProductInvoice savedInvoice = productInvoiceRepository.save(invoice);
-
         List<ProductInvoiceItem> invoiceItems = new ArrayList<>();
 
+        // === VÒNG LẶP TRỪ KHO ƯU TIÊN ===
         for (CartItemDto cartItem : cartView.getItems()) {
             Product product = productRepository.findById(cartItem.getProductId())
                     .orElseThrow(() -> new IllegalStateException("Product not found for id=" + cartItem.getProductId()));
 
+            int quantityNeeded = cartItem.getQuantity();
+
+            // 1. Lấy Inventory hiện tại
+            ProductInventory invQ9 = getInventoryOrNew(product, ID_Q9);
+            ProductInventory invQ1 = getInventoryOrNew(product, ID_Q1);
+
+            int stockQ9 = invQ9.getQuantity();
+            int stockQ1 = invQ1.getQuantity();
+
+            // 2. Double Check: Tổng kho có đủ không?
+            if (stockQ9 + stockQ1 < quantityNeeded) {
+                throw new IllegalStateException("Out of stock: Product " + product.getProductName());
+            }
+
+            // 3. Tính toán trừ kho (Q9 trước, Q1 sau)
+            int takeFromQ9 = 0;
+            int takeFromQ1 = 0;
+
+            if (stockQ9 >= quantityNeeded) {
+                // Case A: Q9 đủ -> Lấy hết từ Q9
+                takeFromQ9 = quantityNeeded;
+            } else {
+                // Case B: Q9 thiếu -> Lấy hết Q9, bù phần thiếu từ Q1
+                takeFromQ9 = stockQ9;
+                takeFromQ1 = quantityNeeded - stockQ9;
+            }
+
+            // 4. Update DB
+            if (takeFromQ9 > 0) {
+                invQ9.setQuantity(invQ9.getQuantity() - takeFromQ9);
+                invQ9.setLastUpdated(now);
+                productInventoryRepository.save(invQ9);
+                log.info("Deducted {} items from Q9 for Product {}", takeFromQ9, product.getId());
+            }
+
+            if (takeFromQ1 > 0) {
+                invQ1.setQuantity(invQ1.getQuantity() - takeFromQ1);
+                invQ1.setLastUpdated(now);
+                productInventoryRepository.save(invQ1);
+                log.info("Deducted {} items from Q1 for Product {}", takeFromQ1, product.getId());
+            }
+
+            // 5. Sync lại Tổng Unit và Active
+            syncProductTotalUnit(product);
+
+            // 6. Tạo Invoice Item
             ProductInvoiceItem item = new ProductInvoiceItem();
             item.setInvoice(savedInvoice);
             item.setProduct(product);
-            item.setQuantity(cartItem.getQuantity());
+            item.setQuantity(quantityNeeded);
             item.setUnitPriceBeforeTax(cartItem.getUnitPriceBeforeTax());
             item.setTaxRatePercent(cartItem.getTaxRatePercent());
             item.setTaxAmount(cartItem.getTaxAmount());
@@ -182,25 +240,11 @@ public class CheckoutInvoiceServiceImpl implements CheckoutInvoiceService {
             item.setProductNameSnapshot(cartItem.getProductName());
             item.setSkuSnapshot(cartItem.getSku());
             item.setNote(itemNoteTag);
-
             item.setCreatedAt(now);
 
-            if (product.getUnit() != null) {
-                int remaining = product.getUnit() - cartItem.getQuantity();
-                if (remaining < 0) {
-                    throw new IllegalStateException("Not enough stock for product: " + product.getProductName());
-                }
-                item.setRemainingQuantityAfterSale(remaining);
+            // Ghi nhận lại tồn kho của kho chính (Q9) để tham khảo
+            item.setRemainingQuantityAfterSale(invQ9.getQuantity());
 
-                product.setUnit(remaining);
-                if (remaining == 0) {
-                    product.setIsActive(false);
-                    log.info("Product id={} has reached 0 stock. Auto-deactivating.", product.getId());
-                }
-                productRepository.save(product);
-            } else {
-                item.setRemainingQuantityAfterSale(null);
-            }
             invoiceItems.add(item);
         }
 
@@ -210,27 +254,44 @@ public class CheckoutInvoiceServiceImpl implements CheckoutInvoiceService {
         return mapToCheckoutInvoiceDto(savedInvoice, invoiceItems);
     }
 
+    // [HELPER MỚI] Lấy inventory, nếu không có trả về object ảo qty=0
+    private ProductInventory getInventoryOrNew(Product product, Integer clinicId) {
+        return productInventoryRepository.findByProductIdAndClinicId(product.getId(), clinicId)
+                .orElseGet(() -> {
+                    ProductInventory dummy = new ProductInventory();
+                    dummy.setProduct(product);
+                    dummy.setQuantity(0);
+                    return dummy;
+                });
+    }
+
+    // [HELPER MỚI] Đồng bộ tổng
+    private void syncProductTotalUnit(Product product) {
+        Integer totalUnit = productInventoryRepository.sumTotalQuantityByProductId(product.getId());
+        product.setUnit(totalUnit);
+        if (totalUnit == 0) {
+            product.setIsActive(false);
+        }
+        productRepository.save(product);
+    }
+
     private CheckoutInvoiceDto mapToCheckoutInvoiceDto(ProductInvoice invoice,
                                                        List<ProductInvoiceItem> items) {
+        // ... (Logic Mapping giữ nguyên) ...
         CheckoutInvoiceDto dto = new CheckoutInvoiceDto();
-
         dto.setInvoiceId(invoice.getId());
         dto.setInvoiceCode(invoice.getInvoiceCode());
         dto.setSubTotal(invoice.getSubTotal());
         dto.setTaxTotal(invoice.getTaxTotal());
         dto.setTotalAmount(invoice.getTotalAmount());
         dto.setCurrency(invoice.getCurrency());
-
         dto.setPaymentStatus(invoice.getPaymentStatus());
         dto.setInvoiceStatus(invoice.getInvoiceStatus());
-
         dto.setPaymentMethod(invoice.getPaymentMethod());
         dto.setPaymentChannel(invoice.getPaymentChannel());
         dto.setPaymentCompletedAt(invoice.getPaymentCompletedAt());
-
         dto.setCreatedAt(invoice.getCreatedAt());
         dto.setUpdatedAt(invoice.getUpdatedAt());
-
         dto.setCustomerFullName(invoice.getCustomerFullName());
         dto.setCustomerEmail(invoice.getCustomerEmail());
         dto.setCustomerPhone(invoice.getCustomerPhone());
@@ -252,7 +313,6 @@ public class CheckoutInvoiceServiceImpl implements CheckoutInvoiceService {
             itemDto.setRemainingQuantityAfterSale(item.getRemainingQuantityAfterSale());
             itemDtos.add(itemDto);
         }
-
         dto.setItems(itemDtos);
         return dto;
     }

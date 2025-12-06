@@ -82,9 +82,12 @@ public class SecurityConfig {
 
                         // Products
                         .requestMatchers("/api/products/accountant/**").hasRole("ACCOUNTANT")
+                        .requestMatchers("/api/inventory/**").hasRole("ACCOUNTANT")
                         .requestMatchers("/api/products/**").permitAll()
                         .requestMatchers("/api/cart/**").permitAll()
                         .requestMatchers("/api/checkout/**").permitAll()
+                        .requestMatchers("/api/invoices/**").permitAll()
+
                         // Auth Endpoints
                         .requestMatchers(
                                 "/api/auth/sign-up",

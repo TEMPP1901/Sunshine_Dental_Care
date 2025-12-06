@@ -18,7 +18,8 @@ public interface ProductRepository extends JpaRepository<Product, Integer> {
             FROM Product p
             LEFT JOIN ProductsProductType ppt ON ppt.product = p
             LEFT JOIN ppt.type t
-            WHERE (:keyword IS NULL OR LOWER(p.productName) LIKE LOWER(CONCAT('%', :keyword, '%')))
+            WHERE (:keyword IS NULL OR LOWER(p.productName) LIKE LOWER(CONCAT('%', :keyword, '%'))
+                                    OR LOWER(p.sku) LIKE LOWER(CONCAT('%', :keyword, '%')))
               AND (:active IS NULL OR p.isActive = :active)
               AND (:minPrice IS NULL OR p.defaultRetailPrice >= :minPrice)
               AND (:maxPrice IS NULL OR p.defaultRetailPrice <= :maxPrice)
@@ -30,7 +31,8 @@ public interface ProductRepository extends JpaRepository<Product, Integer> {
             FROM Product p
             LEFT JOIN ProductsProductType ppt ON ppt.product = p
             LEFT JOIN ppt.type t
-            WHERE (:keyword IS NULL OR LOWER(p.productName) LIKE LOWER(CONCAT('%', :keyword, '%')))
+            WHERE (:keyword IS NULL OR LOWER(p.productName) LIKE LOWER(CONCAT('%', :keyword, '%'))
+                                    OR LOWER(p.sku) LIKE LOWER(CONCAT('%', :keyword, '%')))
               AND (:active IS NULL OR p.isActive = :active)
               AND (:minPrice IS NULL OR p.defaultRetailPrice >= :minPrice)
               AND (:maxPrice IS NULL OR p.defaultRetailPrice <= :maxPrice)

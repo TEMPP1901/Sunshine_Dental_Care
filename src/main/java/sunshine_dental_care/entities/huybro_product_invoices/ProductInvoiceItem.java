@@ -1,4 +1,4 @@
-package sunshine_dental_care.entities.huybro_product_invoice;
+package sunshine_dental_care.entities.huybro_product_invoices;
 
 import jakarta.persistence.*;
 import jakarta.validation.constraints.Size;

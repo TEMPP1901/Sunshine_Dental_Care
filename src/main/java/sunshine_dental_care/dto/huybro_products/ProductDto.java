@@ -21,4 +21,6 @@ public class ProductDto {
     private LocalDateTime updatedAt;
     private List<ProductImageDto> image;
     private List<String> typeNames;
+    private BigDecimal latestImportPrice;
+    private BigDecimal latestProfitMargin;
 }

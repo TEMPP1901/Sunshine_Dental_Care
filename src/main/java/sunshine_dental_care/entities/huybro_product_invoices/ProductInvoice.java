@@ -1,4 +1,4 @@
-package sunshine_dental_care.entities.huybro_product_invoice;
+package sunshine_dental_care.entities.huybro_product_invoices;
 
 import jakarta.persistence.*;
 import jakarta.validation.constraints.NotNull;
@@ -127,5 +127,8 @@ public class ProductInvoice {
     @ColumnDefault("N'NEW'")
     @Column(name = "invoiceStatus", nullable = false, length = 50)
     private String invoiceStatus;
+
+    @Column(name = "exchangeRate", precision = 18, scale = 6) // Scale lớn để chính xác
+    private BigDecimal exchangeRate;
 
 }
