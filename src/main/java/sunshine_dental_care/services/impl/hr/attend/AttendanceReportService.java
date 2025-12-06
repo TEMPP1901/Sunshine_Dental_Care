@@ -3,6 +3,7 @@ package sunshine_dental_care.services.impl.hr.attend;
 import java.math.BigDecimal;
 import java.time.DayOfWeek;
 import java.time.LocalDate;
+import java.time.LocalTime;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -29,6 +30,7 @@ import sunshine_dental_care.repositories.auth.UserRepo;
 import sunshine_dental_care.repositories.auth.UserRoleRepo;
 import sunshine_dental_care.repositories.hr.AttendanceRepository;
 import sunshine_dental_care.repositories.hr.DepartmentRepo;
+import sunshine_dental_care.utils.WorkHoursConstants;
 
 @Service
 @RequiredArgsConstructor
@@ -257,6 +259,11 @@ public class AttendanceReportService {
                         item.setCheckInTime(null);
                         item.setCheckOutTime(null);
                         item.setRemarks("Fixed Attendance");
+                        // Set shiftDisplay và shiftHours cho nhân viên absent
+                        item.setShiftStartTime(WorkHoursConstants.EMPLOYEE_START_TIME);
+                        item.setShiftEndTime(WorkHoursConstants.EMPLOYEE_END_TIME);
+                        item.setShiftDisplay(formatTime(WorkHoursConstants.EMPLOYEE_START_TIME) + " - " + formatTime(WorkHoursConstants.EMPLOYEE_END_TIME));
+                        item.setShiftHours(WorkHoursConstants.EMPLOYEE_EXPECTED_HOURS + " hr Shift: A");
                     } else {
                         item.setId(attendance.getId());
                         DailyAttendanceListItemResponse mapped = attendanceReportMapper.mapToDailyListItem(attendance,
@@ -528,5 +535,14 @@ public class AttendanceReportService {
                 .divide(BigDecimal.valueOf(total), 4, java.math.RoundingMode.HALF_UP)
                 .multiply(BigDecimal.valueOf(100))
                 .setScale(2, java.math.RoundingMode.HALF_UP);
+    }
+
+    // Format LocalTime sang string dạng "8.00am" hoặc "6.00pm"
+    private String formatTime(LocalTime time) {
+        int hour = time.getHour();
+        int minute = time.getMinute();
+        String period = hour < 12 ? "am" : "pm";
+        int displayHour = hour > 12 ? hour - 12 : (hour == 0 ? 12 : hour);
+        return String.format("%d.%02d%s", displayHour, minute, period);
     }
 }

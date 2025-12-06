@@ -2,23 +2,25 @@ package sunshine_dental_care.services.impl.hr.attend;
 
 import java.math.BigDecimal;
 import java.time.Duration;
+import java.time.Instant;
 import java.time.LocalTime;
+import java.time.ZoneId;
 
 import org.springframework.stereotype.Component;
+
+import sunshine_dental_care.utils.WorkHoursConstants;
 
 @Component
 public class AttendanceCalculationHelper {
 
-    // Số phút đi muộn tối đa giới hạn (ví dụ: nếu đi muộn hơn 120 phút thì cũng chỉ tính 120)
+    // Giới hạn tối đa số phút đi muộn được tính
     private static final int MAX_LATE_MINUTES_THRESHOLD = 120;
 
-    // Tính số phút đi làm muộn
+    // Tính số phút đi muộn (chỉ tính tối đa tới ngưỡng cho phép)
     public int calculateLateMinutes(LocalTime checkInTime, LocalTime expectedStartTime) {
         if (checkInTime.isAfter(expectedStartTime)) {
             long actualMinutesLate = Duration.between(expectedStartTime, checkInTime).toMinutes();
-            // Nếu đi muộn quá ngưỡng thì chỉ tính tối đa
-            return (int) (actualMinutesLate >= MAX_LATE_MINUTES_THRESHOLD ? MAX_LATE_MINUTES_THRESHOLD
-                    : actualMinutesLate);
+            return (int) (actualMinutesLate >= MAX_LATE_MINUTES_THRESHOLD ? MAX_LATE_MINUTES_THRESHOLD : actualMinutesLate);
         }
         return 0;
     }
@@ -31,21 +33,37 @@ public class AttendanceCalculationHelper {
         return 0;
     }
 
-    // Tính tổng số giờ làm thực tế sau khi đã trừ thời gian nghỉ trưa
+    // Tính tổng số giờ làm thực tế sau khi đã trừ thời gian nghỉ trưa (dùng cho mọi loại nhân viên)
     public BigDecimal calculateActualWorkHours(Duration totalDuration, long lunchBreakMinutes) {
         long adjustedMinutes = totalDuration.toMinutes() - lunchBreakMinutes;
         if (adjustedMinutes < 0) {
             adjustedMinutes = 0;
         }
-        // Làm tròn tới 2 chữ số phần thập phân
+        // Trả về giá trị làm tròn tới 2 số thập phân
         return BigDecimal.valueOf(adjustedMinutes)
                 .divide(BigDecimal.valueOf(60), 2, java.math.RoundingMode.HALF_UP);
     }
 
-    // Tính giờ làm lý thuyết (kỳ vọng) từ lúc bắt đầu đến lúc kết thúc ca làm
+    // Tính số giờ làm kỳ vọng theo lý thuyết dựa vào giờ vào và ra mặc định
     public BigDecimal calculateExpectedWorkHours(LocalTime startTime, LocalTime endTime) {
         long expectedMinutes = Duration.between(startTime, endTime).toMinutes();
-        return BigDecimal.valueOf(expectedMinutes).divide(BigDecimal.valueOf(60), 2,
-                java.math.RoundingMode.HALF_UP);
+        return BigDecimal.valueOf(expectedMinutes)
+                .divide(BigDecimal.valueOf(60), 2, java.math.RoundingMode.HALF_UP);
+    }
+
+    // Tính actualWorkHours có xét loại nhân viên (bác sĩ không trừ nghỉ trưa, còn lại áp dụng rule nghỉ trưa)
+    public BigDecimal calculateActualWorkHours(Instant checkInTime, Instant checkOutTime, boolean isDoctor) {
+        if (checkInTime == null || checkOutTime == null) {
+            return BigDecimal.ZERO;
+        }
+        LocalTime checkInLocalTime = checkInTime.atZone(ZoneId.systemDefault()).toLocalTime();
+        LocalTime checkOutLocalTime = checkOutTime.atZone(ZoneId.systemDefault()).toLocalTime();
+
+        // Số phút làm việc thực tế (sau khi trừ nghỉ trưa nếu cần)
+        Duration totalDuration = Duration.between(checkInTime, checkOutTime);
+
+        int lunchBreakMinutes = WorkHoursConstants.calculateLunchBreakMinutes(checkInLocalTime, checkOutLocalTime, isDoctor);
+
+        return calculateActualWorkHours(totalDuration, lunchBreakMinutes);
     }
 }

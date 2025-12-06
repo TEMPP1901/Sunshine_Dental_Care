@@ -60,15 +60,32 @@ public class ClinicResolutionService {
         // fallback: chọn clinic đầu tiên trong hệ thống
         try {
             List<Clinic> allClinics = clinicRepo.findAll();
-            if (allClinics != null && !allClinics.isEmpty() && allClinics.get(0).getId() != null) {
-                return allClinics.get(0).getId();
+            if (allClinics != null && !allClinics.isEmpty()) {
+                // Tìm clinic active đầu tiên, nếu không có thì lấy clinic đầu tiên
+                Optional<Clinic> activeClinic = allClinics.stream()
+                        .filter(c -> c.getId() != null && (c.getIsActive() == null || Boolean.TRUE.equals(c.getIsActive())))
+                        .findFirst();
+                
+                if (activeClinic.isPresent() && activeClinic.get().getId() != null) {
+                    log.warn("User {} has no clinic assignment. Using fallback clinic {} (active)", 
+                            userId, activeClinic.get().getId());
+                    return activeClinic.get().getId();
+                }
+                
+                // Nếu không có clinic active, lấy clinic đầu tiên
+                if (allClinics.get(0).getId() != null) {
+                    log.warn("User {} has no clinic assignment. Using fallback clinic {} (first available)", 
+                            userId, allClinics.get(0).getId());
+                    return allClinics.get(0).getId();
+                }
             }
         } catch (Exception e) {
             log.error("Failed to get clinics for fallback: {}", e.getMessage());
         }
 
+        // Nếu vẫn không tìm thấy clinic, throw exception với message rõ ràng hơn
         throw new AttendanceValidationException(String.format(
-                "Cannot resolve clinicId for user %d. No clinic assignment, role with clinic, or clinics in system found. Please assign user to a clinic.",
+                "Cannot resolve clinicId for user %d. No clinic assignment, role with clinic, or clinics in system found. Please assign user to a clinic or ensure at least one clinic exists in the system.",
                 userId));
     }
 }

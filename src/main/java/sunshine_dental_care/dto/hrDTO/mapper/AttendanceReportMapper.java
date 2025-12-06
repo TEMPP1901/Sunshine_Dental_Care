@@ -15,6 +15,7 @@ import sunshine_dental_care.entities.DoctorSchedule;
 import sunshine_dental_care.entities.User;
 import sunshine_dental_care.repositories.hr.DoctorScheduleRepo;
 import sunshine_dental_care.services.impl.hr.attend.AttendanceStatusCalculator;
+import sunshine_dental_care.utils.WorkHoursConstants;
 
 /**
  * Mapper để chuyển đổi Attendance entities sang Report Response DTOs.
@@ -113,13 +114,14 @@ public class AttendanceReportMapper {
                         .atZone(java.time.ZoneId.systemDefault())
                         .toLocalTime();
                 
-                long lunchBreakMinutes = 0;
-                LocalTime LUNCH_BREAK_START = LocalTime.of(11, 0);
-                LocalTime LUNCH_BREAK_END = LocalTime.of(13, 0);
-                if (checkInLocalTime.isBefore(LUNCH_BREAK_START)
-                        && checkOutLocalTime.isAfter(LUNCH_BREAK_END)) {
-                    lunchBreakMinutes = 120;
-                }
+                // Kiểm tra xem có phải bác sĩ không (dựa vào có schedule hay không)
+                List<DoctorSchedule> userSchedules = doctorScheduleRepo
+                        .findByUserIdAndClinicIdAndWorkDate(user.getId(), attendance.getClinicId(), workDate);
+                boolean isDoctor = !userSchedules.isEmpty();
+                
+                // Sử dụng WorkHoursConstants để tính lunch break (nhân viên mới trừ, bác sĩ không trừ)
+                int lunchBreakMinutes = WorkHoursConstants.calculateLunchBreakMinutes(
+                        checkInLocalTime, checkOutLocalTime, isDoctor);
                 
                 adjustedMinutes = totalMinutes - lunchBreakMinutes;
                 if (adjustedMinutes < 0) {
@@ -150,6 +152,7 @@ public class AttendanceReportMapper {
                 .findByUserIdAndClinicIdAndWorkDate(user.getId(), attendance.getClinicId(), workDate);
 
         if (!schedules.isEmpty()) {
+            // Bác sĩ có schedule
             DoctorSchedule schedule = schedules.get(0);
             item.setShiftStartTime(schedule.getStartTime());
             item.setShiftEndTime(schedule.getEndTime());
@@ -157,12 +160,14 @@ public class AttendanceReportMapper {
             long shiftHours = java.time.Duration.between(schedule.getStartTime(), schedule.getEndTime()).toHours();
             item.setShiftHours(shiftHours + " hr Shift: A");
         } else {
-            LocalTime defaultStart = attendanceStatusCalculator.getDefaultStartTime();
-            LocalTime defaultEnd = defaultStart.plusHours(9);
+            // Nhân viên không có schedule → dùng giờ mặc định
+            LocalTime defaultStart = WorkHoursConstants.EMPLOYEE_START_TIME;
+            LocalTime defaultEnd = WorkHoursConstants.EMPLOYEE_END_TIME;
             item.setShiftStartTime(defaultStart);
             item.setShiftEndTime(defaultEnd);
             item.setShiftDisplay(formatTime(defaultStart) + " - " + formatTime(defaultEnd));
-            item.setShiftHours("9 hr Shift: A");
+            // Nhân viên: 8 giờ làm việc (10 giờ tổng - 2 giờ nghỉ trưa)
+            item.setShiftHours(WorkHoursConstants.EMPLOYEE_EXPECTED_HOURS + " hr Shift: A");
         }
 
         item.setRemarks(attendance.getNote() != null ? attendance.getNote() : "Fixed Attendance");
@@ -262,13 +267,13 @@ public class AttendanceReportMapper {
                         .atZone(java.time.ZoneId.systemDefault())
                         .toLocalTime();
                 
-                long lunchBreakMinutes = 0;
-                LocalTime LUNCH_BREAK_START = LocalTime.of(11, 0);
-                LocalTime LUNCH_BREAK_END = LocalTime.of(13, 0);
-                if (checkInLocalTime.isBefore(LUNCH_BREAK_START)
-                        && checkOutLocalTime.isAfter(LUNCH_BREAK_END)) {
-                    lunchBreakMinutes = 120;
-                }
+                // Kiểm tra xem có phải bác sĩ không (dựa vào shiftType)
+                boolean isDoctorForMonthly = attendance.getShiftType() != null 
+                        && (attendance.getShiftType().equals("MORNING") || attendance.getShiftType().equals("AFTERNOON"));
+                
+                // Sử dụng WorkHoursConstants để tính lunch break (nhân viên mới trừ, bác sĩ không trừ)
+                int lunchBreakMinutes = WorkHoursConstants.calculateLunchBreakMinutes(
+                        checkInLocalTime, checkOutLocalTime, isDoctorForMonthly);
                 
                 long adjustedMinutes = totalMinutes - lunchBreakMinutes;
                 if (adjustedMinutes < 0) {

@@ -21,6 +21,7 @@ import sunshine_dental_care.repositories.hr.AttendanceRepository;
 import sunshine_dental_care.repositories.hr.DoctorScheduleRepo;
 import sunshine_dental_care.repositories.hr.LeaveRequestRepo;
 import sunshine_dental_care.services.impl.hr.schedule.HolidayService;
+import sunshine_dental_care.utils.WorkHoursConstants;
 
 @Component
 @RequiredArgsConstructor
@@ -32,8 +33,6 @@ public class AttendanceStatusCalculator {
     private final DoctorScheduleRepo doctorScheduleRepo;
     private final LeaveRequestRepo leaveRequestRepo;
     private final HolidayService holidayService;
-
-    private static final LocalTime LUNCH_BREAK_START = LocalTime.of(11, 0);
 
     private static final List<String> FORBIDDEN_ROLES = List.of(
             "ADMIN", "Admin", "admin",
@@ -60,7 +59,7 @@ public class AttendanceStatusCalculator {
 
     // Đánh giá trạng thái chấm công so với giờ làm chuẩn
     public String determineAttendanceStatus(Integer userId, Integer clinicId, LocalDate workDate, Instant checkInTime) {
-        LocalTime expectedStartTime = LocalTime.of(8, 0);
+        LocalTime expectedStartTime = WorkHoursConstants.EMPLOYEE_START_TIME;
         LocalTime checkInLocalTime = checkInTime.atZone(ZoneId.systemDefault()).toLocalTime();
 
         boolean hasApprovedLeave = leaveRequestRepo.hasApprovedLeaveOnDate(userId, workDate);
@@ -155,15 +154,11 @@ public class AttendanceStatusCalculator {
                 continue;
             }
 
-            String shiftType;
             LocalTime startTime = schedule.getStartTime();
             if (startTime == null) continue;
 
-            if (startTime.isBefore(LUNCH_BREAK_START)) {
-                shiftType = "MORNING";
-            } else {
-                shiftType = "AFTERNOON";
-            }
+            // Sử dụng WorkHoursConstants để xác định shiftType
+            String shiftType = WorkHoursConstants.determineShiftType(startTime);
 
             Optional<Attendance> attendance = attendanceRepository
                     .findByUserIdAndClinicIdAndWorkDateAndShiftType(userId, clinicId, workDate, shiftType);

@@ -14,6 +14,7 @@ import sunshine_dental_care.entities.DoctorSchedule;
 import sunshine_dental_care.exceptions.hr.AttendanceExceptions.AttendanceValidationException;
 import sunshine_dental_care.repositories.hr.DoctorScheduleRepo;
 import sunshine_dental_care.services.interfaces.hr.ShiftService;
+import sunshine_dental_care.utils.WorkHoursConstants;
 
 @Service
 @RequiredArgsConstructor
@@ -22,44 +23,37 @@ public class ShiftServiceImpl implements ShiftService {
 
     private final DoctorScheduleRepo doctorScheduleRepo;
 
-    private static final LocalTime LUNCH_BREAK_START = LocalTime.of(11, 0);
-    private static final LocalTime LUNCH_BREAK_END = LocalTime.of(13, 0);
-    private static final LocalTime AFTERNOON_SHIFT_START = LocalTime.of(13, 0);
-    private static final LocalTime EMPLOYEE_START_TIME = LocalTime.of(8, 0);
-    private static final LocalTime EMPLOYEE_END_TIME = LocalTime.of(18, 0);
-
     // xác định ca làm việc dựa vào giờ vào ca
     @Override
     public String determineShiftForDoctor(LocalTime currentTime) {
-        if (currentTime.isBefore(LUNCH_BREAK_START)) {
-            return "MORNING";
-        } else if (currentTime.isAfter(LUNCH_BREAK_START) && currentTime.isBefore(LocalTime.of(18, 0))) {
-            return "AFTERNOON";
-        }
-        return "AFTERNOON";
+        return WorkHoursConstants.determineShiftForDoctor(currentTime);
     }
 
     // chỉ ca CHIỀU thì không thể check-in trước 13h
     @Override
     public void validateCheckInTime(String shiftType, LocalTime currentTime) {
-        if ("AFTERNOON".equals(shiftType) && currentTime.isBefore(AFTERNOON_SHIFT_START)) {
+        if (WorkHoursConstants.SHIFT_TYPE_AFTERNOON.equals(shiftType) 
+                && currentTime.isBefore(WorkHoursConstants.AFTERNOON_SHIFT_START)) {
             throw new AttendanceValidationException(
-                String.format("Không thể check-in ca CHIỀU trước 13:00. Giờ hiện tại: %s", currentTime));
+                String.format("Không thể check-in ca CHIỀU trước %s. Giờ hiện tại: %s", 
+                    WorkHoursConstants.AFTERNOON_SHIFT_START, currentTime));
         }
     }
 
     // ca SÁNG không check-out trước 8h, ca CHIỀU không check-out trước 13h
     @Override
     public void validateCheckOutTime(String shiftType, LocalTime currentTime) {
-        if ("MORNING".equals(shiftType)) {
-            if (currentTime.isBefore(LocalTime.of(8, 0))) {
+        if (WorkHoursConstants.SHIFT_TYPE_MORNING.equals(shiftType)) {
+            if (currentTime.isBefore(WorkHoursConstants.MORNING_SHIFT_START)) {
                 throw new AttendanceValidationException(
-                    String.format("Không thể check-out ca SÁNG trước 8:00. Giờ hiện tại: %s", currentTime));
+                    String.format("Không thể check-out ca SÁNG trước %s. Giờ hiện tại: %s", 
+                        WorkHoursConstants.MORNING_SHIFT_START, currentTime));
             }
-        } else if ("AFTERNOON".equals(shiftType)) {
-            if (currentTime.isBefore(AFTERNOON_SHIFT_START)) {
+        } else if (WorkHoursConstants.SHIFT_TYPE_AFTERNOON.equals(shiftType)) {
+            if (currentTime.isBefore(WorkHoursConstants.AFTERNOON_SHIFT_START)) {
                 throw new AttendanceValidationException(
-                    String.format("Không thể check-out ca CHIỀU trước 13:00. Giờ hiện tại: %s", currentTime));
+                    String.format("Không thể check-out ca CHIỀU trước %s. Giờ hiện tại: %s", 
+                        WorkHoursConstants.AFTERNOON_SHIFT_START, currentTime));
             }
         }
     }
@@ -74,9 +68,8 @@ public class ShiftServiceImpl implements ShiftService {
         }
         for (DoctorSchedule schedule : schedules) {
             LocalTime startTime = schedule.getStartTime();
-            boolean isMorningMatch = "MORNING".equals(shiftType) && startTime.isBefore(LUNCH_BREAK_START);
-            boolean isAfternoonMatch = "AFTERNOON".equals(shiftType) && startTime.isAfter(LUNCH_BREAK_START);
-            if (isMorningMatch || isAfternoonMatch) {
+            // Sử dụng helper method từ WorkHoursConstants để xử lý đúng boundary cases
+            if (WorkHoursConstants.matchesShiftType(startTime, shiftType)) {
                 return Optional.of(schedule);
             }
         }
@@ -99,13 +92,14 @@ public class ShiftServiceImpl implements ShiftService {
     @Override
     @Transactional
     public void activateAfternoonSchedulesIfMorningCheckIn(Integer userId, LocalDate date, String shiftType, Integer currentScheduleId) {
-        if ("MORNING".equals(shiftType)) {
+        if (WorkHoursConstants.SHIFT_TYPE_MORNING.equals(shiftType)) {
             var allSchedules = doctorScheduleRepo.findByDoctorIdAndWorkDate(userId, date);
             for (var schedule : allSchedules) {
                 if (schedule == null || schedule.getId().equals(currentScheduleId))
                     continue;
                 LocalTime scheduleStart = schedule.getStartTime();
-                if (scheduleStart == null || !scheduleStart.isAfter(LUNCH_BREAK_START))
+                // Active các schedule có startTime >= 11:00 (ca chiều)
+                if (scheduleStart == null || scheduleStart.isBefore(WorkHoursConstants.LUNCH_BREAK_START))
                     continue;
                 if (schedule.getStatus() == null || !"ACTIVE".equals(schedule.getStatus())) {
                     schedule.setStatus("ACTIVE");
@@ -121,12 +115,12 @@ public class ShiftServiceImpl implements ShiftService {
         if (schedule != null) {
             return schedule.getStartTime();
         }
-        if ("MORNING".equals(shiftType)) {
-            return LocalTime.of(8, 0);
-        } else if ("AFTERNOON".equals(shiftType)) {
-            return LocalTime.of(13, 0);
+        if (WorkHoursConstants.SHIFT_TYPE_MORNING.equals(shiftType)) {
+            return WorkHoursConstants.MORNING_SHIFT_START;
+        } else if (WorkHoursConstants.SHIFT_TYPE_AFTERNOON.equals(shiftType)) {
+            return WorkHoursConstants.AFTERNOON_SHIFT_START;
         } else {
-            return EMPLOYEE_START_TIME;
+            return WorkHoursConstants.EMPLOYEE_START_TIME;
         }
     }
 
@@ -136,12 +130,12 @@ public class ShiftServiceImpl implements ShiftService {
         if (schedule != null) {
             return schedule.getEndTime();
         }
-        if ("MORNING".equals(shiftType)) {
-            return LocalTime.of(11, 0);
-        } else if ("AFTERNOON".equals(shiftType)) {
-            return LocalTime.of(18, 0);
+        if (WorkHoursConstants.SHIFT_TYPE_MORNING.equals(shiftType)) {
+            return WorkHoursConstants.MORNING_SHIFT_END;
+        } else if (WorkHoursConstants.SHIFT_TYPE_AFTERNOON.equals(shiftType)) {
+            return WorkHoursConstants.AFTERNOON_SHIFT_END;
         } else {
-            return EMPLOYEE_END_TIME;
+            return WorkHoursConstants.EMPLOYEE_END_TIME;
         }
     }
 }

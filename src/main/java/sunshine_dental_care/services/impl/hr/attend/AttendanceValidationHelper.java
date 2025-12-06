@@ -12,6 +12,7 @@ import sunshine_dental_care.entities.Attendance;
 import sunshine_dental_care.exceptions.hr.AttendanceExceptions.AlreadyCheckedInException;
 import sunshine_dental_care.exceptions.hr.AttendanceExceptions.AttendanceValidationException;
 import sunshine_dental_care.repositories.hr.AttendanceRepository;
+import sunshine_dental_care.utils.WorkHoursConstants;
 
 @Component
 @RequiredArgsConstructor
@@ -62,10 +63,10 @@ public class AttendanceValidationHelper {
 
     // Chỉ cho phép check-out sau giờ nghỉ trưa (sau 13h)
     public void validateCheckOutTimeForEmployee(LocalTime currentTime) {
-        if (currentTime.isBefore(LocalTime.of(13, 0))) {
+        if (currentTime.isBefore(WorkHoursConstants.LUNCH_BREAK_END)) {
             throw new AttendanceValidationException(
-                    String.format("Check-out is allowed only after lunch break (after 13:00). Current time: %s",
-                            currentTime));
+                    String.format("Check-out is allowed only after lunch break (after %s). Current time: %s",
+                            WorkHoursConstants.LUNCH_BREAK_END, currentTime));
         }
     }
 }
