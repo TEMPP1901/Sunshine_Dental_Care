@@ -137,30 +137,31 @@ public class ProductServiceImpl implements ProductService {
                 .findRecentPurchases(id, PageRequest.of(0, 10));
         dto.setRecentPurchases(recentPurchases);
 
-        // 3. LOGIC GIẢM GIÁ (SALE %)
-        // So sánh Giá hiện tại vs Giá cao nhất từng thiết lập trong quá khứ
+        // --- 3. LOGIC GIẢM GIÁ (SALE %) - [FIXED FINAL: NULL SAFETY] ---
         BigDecimal maxHistoryPrice = stockReceiptRepository.findMaxRetailPriceByProductId(id);
         BigDecimal currentPrice = product.getDefaultRetailPrice();
+
+        dto.setOriginalPrice(null);
+        dto.setDiscountPercentage(null);
 
         if (maxHistoryPrice != null && maxHistoryPrice.compareTo(BigDecimal.ZERO) > 0
                 && currentPrice != null && currentPrice.compareTo(maxHistoryPrice) < 0) {
 
-            // Công thức: (Max - Current) / Max * 100
+            // Tính % giảm giá
             BigDecimal diff = maxHistoryPrice.subtract(currentPrice);
-            BigDecimal percent = diff.divide(maxHistoryPrice, 2, RoundingMode.HALF_UP)
-                    .multiply(BigDecimal.valueOf(100));
 
-            // Chỉ hiển thị Sale nếu giảm > 1%
-            if (percent.compareTo(BigDecimal.ONE) >= 0) {
-                dto.setDiscountPercentage(percent.intValue());
-            } else {
-                dto.setDiscountPercentage(0);
+            // Công thức: (Diff * 100) / Max
+            // Scale 2, Làm tròn HALF_UP
+            BigDecimal percent = diff.multiply(BigDecimal.valueOf(100))
+                    .divide(maxHistoryPrice, 2, RoundingMode.HALF_UP);
+
+            if (percent.compareTo(BigDecimal.ZERO) > 0) {
+                dto.setOriginalPrice(maxHistoryPrice);
+                dto.setDiscountPercentage(percent);
             }
-        } else {
-            dto.setDiscountPercentage(0);
         }
 
-        // --- 4. SẢN PHẨM GỢI Ý (RELATED PRODUCTS) [UPDATED LOGIC] ---
+        // --- 4. SẢN PHẨM GỢI Ý (RELATED PRODUCTS) ---
 
         // B1: Lấy danh sách Type của sản phẩm hiện tại (đã có sẵn trong DTO sau khi map)
         List<String> currentTypeNames = dto.getTypeNames();
