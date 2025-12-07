@@ -1,4 +1,4 @@
-package sunshine_dental_care.api.huybro_invoice;
+package sunshine_dental_care.api.huybro_products;
 
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;

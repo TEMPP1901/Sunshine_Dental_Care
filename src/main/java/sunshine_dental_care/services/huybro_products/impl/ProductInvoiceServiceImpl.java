@@ -15,7 +15,9 @@ import sunshine_dental_care.entities.huybro_product_invoices.ProductInvoiceItem;
 import sunshine_dental_care.repositories.huybro_products.ProductInventoryRepository;
 import sunshine_dental_care.repositories.huybro_products.ProductInvoiceItemRepository;
 import sunshine_dental_care.repositories.huybro_products.ProductInvoiceRepository;
+import sunshine_dental_care.services.huybro_checkout.email.client.EmailService;
 import sunshine_dental_care.services.huybro_products.interfaces.ProductInvoiceService;
+import sunshine_dental_care.utils.huybro_utils.EmailTemplateUtils;
 
 import java.time.Instant;
 import java.time.LocalDateTime;
@@ -29,7 +31,8 @@ public class ProductInvoiceServiceImpl implements ProductInvoiceService {
 
     private final ProductInvoiceRepository invoiceRepository;
     private final ProductInvoiceItemRepository invoiceItemRepository;
-    private final ProductInventoryRepository productInventoryRepository; // Dùng để check/trừ kho
+    private final ProductInventoryRepository productInventoryRepository;
+    private final EmailService emailService;;
 
     @Override
     @Transactional(readOnly = true)
@@ -106,6 +109,24 @@ public class ProductInvoiceServiceImpl implements ProductInvoiceService {
         invoice.setInvoiceStatus(newStatus);
         invoice.setNotes(request.getNote() != null ? request.getNote() : invoice.getNotes());
         invoice.setUpdatedAt(LocalDateTime.now());
+        ProductInvoice savedInvoice = invoiceRepository.save(invoice);
+
+        // [NEW] GỬI MAIL FULL HÓA ĐƠN + TRẠNG THÁI MỚI
+        if (!currentStatus.equalsIgnoreCase(newStatus) && savedInvoice.getCustomerEmail() != null) {
+            try {
+                // 1. Phải lấy lại danh sách sản phẩm để in ra bảng (Full Bill)
+                List<ProductInvoiceItem> items = invoiceItemRepository.findAllByInvoiceIdWithProduct(invoiceId);
+
+                // 2. Tạo nội dung email
+                String subject = "Cập nhật đơn hàng #" + savedInvoice.getInvoiceCode() + ": " + newStatus;
+                String htmlBody = EmailTemplateUtils.buildInvoiceEmail(savedInvoice, items);
+
+                // 3. Gửi
+                emailService.sendHtmlEmail(savedInvoice.getCustomerEmail(), subject, htmlBody);
+            } catch (Exception e) {
+                log.warn("Failed to send status update email: {}", e.getMessage());
+            }
+        }
 
         invoiceRepository.save(invoice);
     }

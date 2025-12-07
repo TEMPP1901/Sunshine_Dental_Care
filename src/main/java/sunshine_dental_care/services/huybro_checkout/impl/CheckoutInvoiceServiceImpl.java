@@ -30,7 +30,9 @@ import sunshine_dental_care.repositories.huybro_products.ProductRepository;
 import sunshine_dental_care.security.CurrentUser;
 import sunshine_dental_care.services.huybro_cart.impl.CurrencyRateInternalService;
 import sunshine_dental_care.services.huybro_cart.interfaces.CartService;
+import sunshine_dental_care.services.huybro_checkout.email.client.EmailService;
 import sunshine_dental_care.services.huybro_checkout.interfaces.CheckoutInvoiceService;
+import sunshine_dental_care.utils.huybro_utils.EmailTemplateUtils;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
@@ -53,7 +55,7 @@ public class CheckoutInvoiceServiceImpl implements CheckoutInvoiceService {
     private final CurrencyRateInternalService currencyRateService;
     private final ProductInventoryRepository productInventoryRepository;
     private final ClinicRepository clinicRepository;
-
+    private final EmailService emailService;
     // [CONFIG HARDCODE] Theo yêu cầu: Q9 ưu tiên, Q1 dự phòng
     private static final Integer ID_Q1 = 1; // Kho Khám
     private static final Integer ID_Q9 = 2; // Kho Bán (Ưu tiên)
@@ -250,7 +252,17 @@ public class CheckoutInvoiceServiceImpl implements CheckoutInvoiceService {
 
         productInvoiceItemRepository.saveAll(invoiceItems);
         cartService.clearCart(session);
+        try {
+            if (savedInvoice.getCustomerEmail() != null) {
+                String subject = "Xác nhận đơn hàng #" + savedInvoice.getInvoiceCode();
+                // Dùng chung 1 hàm buildInvoiceEmail
+                String htmlBody = EmailTemplateUtils.buildInvoiceEmail(savedInvoice, invoiceItems);
 
+                emailService.sendHtmlEmail(savedInvoice.getCustomerEmail(), subject, htmlBody);
+            }
+        } catch (Exception e) {
+            log.warn("Failed to send order email: {}", e.getMessage());
+        }
         return mapToCheckoutInvoiceDto(savedInvoice, invoiceItems);
     }
 
