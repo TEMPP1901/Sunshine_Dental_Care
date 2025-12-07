@@ -187,6 +187,7 @@ public class ProductInvoiceServiceImpl implements ProductInvoiceService {
                 .invoiceId(inv.getId())
                 .invoiceCode(inv.getInvoiceCode())
                 .invoiceDate(inv.getInvoiceDate())
+                .currency(inv.getCurrency())
                 .customerFullName(inv.getCustomerFullName())
                 .customerPhone(inv.getCustomerPhone())
                 .totalAmount(inv.getTotalAmount())

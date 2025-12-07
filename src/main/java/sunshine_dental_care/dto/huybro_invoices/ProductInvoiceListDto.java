@@ -26,4 +26,5 @@ public class ProductInvoiceListDto implements Serializable {
     private String paymentMethod;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
+    private String currency;
 }
