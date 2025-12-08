@@ -1,5 +1,7 @@
 package sunshine_dental_care.services.doctor;
 
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
 import sunshine_dental_care.dto.doctorDTO.ClinicDTO;
 import sunshine_dental_care.dto.doctorDTO.DoctorAppointmentDTO;
@@ -9,8 +11,12 @@ import sunshine_dental_care.dto.doctorDTO.RoomDTO;
 import sunshine_dental_care.dto.doctorDTO.ServiceDTO;
 import sunshine_dental_care.dto.doctorDTO.ServiceVariantDTO;
 import sunshine_dental_care.entities.Appointment;
+import sunshine_dental_care.entities.User;
 import sunshine_dental_care.repositories.doctor.DoctorAppointmentRepo;
 import sunshine_dental_care.repositories.doctor.DoctorRepo;
+import sunshine_dental_care.repositories.auth.UserRepo;
+import sunshine_dental_care.security.CurrentUser;
+import sunshine_dental_care.services.interfaces.system.AuditLogService;
 
 import java.time.Instant;
 import java.util.List;
@@ -22,10 +28,17 @@ public class DoctorAppointmentImp implements DoctorAppointmentService{
 
     private DoctorRepo _doctorRepo;
     private DoctorAppointmentRepo _doctorAppointmentRepo;
+    private UserRepo _userRepo;
+    private AuditLogService _auditLogService;
 
-    public DoctorAppointmentImp(DoctorRepo doctorRepo, DoctorAppointmentRepo doctorAppointmentRepo) {
+    public DoctorAppointmentImp(DoctorRepo doctorRepo,
+                                DoctorAppointmentRepo doctorAppointmentRepo,
+                                UserRepo userRepo,
+                                AuditLogService auditLogService) {
         _doctorRepo = doctorRepo;
         _doctorAppointmentRepo = doctorAppointmentRepo;
+        _userRepo = userRepo;
+        _auditLogService = auditLogService;
     }
 
     // Hàm chuyển đổi từ entity Appointment sang DTO DoctorAppointmentDTO
@@ -169,9 +182,16 @@ public class DoctorAppointmentImp implements DoctorAppointmentService{
     @Override
     // Thay đổi trạng thái của lịch hẹn (VD: đã hoàn thành, đã hủy,...)
     public void changeStatusAppointment(Integer appointmentId, String status) {
-        _doctorAppointmentRepo.findById(appointmentId)
+        Appointment appt = _doctorAppointmentRepo.findById(appointmentId)
             .orElseThrow(() -> new IllegalArgumentException("Appointment not found"));
         _doctorAppointmentRepo.updateStatus(appointmentId, status); // Cập nhật trạng thái lịch hẹn
+
+        // Audit log: bác sĩ đổi trạng thái lịch hẹn
+        User actor = resolveCurrentUser();
+        if (actor != null) {
+            _auditLogService.logAction(actor, "DOCTOR_UPDATE_STATUS", "APPOINTMENT", appointmentId, null,
+                    "Status -> " + status);
+        }
     }
 
     @Override
@@ -182,5 +202,17 @@ public class DoctorAppointmentImp implements DoctorAppointmentService{
         List<Appointment> appointments = _doctorAppointmentRepo.findByDoctorIdAndStartDateTimeBetween(
                 doctor.getId(), startDate, endDate);
         return appointments.stream().map(this::mapToDTO).collect(Collectors.toList());
+    }
+
+    // Lấy user hiện tại từ SecurityContext để ghi audit
+    private User resolveCurrentUser() {
+        try {
+            Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+            if (auth != null && auth.getPrincipal() instanceof CurrentUser currentUser) {
+                return _userRepo.findById(currentUser.userId()).orElse(null);
+            }
+        } catch (Exception ignored) {
+        }
+        return null;
     }
 }

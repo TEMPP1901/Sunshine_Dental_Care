@@ -9,6 +9,8 @@ import java.util.Map;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -53,6 +55,8 @@ import sunshine_dental_care.repositories.hr.LeaveRequestRepo;
 import sunshine_dental_care.repositories.hr.RoomRepo;
 import sunshine_dental_care.repositories.hr.UserClinicAssignmentRepo;
 import sunshine_dental_care.repositories.reception.AppointmentRepo;
+import sunshine_dental_care.security.CurrentUser;
+import sunshine_dental_care.services.interfaces.system.AuditLogService;
 import sunshine_dental_care.services.auth_service.MailService;
 import sunshine_dental_care.services.interfaces.hr.HrEmployeeService;
 
@@ -83,6 +87,7 @@ public class HrEmployeeServiceImpl implements HrEmployeeService {
     private final MedicalRecordRepository medicalRecordRepository;
     private final AppointmentRepo appointmentRepo;
     private final FaceProfileUpdateRequestRepo faceProfileUpdateRequestRepo;
+    private final AuditLogService auditLogService;
     @PersistenceContext
     private EntityManager entityManager;
 
@@ -246,6 +251,17 @@ public class HrEmployeeServiceImpl implements HrEmployeeService {
             }
             log.info("Employee created successfully: userId={}, email={}", user.getId(), user.getEmail());
 
+            // Ghi audit log tạo nhân viên + phân công phòng khám nếu có
+            User actor = getCurrentUserEntity();
+            if (actor != null) {
+                auditLogService.logAction(actor, "CREATE", "EMPLOYEE", user.getId(), null, null);
+                if (assignment != null && assignment.getId() != null) {
+                    auditLogService.logAction(actor, "ASSIGN", "USER_CLINIC_ASSIGNMENT", assignment.getId(),
+                            null,
+                            "Assigned user " + user.getId() + " to clinic " + assignment.getClinic().getId());
+                }
+            }
+
             // Gửi email chào mừng khi tạo mới tài khoản
             try {
                 String roleName = role != null ? role.getRoleName() : null;
@@ -381,6 +397,12 @@ public class HrEmployeeServiceImpl implements HrEmployeeService {
         userRoleRepo.saveAll(userRoles);
 
         log.info("Employee {} status changed to {} with reason: {}", id, isActive, reason);
+
+        User actor = getCurrentUserEntity();
+        if (actor != null) {
+            String action = Boolean.TRUE.equals(isActive) ? "UNLOCK" : "LOCK";
+            auditLogService.logAction(actor, action, "EMPLOYEE", user.getId(), null, reason);
+        }
 
         return employeeMapper.toEmployeeResponse(user);
     }
@@ -632,6 +654,11 @@ public class HrEmployeeServiceImpl implements HrEmployeeService {
             userRepo.delete(user);
             log.info("Hard deleted employee {} successfully", id);
 
+            User actor = getCurrentUserEntity();
+            if (actor != null) {
+                auditLogService.logAction(actor, "DELETE", "EMPLOYEE", id, null, reason);
+            }
+
         } catch (EmployeeNotFoundException | EmployeeValidationException ex) {
             log.error("Error hard deleting employee {}: {}", id, ex.getMessage(), ex);
             throw ex;
@@ -666,4 +693,16 @@ public class HrEmployeeServiceImpl implements HrEmployeeService {
         }
     }
 
+    // Lấy user hiện tại từ SecurityContext để ghi audit log (nếu không có thì bỏ qua log)
+    private User getCurrentUserEntity() {
+        try {
+            Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+            if (auth != null && auth.getPrincipal() instanceof CurrentUser currentUser) {
+                return userRepo.findById(currentUser.userId()).orElse(null);
+            }
+        } catch (Exception e) {
+            log.warn("Cannot resolve current user for audit log: {}", e.getMessage());
+        }
+        return null;
+    }
 }

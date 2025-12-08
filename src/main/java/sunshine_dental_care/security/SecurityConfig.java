@@ -81,8 +81,8 @@ public class SecurityConfig {
                         .requestMatchers("/api/doctor/**","/api/patients/{patientId}/records/**").hasRole("DOCTOR") // Chỉ bác sĩ được phép,
                         .requestMatchers("/auth/sign-up").permitAll()  // Cho phép đăng ký PATIENT * đổi vị trí vì đây là public
 
-                        // Products
-                        .requestMatchers("/api/products/accountant/**").hasRole("ACCOUNTANT")
+                        // Products - Cho phép Admin truy cập endpoint Accountant
+                        .requestMatchers("/api/products/accountant/**").hasAnyRole("ACCOUNTANT", "ADMIN")
                         .requestMatchers("/api/products/**").permitAll()
                         .requestMatchers("/api/cart/**").permitAll()
                         .requestMatchers("/api/checkout/**").permitAll()
@@ -104,8 +104,13 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.POST, "/api/auth/change-password").authenticated()
 
                         // Phân quyền theo Role
-                        .requestMatchers("/api/hr/employees/**").hasRole("HR")
+                        // Cho phép Admin truy cập một số endpoint HR Management (departments, clinics, roles)
+                        .requestMatchers("/api/hr/management/departments").hasAnyRole("HR", "ADMIN")
+                        .requestMatchers("/api/hr/management/clinics").hasAnyRole("HR", "ADMIN")
+                        .requestMatchers("/api/hr/management/roles").hasAnyRole("HR", "ADMIN")
+                        .requestMatchers("/api/hr/management/rooms").hasAnyRole("HR", "ADMIN")
                         .requestMatchers("/api/hr/management/**").hasRole("HR")
+                        .requestMatchers("/api/hr/employees/**").hasRole("HR")
                         .requestMatchers("/api/public/**").permitAll()
 
                         // Cho phép mọi user đã login (bao gồm Patient) xem slot và đặt lịch

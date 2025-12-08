@@ -1,20 +1,30 @@
 package sunshine_dental_care.entities.huybro_product_invoice;
 
-import jakarta.persistence.*;
-import jakarta.validation.constraints.NotNull;
-import jakarta.validation.constraints.Size;
-import lombok.Getter;
-import lombok.Setter;
-import org.hibernate.annotations.ColumnDefault;
-import org.hibernate.annotations.Nationalized;
-import sunshine_dental_care.entities.Appointment;
-import sunshine_dental_care.entities.Clinic;
-import sunshine_dental_care.entities.Patient;
-
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+
+import org.hibernate.annotations.ColumnDefault;
+import org.hibernate.annotations.Nationalized;
+
+import jakarta.persistence.Column;
+import jakarta.persistence.Entity;
+import jakarta.persistence.FetchType;
+import jakarta.persistence.GeneratedValue;
+import jakarta.persistence.GenerationType;
+import jakarta.persistence.Id;
+import jakarta.persistence.JoinColumn;
+import jakarta.persistence.ManyToOne;
+import jakarta.persistence.Table;
+import jakarta.persistence.Transient;
+import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Size;
+import lombok.Getter;
+import lombok.Setter;
+import sunshine_dental_care.entities.Appointment;
+import sunshine_dental_care.entities.Clinic;
+import sunshine_dental_care.entities.Patient;
 
 @Getter
 @Setter
@@ -124,8 +134,7 @@ public class ProductInvoice {
 
     @Size(max = 50)
     @Nationalized
-    @ColumnDefault("N'NEW'")
-    @Column(name = "invoiceStatus", nullable = false, length = 50)
+    @Transient // Column not present in DB; avoid SQL errors
     private String invoiceStatus;
 
 }

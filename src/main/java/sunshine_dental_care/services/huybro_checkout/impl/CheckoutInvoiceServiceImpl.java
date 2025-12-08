@@ -26,6 +26,7 @@ import sunshine_dental_care.repositories.huybro_products.ProductRepository;
 import sunshine_dental_care.security.CurrentUser;
 import sunshine_dental_care.services.huybro_cart.interfaces.CartService;
 import sunshine_dental_care.services.huybro_checkout.interfaces.CheckoutInvoiceService;
+import sunshine_dental_care.services.interfaces.system.AuditLogService;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
@@ -45,6 +46,7 @@ public class CheckoutInvoiceServiceImpl implements CheckoutInvoiceService {
     private final ProductInvoiceRepository productInvoiceRepository;
     private final ProductInvoiceItemRepository productInvoiceItemRepository;
     private final UserCustomRepository userRepository;
+    private final AuditLogService auditLogService;
 
     @Override
     @Transactional
@@ -207,6 +209,23 @@ public class CheckoutInvoiceServiceImpl implements CheckoutInvoiceService {
         productInvoiceItemRepository.saveAll(invoiceItems);
         cartService.clearCart(session);
 
+        // Ghi audit log tạo hóa đơn
+        User actor = resolveCurrentUserEntity();
+        if (actor != null) {
+            auditLogService.logAction(
+                    actor,
+                    "CREATE_INVOICE",
+                    "PRODUCT_INVOICE",
+                    savedInvoice.getId(),
+                    null,
+                    String.format("Invoice %s total %s %s via %s/%s",
+                            savedInvoice.getInvoiceCode(),
+                            savedInvoice.getTotalAmount(),
+                            savedInvoice.getCurrency(),
+                            savedInvoice.getPaymentMethod(),
+                            savedInvoice.getPaymentChannel()));
+        }
+
         return mapToCheckoutInvoiceDto(savedInvoice, invoiceItems);
     }
 
@@ -265,5 +284,19 @@ public class CheckoutInvoiceServiceImpl implements CheckoutInvoiceService {
 
     private String trimToNull(String value) {
         return StringUtils.trimToNull(value);
+    }
+
+    // Helper: lấy actor từ SecurityContext để ghi audit log
+    private User resolveCurrentUserEntity() {
+        try {
+            Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+            if (auth != null && auth.isAuthenticated() && auth.getPrincipal() instanceof CurrentUser currentUser) {
+                Integer userId = currentUser.userId();
+                return userRepository.findById(userId).orElse(null);
+            }
+        } catch (Exception e) {
+            log.warn("Cannot resolve current user for audit log: {}", e.getMessage());
+        }
+        return null;
     }
 }

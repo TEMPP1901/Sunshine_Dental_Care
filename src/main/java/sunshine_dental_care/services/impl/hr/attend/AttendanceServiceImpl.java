@@ -15,6 +15,8 @@ import java.util.stream.Collectors;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -52,7 +54,9 @@ import sunshine_dental_care.services.impl.notification.NotificationService;
 import sunshine_dental_care.services.interfaces.hr.AttendanceService;
 import sunshine_dental_care.services.interfaces.hr.FaceRecognitionService.FaceVerificationResult;
 import sunshine_dental_care.services.interfaces.hr.ShiftService;
+import sunshine_dental_care.services.interfaces.system.AuditLogService;
 import sunshine_dental_care.utils.WorkHoursConstants;
+import sunshine_dental_care.security.CurrentUser;
 
 @Service
 @RequiredArgsConstructor
@@ -77,6 +81,7 @@ public class AttendanceServiceImpl implements AttendanceService {
 
     private final AttendanceCalculationHelper calculationHelper;
     private final AttendanceValidationHelper validationHelper;
+    private final AuditLogService auditLogService;
 
     private static final Set<String> ADMIN_ALLOWED_STATUSES = Set.of(
             "ON_TIME", "LATE", "ABSENT", "APPROVED_ABSENCE", "APPROVED_LATE", "APPROVED_PRESENT");
@@ -205,6 +210,12 @@ public class AttendanceServiceImpl implements AttendanceService {
             expectedEndTime = shiftService.getExpectedEndTime(shiftType, matchedSchedule.orElse(null));
         }
 
+        User actor = resolveCurrentUserEntity();
+        if (actor != null) {
+            auditLogService.logAction(actor, "CHECK_IN", "ATTENDANCE", attendance.getId(), null,
+                    "Check-in for user " + request.getUserId() + " at clinic " + clinicId);
+        }
+
         return attendanceMapper.mapToAttendanceResponse(attendance, user, clinic, faceProfile, faceResult, wifiResult,
                 expectedStartTime, expectedEndTime);
     }
@@ -319,6 +330,12 @@ public class AttendanceServiceImpl implements AttendanceService {
                 .orElseThrow(() -> new AttendanceNotFoundException("Clinic not found"));
 
         sendCheckOutNotification(attendance.getUserId(), clinic.getClinicName(), attendance.getActualWorkHours(), attendance.getId());
+
+        User actor = resolveCurrentUserEntity();
+        if (actor != null) {
+            auditLogService.logAction(actor, "CHECK_OUT", "ATTENDANCE", attendance.getId(), null,
+                    "Check-out for user " + attendance.getUserId() + " at clinic " + attendance.getClinicId());
+        }
 
         return attendanceMapper.mapToAttendanceResponse(attendance, user, clinic, faceProfile, faceResult, wifiResult,
                 expectedStartTime, expectedEndTime);
@@ -571,7 +588,15 @@ public class AttendanceServiceImpl implements AttendanceService {
                     (attendance.getNote() != null ? attendance.getNote() + " | " : "") + "[Admin: " + adminNote + "]");
         }
         attendance.setUpdatedAt(Instant.now());
-        return mapToResponseWithLookups(attendanceRepo.save(attendance));
+        Attendance saved = attendanceRepo.save(attendance);
+
+        User actor = resolveUserById(adminUserId);
+        if (actor != null) {
+            auditLogService.logAction(actor, "APPROVE_ATTENDANCE", "ATTENDANCE", attendanceId, null,
+                    "Status -> " + newStatus + (adminNote != null ? " | note: " + adminNote : ""));
+        }
+
+        return mapToResponseWithLookups(saved);
     }
 
     @Override
@@ -597,6 +622,14 @@ public class AttendanceServiceImpl implements AttendanceService {
     @Transactional
     public AttendanceResponse processExplanation(AdminExplanationActionRequest request, Integer adminUserId) {
         Attendance attendance = attendanceExplanationHelper.processExplanation(request, adminUserId);
+
+        User actor = resolveUserById(adminUserId);
+        if (actor != null) {
+            auditLogService.logAction(actor, request.getAction(), "ATTENDANCE", request.getAttendanceId(), null,
+                    "Process explanation: " + request.getAction() +
+                            (request.getAdminNote() != null ? " | note: " + request.getAdminNote() : ""));
+        }
+
         return mapToResponseWithLookups(attendance);
     }
 
@@ -614,5 +647,29 @@ public class AttendanceServiceImpl implements AttendanceService {
         LocalTime start = WorkHoursConstants.EMPLOYEE_START_TIME;
         LocalTime end = WorkHoursConstants.EMPLOYEE_END_TIME;
         return new LocalTime[] { start, end };
+    }
+
+    // Helper: lấy user hiện tại từ SecurityContext
+    private User resolveCurrentUserEntity() {
+        try {
+            Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+            if (auth != null && auth.getPrincipal() instanceof CurrentUser currentUser) {
+                return userRepo.findById(currentUser.userId()).orElse(null);
+            }
+        } catch (Exception e) {
+            log.warn("Cannot resolve current user for audit log: {}", e.getMessage());
+        }
+        return null;
+    }
+
+    // Helper: lấy user theo id (cho các action truyền vào adminUserId)
+    private User resolveUserById(Integer userId) {
+        if (userId == null) return null;
+        try {
+            return userRepo.findById(userId).orElse(null);
+        } catch (Exception e) {
+            log.warn("Cannot resolve user {} for audit log: {}", userId, e.getMessage());
+            return null;
+        }
     }
 }

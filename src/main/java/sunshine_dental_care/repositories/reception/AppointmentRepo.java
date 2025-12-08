@@ -55,4 +55,12 @@ public interface AppointmentRepo extends JpaRepository<Appointment, Integer> {
             @Param("clinicId") Integer clinicId,
             @Param("date") LocalDate date
     );
+
+    //Lấy TẤT CẢ lịch hẹn trong ngày (không filter theo clinic).
+    @Query("SELECT a FROM Appointment a " +
+            "WHERE CAST(a.startDateTime AS date) = :date " +
+            "ORDER BY a.startDateTime ASC")
+    List<Appointment> findAllByDate(
+            @Param("date") LocalDate date
+    );
 }
