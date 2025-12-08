@@ -24,73 +24,67 @@ public class AppointmentReminderTask {
     private final MailService mailService;
 
     /**
-     * PRODUCTION MODE:
-     * Chạy định kỳ vào phút thứ 0 và phút thứ 30 của mỗi giờ.
-     * Ví dụ: 8:00, 8:30, 9:00, 9:30...
+     * PRODUCTION MODE: Chạy mỗi 30 phút.
      */
     @Scheduled(cron = "0 0/30 * * * ?")
-    @Transactional // Transaction giúp lấy dữ liệu Lazy Loading an toàn
+    @Transactional
     public void scanAndRemindAppointments() {
-        // Instant now = Instant.now(); // Log này để debug nếu cần
-        // System.out.println("--- [SCHEDULER] Bắt đầu quét nhắc hẹn: " + now);
-
         Instant now = Instant.now();
 
-        // LOGIC QUÉT THỰC TẾ:
-        // Chúng ta muốn nhắc khách trước 24h.
-        // Để tránh bỏ sót, ta quét cửa sổ từ [23h tới] đến [24h30p tới].
-        // Ví dụ: Bây giờ là 10:00 sáng.
-        // -> WindowStart = 09:00 sáng mai.
-        // -> WindowEnd   = 10:30 sáng mai.
-        // Bất kỳ lịch hẹn nào rơi vào khoảng này sẽ được gửi mail.
+        // --- LOGIC 1: NHẮC 24H (Giữ nguyên) ---
+        Instant start24h = now.plus(23, ChronoUnit.HOURS);
+        Instant end24h = now.plus(24, ChronoUnit.HOURS).plus(30, ChronoUnit.MINUTES);
+        List<Appointment> list24h = appointmentRepo.findAppointmentsToRemind(start24h, end24h);
+        processList(list24h, "24H", false);
 
-        Instant windowStart = now.plus(23, ChronoUnit.HOURS);
-        Instant windowEnd = now.plus(24, ChronoUnit.HOURS).plus(30, ChronoUnit.MINUTES);
+        // --- LOGIC 2: NHẮC GẤP (SỬA ĐỔI QUAN TRỌNG) ---
+        // Thay đổi: Quét từ [Hiện tại] đến [2h30p tới]
+        // Để bắt tất cả các lịch hẹn sắp diễn ra trong tương lai gần mà chưa gửi mail
+        Instant startUrgent = now;
+        Instant endUrgent = now.plus(2, ChronoUnit.HOURS).plus(30, ChronoUnit.MINUTES);
 
-        List<Appointment> appointments = appointmentRepo.findAppointmentsToRemind(windowStart, windowEnd);
+        List<Appointment> listUrgent = appointmentRepo.findUrgentAppointmentsToRemind(startUrgent, endUrgent);
+        processList(listUrgent, "URGENT", true);
+    }
 
+    private void processList(List<Appointment> appointments, String type, boolean isUrgent) {
         if (!appointments.isEmpty()) {
-            System.out.println(">>> [REMINDER JOB] Tìm thấy " + appointments.size() + " lịch hẹn cần nhắc nhở.");
+            System.out.println(">>> [SCAN " + type + "] Tìm thấy " + appointments.size() + " lịch.");
         }
 
         for (Appointment appt : appointments) {
             try {
-                if (appt.getPatient() != null && appt.getPatient().getUser() != null) {
+                // Chỉ gửi nếu chưa quá hạn (Start time phải còn ở tương lai)
+                // Vì nếu quét từ 'now', có thể dính các lịch vừa trôi qua vài giây
+                if (appt.getStartDateTime().isBefore(Instant.now())) {
+                    continue;
+                }
 
-                    // 1. Format thời gian hiển thị (Giờ Việt Nam)
+                if (appt.getPatient() != null && appt.getPatient().getUser() != null) {
                     LocalDateTime ldt = LocalDateTime.ofInstant(appt.getStartDateTime(), ZoneId.systemDefault());
                     String timeStr = ldt.format(DateTimeFormatter.ofPattern("HH:mm 'ngày' dd/MM/yyyy"));
 
-                    // 2. Lấy Tên Dịch Vụ (Lấy ngay trong Transaction này)
                     String serviceName = "Nha khoa tổng quát";
                     if (appt.getAppointmentServices() != null && !appt.getAppointmentServices().isEmpty()) {
                         AppointmentService as = appt.getAppointmentServices().get(0);
-                        if (as.getService() != null) {
-                            serviceName = as.getService().getServiceName();
-                        }
+                        if (as.getService() != null) serviceName = as.getService().getServiceName();
                     }
 
-                    // 3. Lấy Địa chỉ
                     String address = (appt.getClinic() != null) ? appt.getClinic().getAddress() : "Phòng khám chính";
 
-                    // 4. Gửi mail (Async)
-                    mailService.sendAppointmentReminderEmail(
-                            appt.getPatient().getUser(),
-                            appt,
-                            timeStr,
-                            serviceName,
-                            address
-                    );
+                    if (isUrgent) {
+                        mailService.sendUrgentReminderEmail(appt.getPatient().getUser(), appt, timeStr, serviceName, address);
+                        appt.setIsUrgentReminderSent(true);
+                    } else {
+                        mailService.sendAppointmentReminderEmail(appt.getPatient().getUser(), appt, timeStr, serviceName, address);
+                        appt.setIsReminderSent(true);
+                    }
 
-                    // 5. Đánh dấu đã gửi để không quét lại lần sau
-                    appt.setIsReminderSent(true);
                     appointmentRepo.save(appt);
-
-                    System.out.println(">>> [SENT] Đã gửi nhắc nhở cho Appointment ID: " + appt.getId());
+                    System.out.println(">>> [SENT " + type + "] ID: " + appt.getId());
                 }
             } catch (Exception e) {
-                System.err.println(">>> [ERROR] Lỗi gửi nhắc nhở ID " + appt.getId() + ": " + e.getMessage());
-                // Không throw exception để vòng lặp tiếp tục chạy cho các lịch hẹn khác
+                System.err.println(">>> [ERROR] ID " + appt.getId() + ": " + e.getMessage());
             }
         }
     }

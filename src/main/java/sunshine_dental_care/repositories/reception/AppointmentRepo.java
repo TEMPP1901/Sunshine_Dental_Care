@@ -18,9 +18,9 @@ public interface AppointmentRepo extends JpaRepository<Appointment, Integer> {
     @Query("SELECT a FROM Appointment a " +
             "WHERE a.status IN ('CONFIRMED', 'SCHEDULED', 'PENDING') " +
             "AND (" +
-            "   (a.doctor.id = :doctorId AND a.endDateTime > :newStart AND a.startDateTime < :newEnd) " + // Check Doctor (Toàn hệ thống)
+            "   (a.doctor.id = :doctorId AND a.endDateTime > :newStart AND a.startDateTime < :newEnd) " +
             "   OR " +
-            "   (:roomId IS NOT NULL AND a.room.id = :roomId AND a.endDateTime > :newStart AND a.startDateTime < :newEnd) " + // Check Room (Nếu có chọn phòng)
+            "   (:roomId IS NOT NULL AND a.room.id = :roomId AND a.endDateTime > :newStart AND a.startDateTime < :newEnd) " +
             ")")
     List<Appointment> findConflictAppointments(
             @Param("doctorId") Integer doctorId,
@@ -29,9 +29,6 @@ public interface AppointmentRepo extends JpaRepository<Appointment, Integer> {
             @Param("newEnd") Instant newEnd
     );
 
-    /**
-     * Lấy danh sách các lịch hẹn ĐÃ CÓ của bác sĩ trong ngày cụ thể.
-     */
     @Query("SELECT a FROM Appointment a " +
             "WHERE a.doctor.id = :doctorId " +
             "AND a.status IN ('CONFIRMED', 'SCHEDULED', 'PENDING') " +
@@ -41,9 +38,6 @@ public interface AppointmentRepo extends JpaRepository<Appointment, Integer> {
             @Param("date") LocalDate date
     );
 
-    /**
-     * Lấy tất cả lịch hẹn của một Clinic trong ngày cụ thể.
-     */
     @Query("SELECT a FROM Appointment a " +
             "WHERE a.clinic.id = :clinicId " +
             "AND CAST(a.startDateTime AS date) = :date " +
@@ -53,10 +47,17 @@ public interface AppointmentRepo extends JpaRepository<Appointment, Integer> {
             @Param("date") LocalDate date
     );
 
-    // --- MỚI THÊM: Query tìm lịch hẹn cần nhắc nhở ---
+    // Query nhắc 24h (Cũ)
     @Query("SELECT a FROM Appointment a WHERE a.status = 'CONFIRMED' " +
             "AND (a.isReminderSent IS NULL OR a.isReminderSent = false) " +
             "AND a.startDateTime BETWEEN :start AND :end")
     List<Appointment> findAppointmentsToRemind(@Param("start") Instant start,
                                                @Param("end") Instant end);
+
+    // --- MỚI: Query nhắc gấp 2h (Check cột isUrgentReminderSent) ---
+    @Query("SELECT a FROM Appointment a WHERE a.status = 'CONFIRMED' " +
+            "AND (a.isUrgentReminderSent IS NULL OR a.isUrgentReminderSent = false) " +
+            "AND a.startDateTime BETWEEN :start AND :end")
+    List<Appointment> findUrgentAppointmentsToRemind(@Param("start") Instant start,
+                                                     @Param("end") Instant end);
 }

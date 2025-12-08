@@ -25,7 +25,7 @@ public class DentalAIClient {
     private final ObjectMapper objectMapper;
 
     // --- CẬP NHẬT: Dùng đúng model có trong danh sách của bạn ---
-    private static final String MODEL_ID = "gemini-2.0-flash";
+    private static final String MODEL_ID = "gemini-2.5-flash";
 
     // URL chuẩn
     private static final String GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/" + MODEL_ID + ":generateContent";

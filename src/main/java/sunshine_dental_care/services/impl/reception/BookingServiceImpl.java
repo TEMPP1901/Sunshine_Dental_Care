@@ -6,15 +6,19 @@ import org.springframework.stereotype.Service;
 import sunshine_dental_care.dto.receptionDTO.bookingDto.BookingSlotRequest;
 import sunshine_dental_care.dto.receptionDTO.bookingDto.TimeSlotResponse;
 import sunshine_dental_care.entities.Appointment;
+import sunshine_dental_care.entities.AppointmentService;
 import sunshine_dental_care.entities.DoctorSchedule;
 import sunshine_dental_care.entities.ServiceVariant;
 import sunshine_dental_care.repositories.hr.DoctorScheduleRepo;
 import sunshine_dental_care.repositories.reception.AppointmentRepo;
 import sunshine_dental_care.repositories.reception.ServiceVariantRepo;
 import sunshine_dental_care.services.interfaces.reception.BookingService;
+import sunshine_dental_care.services.auth_service.MailService; // <--- 1. Import mới
 
+import java.time.LocalDateTime;
 import java.time.LocalTime;
 import java.time.ZoneId;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -25,124 +29,102 @@ public class BookingServiceImpl implements BookingService {
     private final DoctorScheduleRepo doctorScheduleRepo;
     private final AppointmentRepo appointmentRepo;
     private final ServiceVariantRepo serviceVariantRepo;
+    private final MailService mailService; // <--- 2. Inject MailService
 
     private static final List<LocalTime> FIXED_SLOTS = List.of(
             LocalTime.of(8, 0), LocalTime.of(9, 0), LocalTime.of(10, 0),
             LocalTime.of(11, 0),
-            // Nghỉ trưa 12:00 - 13:00 (Không có slot)
             LocalTime.of(13, 0), LocalTime.of(14, 0), LocalTime.of(15, 0),
             LocalTime.of(16, 0), LocalTime.of(17, 0), LocalTime.of(18, 0)
     );
 
-
     @Override
     public List<TimeSlotResponse> getAvailableSlots(BookingSlotRequest request) {
+        // ... (Giữ nguyên toàn bộ logic cũ của bạn ở đây) ...
+        // ... Code cũ ...
         List<TimeSlotResponse> responseSlots = new ArrayList<>();
-
-        // 1. TÍNH TỔNG THỜI GIAN TỪ variantsId
         List<Integer> variantIds = request.getServiceIds();
-        if (variantIds == null || variantIds.isEmpty()) {
-            return generateAllBusySlots();
-        }
-
-        // Tìm các Variants theo ID gửi lên
+        if (variantIds == null || variantIds.isEmpty()) return generateAllBusySlots();
         List<ServiceVariant> selectedVariants = serviceVariantRepo.findAllById(variantIds);
-
-        // Cộng tổng duration từ các Variant
-        int totalMinutes = selectedVariants.stream()
-                .mapToInt(v -> v.getDuration() != null ? v.getDuration() : 60)
-                .sum();
-
+        int totalMinutes = selectedVariants.stream().mapToInt(v -> v.getDuration() != null ? v.getDuration() : 60).sum();
         int durationMinutes = Math.max(60, totalMinutes);
-
         log.info("Calculating Slots for Doctor {}. Total Duration: {} mins", request.getDoctorId(), durationMinutes);
-
-        // 2. Lấy lịch làm việc tại Clinic
-        List<DoctorSchedule> validSchedules = doctorScheduleRepo.findByUserIdAndClinicIdAndWorkDate(
-                request.getDoctorId(),
-                request.getClinicId(),
-                request.getDate()
-        );
-
-        if (validSchedules.isEmpty()) {
-            return generateAllBusySlots();
-        }
-
-        // 3. Lấy lịch BẬN (bao gồm cả PENDING)
-        List<Appointment> bookedApps = appointmentRepo.findBusySlotsByDoctorAndDate(
-                request.getDoctorId(),
-                request.getDate()
-        );
-
-        // 4. Duyệt qua các slot cứng
+        List<DoctorSchedule> validSchedules = doctorScheduleRepo.findByUserIdAndClinicIdAndWorkDate(request.getDoctorId(), request.getClinicId(), request.getDate());
+        if (validSchedules.isEmpty()) return generateAllBusySlots();
+        List<Appointment> bookedApps = appointmentRepo.findBusySlotsByDoctorAndDate(request.getDoctorId(), request.getDate());
         for (LocalTime slotStart : FIXED_SLOTS) {
-            // Tính giờ kết thúc dự kiến dựa trên TỔNG THỜI GIAN
             LocalTime slotEnd = slotStart.plusMinutes(durationMinutes);
-
-            // *Lưu ý: Nếu slotEnd vượt quá 24h (qua ngày hôm sau) thì bỏ qua
             if (slotEnd.isBefore(slotStart)) continue;
-
             boolean isAvailable = false;
-
-            // CHECK 1: Nằm trong ca làm việc
             for (DoctorSchedule sch : validSchedules) {
-                /* code dài dòng hơn nếu ko dùng phủ định !
-                (slotStart.isAfter(schStart) || slotStart.equals(schStart))
-                &&
-                (slotEnd.isBefore(schEnd) || slotEnd.equals(schEnd))*/
-
                 if (!slotStart.isBefore(sch.getStartTime()) && !slotEnd.isAfter(sch.getEndTime())) {
                     isAvailable = true;
                     break;
                 }
             }
-
-            // CHECK 2: Va chạm lịch khác
             if (isAvailable) {
-                if (isTimeOverlap(slotStart, slotEnd, bookedApps)) {
-                    isAvailable = false;
-                }
+                if (isTimeOverlap(slotStart, slotEnd, bookedApps)) isAvailable = false;
             }
-
-            // CHECK 3: Quá khứ
             if (request.getDate().equals(java.time.LocalDate.now())) {
-                if (slotStart.isBefore(LocalTime.now())) {
-                    isAvailable = false;
-                }
+                if (slotStart.isBefore(LocalTime.now())) isAvailable = false;
             }
-
             responseSlots.add(new TimeSlotResponse(slotStart.toString(), isAvailable));
         }
-
         return responseSlots;
     }
 
-    /**
-     * Helper: Kiểm tra xem khoảng [start, end] có trùng với bất kỳ lịch hẹn nào không
-     */
+    // ... Helper methods cũ giữ nguyên ...
     private boolean isTimeOverlap(LocalTime start, LocalTime end, List<Appointment> existingAppointments) {
         ZoneId zoneId = ZoneId.of("Asia/Ho_Chi_Minh");
-
         for (Appointment app : existingAppointments) {
             LocalTime appStart = app.getStartDateTime().atZone(zoneId).toLocalTime();
             LocalTime appEnd = app.getEndDateTime().atZone(zoneId).toLocalTime();
-
-            // Logic va chạm: (Start A < End B) và (Start B < End A)
-            // [08:00 - 09:30] vs [09:00 - 10:00]
-            // 08:00 < 10:00 (True) && 09:00 < 09:30 (True) -> TRUE (Va chạm)
-            if (start.isBefore(appEnd) && appStart.isBefore(end)) {
-                return true;
-            }
+            if (start.isBefore(appEnd) && appStart.isBefore(end)) return true;
         }
         return false;
     }
 
     private List<TimeSlotResponse> generateAllBusySlots() {
         List<TimeSlotResponse> slots = new ArrayList<>();
-        for (LocalTime time : FIXED_SLOTS) {
-            slots.add(new TimeSlotResponse(time.toString(), false));
-        }
+        for (LocalTime time : FIXED_SLOTS) slots.add(new TimeSlotResponse(time.toString(), false));
         return slots;
     }
-}
 
+    // =========================================================
+    // 3. THÊM HÀM NÀY ĐỂ GỌI KHI ĐẶT LỊCH THÀNH CÔNG
+    // =========================================================
+    /**
+     * Hàm này nên được gọi ngay sau khi appointmentRepo.save(appt) ở nơi xử lý đặt lịch.
+     * Vì file này chưa có hàm createBooking, mình viết hàm public này để bạn gọi từ Controller hoặc nơi khác.
+     */
+    public void notifyBookingSuccess(Appointment appt) {
+        try {
+            if (appt.getPatient() != null && appt.getPatient().getUser() != null) {
+                // Prepare data
+                String timeStr = LocalDateTime.ofInstant(appt.getStartDateTime(), ZoneId.systemDefault())
+                        .format(DateTimeFormatter.ofPattern("HH:mm dd/MM/yyyy"));
+
+                String serviceName = "Dịch vụ nha khoa";
+                if (appt.getAppointmentServices() != null && !appt.getAppointmentServices().isEmpty()) {
+                    AppointmentService as = appt.getAppointmentServices().get(0);
+                    if (as.getService() != null) serviceName = as.getService().getServiceName();
+                }
+
+                String address = (appt.getClinic() != null) ? appt.getClinic().getAddress() : "Phòng khám";
+
+                // Send Mail
+                mailService.sendBookingSuccessEmail(
+                        appt.getPatient().getUser(),
+                        appt,
+                        timeStr,
+                        serviceName,
+                        address
+                );
+                log.info(">>> Sent Booking Success Email for Appt ID: {}", appt.getId());
+            }
+        } catch (Exception e) {
+            log.error("Failed to send booking success email: {}", e.getMessage());
+            // Không throw exception để tránh rollback giao dịch đặt lịch
+        }
+    }
+}
