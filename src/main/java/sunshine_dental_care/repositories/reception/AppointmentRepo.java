@@ -60,4 +60,13 @@ public interface AppointmentRepo extends JpaRepository<Appointment, Integer> {
             "AND a.startDateTime BETWEEN :start AND :end")
     List<Appointment> findUrgentAppointmentsToRemind(@Param("start") Instant start,
                                                      @Param("end") Instant end);
+
+    // ================== PHẦN THÊM MỚI CHO DASHBOARD ==================
+    // 1. Lấy lịch hẹn sắp tới (Chưa diễn ra) để hiển thị Countdown
+    @Query("SELECT a FROM Appointment a WHERE a.patient.id = :patientId AND a.startDateTime > CURRENT_TIMESTAMP AND a.status IN ('CONFIRMED', 'PENDING', 'SCHEDULED') ORDER BY a.startDateTime ASC")
+    List<Appointment> findUpcomingAppointmentsByPatient(@Param("patientId") Integer patientId);
+
+    // 2. Đếm số lịch hẹn đã hoàn thành để tính điểm sức khỏe
+    @Query("SELECT COUNT(a) FROM Appointment a WHERE a.patient.id = :patientId AND a.status = 'COMPLETED'")
+    long countCompletedAppointments(@Param("patientId") Integer patientId);
 }

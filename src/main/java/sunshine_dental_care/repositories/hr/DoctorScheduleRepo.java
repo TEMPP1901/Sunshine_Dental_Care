@@ -17,29 +17,27 @@ public interface DoctorScheduleRepo extends JpaRepository<DoctorSchedule, Intege
     @Query("SELECT d FROM DoctorSchedule d WHERE d.workDate = :workDate ORDER BY d.doctor.id")
     List<DoctorSchedule> findByWorkDate(@Param("workDate") LocalDate workDate);
 
-    // Lấy lịch cho cả tuần (từ Monday đến Saturday, 6 ngày)
+    // Lấy lịch cho cả tuần
     @Query("SELECT d FROM DoctorSchedule d WHERE d.workDate >= :weekStart AND d.workDate <= :weekEnd ORDER BY d.workDate, d.doctor.id")
     List<DoctorSchedule> findByWeekRange(@Param("weekStart") LocalDate weekStart, @Param("weekEnd") LocalDate weekEnd);
 
-    // Lấy lịch của cơ sở theo ngày
+    // Lấy lịch của cơ sở theo ngày (Method cũ của bạn)
     @Query("SELECT d FROM DoctorSchedule d WHERE d.clinic.id = :clinicId AND d.workDate = :workDate ORDER BY d.doctor.id")
     List<DoctorSchedule> findByClinicAndDate(@Param("clinicId") Integer clinicId,
-            @Param("workDate") LocalDate workDate);
+                                             @Param("workDate") LocalDate workDate);
 
-    // Kiểm tra bác sĩ đã được phân công chưa trong ngày
+    // Kiểm tra bác sĩ đã được phân công chưa
     @Query("SELECT COUNT(d) > 0 FROM DoctorSchedule d WHERE d.doctor.id = :doctorId AND d.workDate = :workDate")
     boolean existsByDoctorAndDate(@Param("doctorId") Integer doctorId, @Param("workDate") LocalDate workDate);
 
     // Lấy schedule của user tại clinic trong ngày (chỉ ACTIVE)
-    // Lấy lịch làm việc tại CLINIC KHÁCH CHỌN thêm điều kiện status = 'ACTIVE' của
-    // bác sĩ tại clinicId đó
     @Query("SELECT d FROM DoctorSchedule d WHERE d.doctor.id = :userId AND d.clinic.id = :clinicId AND d.workDate = :workDate AND d.status = 'ACTIVE'")
     List<DoctorSchedule> findByUserIdAndClinicIdAndWorkDate(
             @Param("userId") Integer userId,
             @Param("clinicId") Integer clinicId,
             @Param("workDate") LocalDate workDate);
 
-    // Lấy schedule của user tại clinic trong ngày (tất cả status - dùng để update)
+    // Lấy schedule của user tại clinic trong ngày (tất cả status)
     @Query("SELECT d FROM DoctorSchedule d WHERE d.doctor.id = :userId AND d.clinic.id = :clinicId AND d.workDate = :workDate ORDER BY d.startTime")
     List<DoctorSchedule> findByUserIdAndClinicIdAndWorkDateAllStatus(
             @Param("userId") Integer userId,
@@ -58,4 +56,12 @@ public interface DoctorScheduleRepo extends JpaRepository<DoctorSchedule, Intege
             @Param("doctorId") Integer doctorId,
             @Param("startDate") LocalDate startDate,
             @Param("endDate") LocalDate endDate);
+
+    // --- [THÊM MỚI] Dùng cho chức năng Auto-Assign bác sĩ khi đặt lịch Standard ---
+    // Tìm tất cả bác sĩ có lịch làm việc ACTIVE tại cơ sở vào ngày khách chọn
+    @Query("SELECT d FROM DoctorSchedule d WHERE d.clinic.id = :clinicId AND d.workDate = :workDate AND d.status = 'ACTIVE'")
+    List<DoctorSchedule> findByClinicIdAndWorkDate(
+            @Param("clinicId") Integer clinicId,
+            @Param("workDate") LocalDate workDate
+    );
 }
