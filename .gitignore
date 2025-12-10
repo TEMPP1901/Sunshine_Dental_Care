@@ -34,7 +34,7 @@ build/
 
 ### Environment files ###
 .env
-.env
 !.env
 # Large model files
 src/main/resources/sunshine_dental_care/utils/arcface.onnx
+/.env
