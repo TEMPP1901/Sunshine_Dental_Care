@@ -13,7 +13,16 @@ import sunshine_dental_care.entities.huybro_product_invoice.ProductInvoice;
 @org.springframework.stereotype.Repository
 public interface AdminInvoiceStatsRepository extends Repository<ProductInvoice, Integer> {
 
-    // Lấy tổng doanh thu trong khoảng ngày với trạng thái thanh toán hợp lệ
+    // Lấy tổng doanh số (tất cả hóa đơn, không phân biệt trạng thái thanh toán)
+    @Query("""
+            SELECT COALESCE(SUM(p.totalAmount), 0) FROM ProductInvoice p
+            WHERE p.invoiceDate BETWEEN :startDate AND :endDate
+            """)
+    BigDecimal sumTotalSalesBetween(
+            @Param("startDate") LocalDate startDate,
+            @Param("endDate") LocalDate endDate);
+
+    // Lấy tổng tiền thực thu (chỉ các hóa đơn đã thanh toán)
     @Query("""
             SELECT COALESCE(SUM(p.totalAmount), 0) FROM ProductInvoice p
             WHERE p.invoiceDate BETWEEN :startDate AND :endDate

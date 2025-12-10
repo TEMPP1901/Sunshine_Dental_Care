@@ -58,21 +58,36 @@ public class AdminDashboardServiceImpl implements AdminDashboardService {
                         Instant monthRangeStart = toStartOfDay(monthStart);
                         Instant monthRangeEnd = dayEnd;
 
-                        // Thống kê doanh thu
+                        // Thống kê doanh số (tổng giá trị hóa đơn)
+                        BigDecimal todayTotalSales = BigDecimal.ZERO;
+                        BigDecimal weekTotalSales = BigDecimal.ZERO;
+                        BigDecimal monthTotalSales = BigDecimal.ZERO;
+                        BigDecimal prevMonthTotalSales = BigDecimal.ZERO;
+                        
+                        // Thống kê tiền thực thu (chỉ đã thanh toán)
                         BigDecimal todayRevenue = BigDecimal.ZERO;
                         BigDecimal weekRevenue = BigDecimal.ZERO;
                         BigDecimal monthRevenue = BigDecimal.ZERO;
                         BigDecimal prevMonthRevenue = BigDecimal.ZERO;
+                        
                         BigDecimal totalExpenses = BigDecimal.ZERO; // Placeholder cho tổng chi phí (sẽ thay khi có nguồn dữ liệu thật)
                         boolean expensesSupported = false;
                         BigDecimal netProfit = BigDecimal.ZERO;
                         Double monthOverMonthGrowth = 0.0;
                         List<DailyRevenueDto> last7DaysRevenue = new ArrayList<>();
                         try {
+                                // Tính doanh số (tất cả hóa đơn)
+                                todayTotalSales = adminInvoiceStatsRepository.sumTotalSalesBetween(today, today);
+                                weekTotalSales = adminInvoiceStatsRepository.sumTotalSalesBetween(weekStart, today);
+                                monthTotalSales = adminInvoiceStatsRepository.sumTotalSalesBetween(monthStart, today);
+                                prevMonthTotalSales = adminInvoiceStatsRepository.sumTotalSalesBetween(prevMonthStart, prevMonthEnd);
+                                
+                                // Tính tiền thực thu (chỉ đã thanh toán)
                                 todayRevenue = adminInvoiceStatsRepository.sumRevenueBetween(today, today);
                                 weekRevenue = adminInvoiceStatsRepository.sumRevenueBetween(weekStart, today);
                                 monthRevenue = adminInvoiceStatsRepository.sumRevenueBetween(monthStart, today);
                                 prevMonthRevenue = adminInvoiceStatsRepository.sumRevenueBetween(prevMonthStart, prevMonthEnd);
+                                
                                 totalExpenses = calculateExpenses(monthStart, today);
                                 expensesSupported = totalExpenses != null && totalExpenses.compareTo(BigDecimal.ZERO) >= 0;
                                 netProfit = monthRevenue.subtract(totalExpenses);
@@ -215,6 +230,10 @@ public class AdminDashboardServiceImpl implements AdminDashboardService {
                         }
 
                         return DashboardStatisticsDto.builder()
+                                        .todayTotalSales(todayTotalSales)
+                                        .weekTotalSales(weekTotalSales)
+                                        .monthTotalSales(monthTotalSales)
+                                        .previousMonthTotalSales(prevMonthTotalSales)
                                         .todayRevenue(todayRevenue)
                                         .weekRevenue(weekRevenue)
                                         .monthRevenue(monthRevenue)
@@ -248,6 +267,10 @@ public class AdminDashboardServiceImpl implements AdminDashboardService {
                         log.error("Lỗi nghiêm trọng trong getDashboardStatistics: {}", e.getMessage(), e);
                         // Trả về DTO với các giá trị mặc định khi có lỗi
                         return DashboardStatisticsDto.builder()
+                                        .todayTotalSales(BigDecimal.ZERO)
+                                        .weekTotalSales(BigDecimal.ZERO)
+                                        .monthTotalSales(BigDecimal.ZERO)
+                                        .previousMonthTotalSales(BigDecimal.ZERO)
                                         .todayRevenue(BigDecimal.ZERO)
                                         .weekRevenue(BigDecimal.ZERO)
                                         .monthRevenue(BigDecimal.ZERO)
@@ -291,7 +314,11 @@ public class AdminDashboardServiceImpl implements AdminDashboardService {
                 while (!current.isAfter(endDate)) {
                         AdminInvoiceStatsRepository.DailyRevenueView view = revenueByDate.get(current);
                         BigDecimal revenue = view != null ? view.getRevenue() : BigDecimal.ZERO;
-                        Long orderCount = view != null ? view.getOrderCount() : 0L;
+                        Long orderCount = 0L;
+                        if (view != null) {
+                                Long count = view.getOrderCount();
+                                orderCount = count != null ? count : 0L;
+                        }
 
                         result.add(DailyRevenueDto.builder()
                                         .date(current)
@@ -309,6 +336,7 @@ public class AdminDashboardServiceImpl implements AdminDashboardService {
         }
 
         // Hàm giả lập tổng chi phí (sẽ thay khi có số liệu thực tế)
+        @SuppressWarnings("unused")
         private BigDecimal calculateExpenses(LocalDate startDate, LocalDate endDate) {
                 return BigDecimal.ZERO;
         }

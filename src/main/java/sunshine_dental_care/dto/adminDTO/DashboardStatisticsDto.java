@@ -18,11 +18,18 @@ import lombok.NoArgsConstructor;
 @AllArgsConstructor
 public class DashboardStatisticsDto {
 
-    // Revenue Statistics
+    // Revenue Statistics - Doanh số (tổng giá trị hóa đơn)
+    private BigDecimal todayTotalSales;
+    private BigDecimal weekTotalSales;
+    private BigDecimal monthTotalSales;
+    private BigDecimal previousMonthTotalSales;
+    
+    // Revenue Statistics - Tiền thực thu (chỉ đã thanh toán)
     private BigDecimal todayRevenue;
     private BigDecimal weekRevenue;
     private BigDecimal monthRevenue;
     private BigDecimal previousMonthRevenue;
+    
     private BigDecimal totalExpenses; // tổng chi phí (0 nếu chưa có module)
     private Boolean expensesSupported; // false => chưa có module chi phí
     private BigDecimal netProfit; // monthRevenue - totalExpenses

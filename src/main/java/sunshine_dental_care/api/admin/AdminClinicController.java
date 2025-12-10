@@ -11,6 +11,7 @@ import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -20,6 +21,7 @@ import lombok.RequiredArgsConstructor;
 import sunshine_dental_care.dto.adminDTO.AdminClinicDto;
 import sunshine_dental_care.dto.adminDTO.ClinicActivationRequestDto;
 import sunshine_dental_care.dto.adminDTO.ClinicStaffDetailDto;
+import sunshine_dental_care.dto.adminDTO.ClinicUpdateRequestDto;
 import sunshine_dental_care.services.interfaces.admin.AdminClinicService;
 
 @RestController
@@ -51,5 +53,13 @@ public class AdminClinicController {
             @PathVariable Integer id,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate date) {
         return ResponseEntity.ok(adminClinicService.getClinicStaffDetails(id, date));
+    }
+
+    // Cập nhật thông tin phòng khám
+    @PutMapping("/{id}")
+    public ResponseEntity<AdminClinicDto> updateClinic(
+            @PathVariable Integer id,
+            @Validated @RequestBody ClinicUpdateRequestDto request) {
+        return ResponseEntity.ok(adminClinicService.updateClinic(id, request));
     }
 }

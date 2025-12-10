@@ -59,4 +59,28 @@ public interface DoctorScheduleRepo extends JpaRepository<DoctorSchedule, Intege
                         @Param("doctorId") Integer doctorId,
                         @Param("startDate") LocalDate startDate,
                         @Param("endDate") LocalDate endDate);
+
+        // Lấy lịch theo khoảng thời gian và clinic (dùng để tìm schedules trùng với holiday)
+        // Nếu clinicId = null, lấy tất cả schedules trong khoảng thời gian
+        // Chỉ lấy ACTIVE hoặc NULL status (dùng khi tạo holiday)
+        @Query("SELECT d FROM DoctorSchedule d WHERE d.workDate >= :startDate AND d.workDate <= :endDate " +
+               "AND (:clinicId IS NULL OR d.clinic.id = :clinicId) " +
+               "AND d.doctor.isActive = true " +
+               "AND (d.status IS NULL OR d.status = 'ACTIVE') " +
+               "ORDER BY d.workDate, d.clinic.id, d.doctor.id")
+        List<DoctorSchedule> findByDateRangeAndClinic(
+                        @Param("startDate") LocalDate startDate,
+                        @Param("endDate") LocalDate endDate,
+                        @Param("clinicId") Integer clinicId);
+
+        // Lấy lịch theo khoảng thời gian và clinic bao gồm cả CANCELLED (dùng để restore khi xóa holiday)
+        // Nếu clinicId = null, lấy tất cả schedules trong khoảng thời gian
+        @Query("SELECT d FROM DoctorSchedule d WHERE d.workDate >= :startDate AND d.workDate <= :endDate " +
+               "AND (:clinicId IS NULL OR d.clinic.id = :clinicId) " +
+               "AND d.doctor.isActive = true " +
+               "ORDER BY d.workDate, d.clinic.id, d.doctor.id")
+        List<DoctorSchedule> findByDateRangeAndClinicAllStatus(
+                        @Param("startDate") LocalDate startDate,
+                        @Param("endDate") LocalDate endDate,
+                        @Param("clinicId") Integer clinicId);
 }

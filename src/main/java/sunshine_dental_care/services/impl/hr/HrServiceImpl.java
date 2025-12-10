@@ -18,6 +18,7 @@ import sunshine_dental_care.dto.hrDTO.DoctorScheduleDto;
 import sunshine_dental_care.dto.hrDTO.HrDocDto;
 import sunshine_dental_care.dto.hrDTO.RoomResponse;
 import sunshine_dental_care.dto.hrDTO.ValidationResultDto;
+import sunshine_dental_care.dto.notificationDTO.NotificationRequest;
 import sunshine_dental_care.entities.Clinic;
 import sunshine_dental_care.entities.DoctorSchedule;
 import sunshine_dental_care.entities.Room;
@@ -25,9 +26,11 @@ import sunshine_dental_care.entities.User;
 import sunshine_dental_care.exceptions.hr.ScheduleValidationException;
 import sunshine_dental_care.repositories.auth.ClinicRepo;
 import sunshine_dental_care.repositories.auth.UserRepo;
+import sunshine_dental_care.repositories.auth.UserRoleRepo;
 import sunshine_dental_care.repositories.hr.DoctorScheduleRepo;
 import sunshine_dental_care.repositories.hr.RoomRepo;
 import sunshine_dental_care.services.impl.hr.schedule.HolidayService;
+import sunshine_dental_care.services.impl.notification.NotificationService;
 import sunshine_dental_care.services.interfaces.hr.HrService;
 import sunshine_dental_care.services.interfaces.hr.ScheduleValidationService;
 
@@ -43,6 +46,8 @@ public class HrServiceImpl implements HrService {
     private final ScheduleValidationService scheduleValidationService;
     private final sunshine_dental_care.repositories.hr.LeaveRequestRepo leaveRequestRepo;
     private final HolidayService holidayService;
+    private final NotificationService notificationService;
+    private final UserRoleRepo userRoleRepo;
 
     private static final LocalTime LUNCH_BREAK_START = LocalTime.of(11, 0);
 
@@ -137,6 +142,40 @@ public class HrServiceImpl implements HrService {
         }
 
         List<DoctorSchedule> savedSchedules = doctorScheduleRepo.saveAll(schedules);
+
+        // Gửi thông báo realtime cho toàn bộ bác sĩ về lịch làm việc mới
+        try {
+            List<Integer> doctorUserIds = getAllDoctorUserIds();
+            log.info("Sending schedule notification to {} doctors", doctorUserIds.size());
+
+            String weekInfo = String.format("từ %s đến %s", 
+                    request.getWeekStart(), 
+                    request.getWeekStart().plusDays(5));
+            String message = String.format("Lịch làm việc mới đã được tạo cho tuần %s. Vui lòng kiểm tra lịch của bạn.", weekInfo);
+
+            for (Integer doctorId : doctorUserIds) {
+                try {
+                    NotificationRequest notiRequest = NotificationRequest.builder()
+                            .userId(doctorId)
+                            .type("SCHEDULE_CREATED")
+                            .priority("MEDIUM")
+                            .title("Lịch làm việc mới")
+                            .message(message)
+                            .relatedEntityType("SCHEDULE")
+                            .relatedEntityId(null) // Không có ID cụ thể vì là nhiều schedules
+                            .build();
+
+                    notificationService.sendNotification(notiRequest);
+                    log.debug("Schedule notification sent to doctor user {}", doctorId);
+                } catch (Exception e) {
+                    log.error("Failed to send schedule notification to doctor user {}: {}", doctorId, e.getMessage());
+                }
+            }
+            log.info("Successfully sent schedule notifications to {} doctors", doctorUserIds.size());
+        } catch (Exception e) {
+            log.error("Failed to send schedule notifications to doctors: {}", e.getMessage(), e);
+            // Không throw exception để không làm rollback việc tạo schedule
+        }
 
         // Nếu một bác sĩ có ca sáng, đảm bảo các ca chiều trạng thái ACTIVE cho cùng ngày
         for (int dayIndex = 0; dayIndex < 6; dayIndex++) {
@@ -305,5 +344,20 @@ public class HrServiceImpl implements HrService {
         }
 
         return dto;
+    }
+
+    // Lấy danh sách tất cả user IDs của bác sĩ
+    private List<Integer> getAllDoctorUserIds() {
+        try {
+            List<Integer> doctorUserIds = userRoleRepo.findUserIdsByRoleName("DOCTOR");
+            if (doctorUserIds == null) {
+                return List.of();
+            }
+            log.info("Found {} doctor user IDs", doctorUserIds.size());
+            return doctorUserIds;
+        } catch (Exception e) {
+            log.error("Failed to get all doctor user IDs: {}", e.getMessage(), e);
+            return List.of();
+        }
     }
 }

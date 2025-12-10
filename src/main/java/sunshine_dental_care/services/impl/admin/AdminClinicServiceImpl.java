@@ -2,6 +2,7 @@ package sunshine_dental_care.services.impl.admin;
 
 import java.time.LocalDate;
 import java.util.List;
+import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Collectors;
 
@@ -12,6 +13,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import sunshine_dental_care.dto.adminDTO.AdminClinicDto;
 import sunshine_dental_care.dto.adminDTO.ClinicStaffDetailDto;
+import sunshine_dental_care.dto.adminDTO.ClinicUpdateRequestDto;
 import sunshine_dental_care.entities.Clinic;
 import sunshine_dental_care.entities.DoctorSchedule;
 import sunshine_dental_care.entities.Role;
@@ -55,6 +57,47 @@ public class AdminClinicServiceImpl implements AdminClinicService {
                 .orElseThrow(() -> new ClinicNotFoundException(clinicId));
         clinic.setIsActive(active);
         clinicRepo.save(clinic);
+    }
+
+    // Cập nhật thông tin phòng khám
+    @Override
+    @Transactional
+    public AdminClinicDto updateClinic(Integer clinicId, ClinicUpdateRequestDto request) {
+        Clinic clinic = clinicRepo.findById(clinicId)
+                .orElseThrow(() -> new ClinicNotFoundException(clinicId));
+
+        // Kiểm tra clinicCode có trùng với clinic khác không (trừ chính nó)
+        if (request.getClinicCode() != null && !request.getClinicCode().equals(clinic.getClinicCode())) {
+            Optional<Clinic> existingClinic = clinicRepo.findByClinicCode(request.getClinicCode());
+            if (existingClinic.isPresent() && !existingClinic.get().getId().equals(clinicId)) {
+                throw new IllegalArgumentException("Clinic code already exists: " + request.getClinicCode());
+            }
+        }
+
+        // Cập nhật thông tin
+        if (request.getClinicCode() != null) {
+            clinic.setClinicCode(request.getClinicCode());
+        }
+        if (request.getClinicName() != null) {
+            clinic.setClinicName(request.getClinicName());
+        }
+        if (request.getAddress() != null) {
+            clinic.setAddress(request.getAddress());
+        }
+        if (request.getPhone() != null) {
+            clinic.setPhone(request.getPhone());
+        }
+        if (request.getEmail() != null) {
+            clinic.setEmail(request.getEmail());
+        }
+        if (request.getOpeningHours() != null) {
+            clinic.setOpeningHours(request.getOpeningHours());
+        }
+
+        Clinic updatedClinic = clinicRepo.save(clinic);
+        log.info("Updated clinic {}: {}", clinicId, updatedClinic.getClinicName());
+        
+        return convertToDto(updatedClinic);
     }
 
     // Chuyển Clinic sang DTO
