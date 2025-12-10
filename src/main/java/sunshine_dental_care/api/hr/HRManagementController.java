@@ -24,7 +24,7 @@ public class HRManagementController {
     
     // Lấy danh sách tất cả Departments
     @GetMapping("/departments")
-    @PreAuthorize("hasAnyRole('DOCTOR', 'HR', 'RECEPTIONIST', 'ACCOUNTANT')")
+    @PreAuthorize("hasAnyRole('DOCTOR', 'HR', 'RECEPTION', 'ACCOUNTANT')")
     public ResponseEntity<List<DepartmentResponse>> getDepartments() {
         List<DepartmentResponse> departments = hrManagementService.getAllDepartments();
         return ResponseEntity.ok(departments);
@@ -52,6 +52,14 @@ public class HRManagementController {
     public ResponseEntity<List<RoomResponse>> getRooms() {
         List<RoomResponse> rooms = hrManagementService.getAllRooms();
         return ResponseEntity.ok(rooms);
+    }
+    
+    // Lấy danh sách tất cả Holidays (read-only for HR)
+    @GetMapping("/holidays")
+    @PreAuthorize("hasRole('HR')")
+    public ResponseEntity<List<sunshine_dental_care.entities.Holiday>> getHolidays() {
+        List<sunshine_dental_care.entities.Holiday> holidays = hrManagementService.getAllHolidays();
+        return ResponseEntity.ok(holidays);
     }
 }
 

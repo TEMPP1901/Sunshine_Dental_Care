@@ -6,6 +6,7 @@ import java.util.List;
 import org.hibernate.annotations.ColumnDefault;
 import org.hibernate.annotations.Nationalized;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 
 import jakarta.persistence.CascadeType;
@@ -108,9 +109,11 @@ public class User {
     private String specialty;
 
     @OneToMany(mappedBy = "doctor", cascade = CascadeType.ALL, fetch = FetchType.LAZY, orphanRemoval = true)
+    @JsonIgnore
     private List<DoctorSpecialty> doctorSpecialties;
 
     @OneToMany(mappedBy = "user", fetch = FetchType.LAZY) // mappedBy trỏ đến trường 'user' trong UserRole
+    @JsonIgnore
     private List<UserRole> userRoles;
 
 

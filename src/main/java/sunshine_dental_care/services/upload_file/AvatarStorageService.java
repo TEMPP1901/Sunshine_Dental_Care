@@ -98,6 +98,59 @@ public class AvatarStorageService {
         return avatarUrl;
     }
 
+    // Upload avatar và extract embedding nhưng KHÔNG lưu vào EmployeeFaceProfile
+    // Dùng cho yêu cầu cập nhật face profile (cần HR duyệt)
+    // Trả về Map chứa avatarUrl và embedding
+    @Transactional
+    public java.util.Map<String, String> storeAvatarAndExtractEmbedding(MultipartFile file, Integer userId) throws IOException, Exception {
+        if (file == null || file.isEmpty()) {
+            throw new IllegalArgumentException("File is empty");
+        }
+        if (!ALLOWED_TYPES.contains(file.getContentType())) {
+            throw new IllegalArgumentException("Unsupported file type");
+        }
+        
+        String ymd = LocalDate.now().toString();
+        String ext = getExt(file.getOriginalFilename());
+        String safeName = "u" + userId + "-" + UUID.randomUUID().toString().replace("-", "") + ext;
+
+        Path root = Path.of(baseDir).toAbsolutePath().normalize();
+        Path dir = root.resolve(avatarSubdir).resolve(ymd);
+        Files.createDirectories(dir);
+
+        Path target = dir.resolve(safeName).normalize();
+        Files.copy(file.getInputStream(), target, StandardCopyOption.REPLACE_EXISTING);
+
+        String relPath = "/" + baseDir.replaceAll("^/+", "").replaceAll("/+$", "")
+                + "/" + avatarSubdir + "/" + ymd + "/" + safeName;
+        String avatarUrl = publicBaseUrl + relPath;
+        
+        // Extract embedding từ file đã upload (KHÔNG lưu vào EmployeeFaceProfile)
+        String embedding = null;
+        try {
+            log.info("Extracting face embedding for update request from saved image: {}", target.toString());
+            embedding = faceRecognitionService.extractEmbeddingFromPath(target.toString());
+            
+            if (embedding == null || embedding.trim().isEmpty()) {
+                throw new IllegalArgumentException("Extracted embedding is empty");
+            }
+            
+            if (!embedding.trim().startsWith("[") || !embedding.trim().endsWith("]")) {
+                throw new IllegalArgumentException("Invalid embedding format: must be JSON array");
+            }
+        } catch (Exception ex) {
+            log.error("Failed to extract face embedding for update request: {}", ex.getMessage(), ex);
+            throw new Exception("Failed to extract face embedding: " + ex.getMessage(), ex);
+        }
+        
+        java.util.Map<String, String> result = new java.util.HashMap<>();
+        result.put("avatarUrl", avatarUrl);
+        result.put("embedding", embedding);
+        
+        log.info("Avatar uploaded and embedding extracted for update request (not saved to face profile yet): userId={}", userId);
+        return result;
+    }
+
     private String getExt(String original) {
         if (original == null) return ".jpg";
         int dot = original.lastIndexOf('.');

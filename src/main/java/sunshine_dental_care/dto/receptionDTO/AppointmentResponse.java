@@ -1,5 +1,6 @@
 package sunshine_dental_care.dto.receptionDTO;
 
+import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;
 
@@ -23,6 +24,9 @@ public class AppointmentResponse {
     private String createdByUserName;
     private Instant createdAt;
     private Instant updatedAt;
+    
+    private String appointmentType; // "VIP" hoặc "STANDARD"
+    private BigDecimal bookingFee; // Phí đặt lịch hẹn
 
     private List<ServiceItemResponse> services;
 }

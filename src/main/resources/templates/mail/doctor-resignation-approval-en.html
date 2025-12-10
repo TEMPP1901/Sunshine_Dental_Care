@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Notice: Resignation request approved - Sunshine Dental Care</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            max-width: 600px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            background-color: #ffffff;
+            border-radius: 10px;
+            padding: 30px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .header {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        .logo {
+            color: #1A237E;
+            font-size: 28px;
+            font-weight: bold;
+            margin-bottom: 10px;
+        }
+        .title {
+            color: #1976d2;
+            font-size: 24px;
+            font-weight: bold;
+            margin-bottom: 20px;
+        }
+        .content {
+            color: #555;
+            font-size: 16px;
+            margin-bottom: 20px;
+        }
+        .info-box {
+            background-color: #e3f2fd;
+            border-left: 4px solid #1976d2;
+            padding: 15px;
+            margin: 20px 0;
+            border-radius: 5px;
+        }
+        .warning-box {
+            background-color: #fff3e0;
+            border-left: 4px solid #ff9800;
+            padding: 20px;
+            margin: 20px 0;
+            border-radius: 5px;
+        }
+        .important-box {
+            background-color: #ffebee;
+            border-left: 4px solid #d32f2f;
+            padding: 20px;
+            margin: 20px 0;
+            border-radius: 5px;
+        }
+        .info-item {
+            margin: 10px 0;
+            font-size: 15px;
+        }
+        .info-label {
+            font-weight: bold;
+            color: #1A237E;
+        }
+        .highlight {
+            color: #d32f2f;
+            font-weight: bold;
+            font-size: 18px;
+        }
+        .schedule-count {
+            font-size: 24px;
+            font-weight: bold;
+            color: #1976d2;
+            text-align: center;
+            padding: 10px;
+            background-color: #e3f2fd;
+            border-radius: 5px;
+            margin: 15px 0;
+        }
+        .footer {
+            margin-top: 30px;
+            padding-top: 20px;
+            border-top: 1px solid #eee;
+            text-align: center;
+            color: #888;
+            font-size: 12px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <div class="logo"> Sunshine Dental Care</div>
+        </div>
+        
+        <h1 class="title">Notice: Resignation Request Approved</h1>
+        
+        <div class="content">
+            <p>Hello <strong>{{fullName}}</strong>,</p>
+            
+            <p>We would like to inform you that your resignation request has been approved by the Human Resources department and Management.</p>
+            
+            <div class="info-box">
+                <div class="info-item">
+                    <span class="info-label"> Official resignation date:</span> 
+                    <span style="font-size: 18px; font-weight: bold; color: #1976d2;">{{resignationDate}}</span>
+                </div>
+            </div>
+            
+            <div class="important-box">
+                <p style="margin: 0 0 15px 0; font-weight: bold; font-size: 18px; color: #d32f2f;">
+                     IMPORTANT NOTICE
+                </p>
+                <p style="margin: 0 0 10px 0;">
+                    You need to <strong style="color: #d32f2f;">complete all assigned schedules</strong> until the official resignation date (<strong>{{resignationDate}}</strong>).
+                </p>
+                <p style="margin: 0;">
+                    Please ensure you complete all assigned work before your resignation date.
+                </p>
+            </div>
+            
+            <div class="warning-box">
+                <p style="margin: 0 0 10px 0; font-weight: bold; font-size: 16px;">
+                     Current schedule status:
+                </p>
+                <div class="schedule-count">
+                    {{remainingSchedules}} work schedules remaining
+                </div>
+                <p style="margin: 10px 0 0 0; text-align: center; font-size: 14px; color: #666;">
+                    Must be completed before {{resignationDate}}
+                </p>
+            </div>
+            
+            <p>If you have any questions about your assigned schedules or need assistance, please contact the Human Resources department immediately.</p>
+            
+            <p>We sincerely thank you for being part of Sunshine Dental Care. Your contributions have been important to our development.</p>
+            
+            <p>We wish you all the best in your future endeavors!</p>
+            
+            <p>Best regards,<br>
+            <strong>The Sunshine Dental Care Team</strong></p>
+        </div>
+        
+        <div class="footer">
+            <p>This email is automatically sent from the Sunshine Dental Care system.</p>
+            <p>Please do not reply to this email.</p>
+        </div>
+    </div>
+</body>
+</html>
+

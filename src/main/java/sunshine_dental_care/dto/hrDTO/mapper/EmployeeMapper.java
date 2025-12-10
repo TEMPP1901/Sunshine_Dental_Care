@@ -14,6 +14,7 @@ import lombok.extern.slf4j.Slf4j;
 import sunshine_dental_care.dto.hrDTO.EmployeeResponse;
 import sunshine_dental_care.entities.Clinic;
 import sunshine_dental_care.entities.EmployeeFaceProfile;
+import sunshine_dental_care.entities.LeaveRequest;
 import sunshine_dental_care.entities.Role;
 import sunshine_dental_care.entities.User;
 import sunshine_dental_care.entities.UserClinicAssignment;
@@ -23,6 +24,7 @@ import sunshine_dental_care.repositories.auth.RoleRepo;
 import sunshine_dental_care.repositories.auth.UserRoleRepo;
 import sunshine_dental_care.repositories.hr.DoctorSpecialtyRepo;
 import sunshine_dental_care.repositories.hr.EmployeeFaceProfileRepo;
+import sunshine_dental_care.repositories.hr.LeaveRequestRepo;
 import sunshine_dental_care.repositories.hr.UserClinicAssignmentRepo;
 
 @Component
@@ -36,6 +38,7 @@ public class EmployeeMapper {
     private final UserClinicAssignmentRepo userClinicAssignmentRepo;
     private final EmployeeFaceProfileRepo faceProfileRepo;
     private final DoctorSpecialtyRepo doctorSpecialtyRepo;
+    private final LeaveRequestRepo leaveRequestRepo;
 
     // Lấy thực thể Role, tránh lỗi proxy Hibernate
     public Role getRoleFromEntity(Role role) {
@@ -100,6 +103,9 @@ public class EmployeeMapper {
 
         faceProfileRepo.findByUserId(user.getId()).ifPresent(profile -> applyFaceProfile(response, profile));
 
+        // Kiểm tra có đơn nghỉ việc đã được duyệt không
+        setHasApprovedResignation(response, user.getId());
+
         return response;
     }
 
@@ -159,6 +165,9 @@ public class EmployeeMapper {
                 applyFaceProfile(response, profile);
             }
 
+            // Kiểm tra có đơn nghỉ việc đã được duyệt không
+            setHasApprovedResignation(response, user.getId());
+
             return response;
         });
     }
@@ -206,7 +215,23 @@ public class EmployeeMapper {
 
         faceProfileRepo.findByUserId(user.getId()).ifPresent(profile -> applyFaceProfile(response, profile));
 
+        // Kiểm tra có đơn nghỉ việc đã được duyệt không
+        setHasApprovedResignation(response, user.getId());
+
         return response;
+    }
+
+    // Helper method: Kiểm tra và set hasApprovedResignation
+    private void setHasApprovedResignation(EmployeeResponse response, Integer userId) {
+        try {
+            List<LeaveRequest> resignationRequests = leaveRequestRepo.findByUserIdAndTypeAndStatusOrderByCreatedAtDesc(
+                userId, "RESIGNATION", "APPROVED");
+            boolean hasApprovedResignation = !resignationRequests.isEmpty();
+            response.setHasApprovedResignation(hasApprovedResignation);
+        } catch (Exception ex) {
+            log.warn("Error checking approved resignation for user {}: {}", userId, ex.getMessage());
+            response.setHasApprovedResignation(false);
+        }
     }
 
     // Gán embedding khuôn mặt vào EmployeeResponse

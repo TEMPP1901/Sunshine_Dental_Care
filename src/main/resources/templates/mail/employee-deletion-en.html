@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Notice: Account Deactivated - Sunshine Dental Care</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            max-width: 600px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            background-color: #ffffff;
+            border-radius: 10px;
+            padding: 30px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .header {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        .logo {
+            color: #1A237E;
+            font-size: 28px;
+            font-weight: bold;
+            margin-bottom: 10px;
+        }
+        .title {
+            color: #d32f2f;
+            font-size: 24px;
+            font-weight: bold;
+            margin-bottom: 20px;
+        }
+        .content {
+            color: #555;
+            font-size: 16px;
+            margin-bottom: 20px;
+        }
+        .info-box {
+            background-color: #fff3e0;
+            border-left: 4px solid #ff9800;
+            padding: 15px;
+            margin: 20px 0;
+            border-radius: 5px;
+        }
+        .reason-box {
+            background-color: #f8f9fa;
+            border-left: 4px solid #d32f2f;
+            padding: 15px;
+            margin: 20px 0;
+            border-radius: 5px;
+        }
+        .info-item {
+            margin: 10px 0;
+            font-size: 14px;
+        }
+        .info-label {
+            font-weight: bold;
+            color: #1A237E;
+        }
+        .thank-you {
+            background-color: #e8f5e9;
+            border-left: 4px solid #4caf50;
+            padding: 15px;
+            margin: 20px 0;
+            border-radius: 5px;
+            color: #2e7d32;
+        }
+        .footer {
+            margin-top: 30px;
+            padding-top: 20px;
+            border-top: 1px solid #eee;
+            text-align: center;
+            color: #888;
+            font-size: 12px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <div class="logo"> Sunshine Dental Care</div>
+        </div>
+        
+        <h1 class="title">Notice: Your Account Has Been Permanently Deleted</h1>
+        
+        <div class="content">
+            <p>Hello <strong>{{fullName}}</strong>,</p>
+            
+            <p>We would like to inform you that your account on the Sunshine Dental Care system has been <strong style="color: #d32f2f;">permanently deleted</strong> by decision of the Human Resources department.</p>
+            
+            <div class="reason-box">
+                <div class="info-item">
+                    <span class="info-label">Reason for permanent deletion:</span> {{reason}}
+                </div>
+            </div>
+            
+            <div class="info-box">
+                <p style="margin: 0 0 10px 0; font-weight: bold; font-size: 16px;">
+                     Important Notice:
+                </p>
+                <p style="margin: 0;">
+                    All data related to your account has been permanently deleted from the system, including:
+                </p>
+                <ul style="margin: 10px 0 0 20px; padding: 0;">
+                    <li>Account information and employee profile</li>
+                    <li>Attendance history</li>
+                    <li>Assigned work schedules</li>
+                    <li>Leave requests and related records</li>
+                    <li>All other data in the system</li>
+                </ul>
+                <p style="margin: 10px 0 0 0; font-weight: bold; color: #d32f2f;">
+                    This action cannot be undone.
+                </p>
+            </div>
+            
+            <div class="thank-you">
+                <p style="margin: 0; font-weight: bold; font-size: 16px;"> Thank You!</p>
+                <p style="margin: 10px 0 0 0;">We sincerely thank you for being part of Sunshine Dental Care. Your contributions have been important to our growth and success.</p>
+            </div>
+            
+            <p>If you have any questions about this decision or need assistance, please contact the Human Resources department via email or the provided phone number.</p>
+            
+            <p>We wish you all the best in your future endeavors!</p>
+            
+            <p>Best regards,<br>
+            <strong>The Sunshine Dental Care Team</strong></p>
+        </div>
+        
+        <div class="footer">
+            <p>This is an automated email from the Sunshine Dental Care system.</p>
+            <p>Please do not reply to this email.</p>
+        </div>
+    </div>
+</body>
+</html>
+
