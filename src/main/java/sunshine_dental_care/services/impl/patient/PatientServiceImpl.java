@@ -4,13 +4,13 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import sunshine_dental_care.dto.patientDTO.PatientAppointmentResponse;
-import sunshine_dental_care.dto.patientDTO.PatientDashboardDTO; // Import DTO Dashboard
-import sunshine_dental_care.dto.patientDTO.PatientProfileDTO; // Import DTO Profile
-import sunshine_dental_care.dto.patientDTO.UpdatePatientProfileRequest; // Import Request Update
+import sunshine_dental_care.dto.patientDTO.PatientDashboardDTO;
+import sunshine_dental_care.dto.patientDTO.PatientProfileDTO;
+import sunshine_dental_care.dto.patientDTO.UpdatePatientProfileRequest;
 import sunshine_dental_care.dto.receptionDTO.bookingDto.BookingRequest;
 import sunshine_dental_care.entities.*;
 import sunshine_dental_care.exceptions.reception.AppointmentConflictException;
-import sunshine_dental_care.repositories.AIRecommendationRepository; // Import Repo AI
+import sunshine_dental_care.repositories.AIRecommendationRepository;
 import sunshine_dental_care.repositories.auth.ClinicRepo;
 import sunshine_dental_care.repositories.auth.PatientRepo;
 import sunshine_dental_care.repositories.auth.UserRepo;
@@ -42,93 +42,99 @@ public class PatientServiceImpl implements PatientService {
     private final ClinicRepo clinicRepo;
     private final ServiceVariantRepo serviceVariantRepo;
     private final AppointmentServiceRepo appointmentServiceRepo;
-
-    // Inject thêm Repo AI
     private final AIRecommendationRepository aiRecommendationRepository;
 
     // --- HELPER METHOD: Tìm User thông minh ---
     private User findUser(String userIdOrEmail) {
-        System.out.println(">>> [DEBUG] Đang tìm User với từ khóa: " + userIdOrEmail);
-
-        if (userIdOrEmail == null) {
-            throw new RuntimeException("Token không hợp lệ (User identifier is null)");
-        }
+        if (userIdOrEmail == null) throw new RuntimeException("Token invalid");
         if (userIdOrEmail.matches("\\d+")) {
             return userRepo.findById(Integer.parseInt(userIdOrEmail))
-                    .orElseThrow(() -> new RuntimeException("User not found (ID: " + userIdOrEmail + ")"));
+                    .orElseThrow(() -> new RuntimeException("User not found ID: " + userIdOrEmail));
         } else {
             return userRepo.findByEmail(userIdOrEmail.trim())
-                    .orElseThrow(() -> new RuntimeException("User not found (Email: " + userIdOrEmail + ")"));
+                    .orElseThrow(() -> new RuntimeException("User not found Email: " + userIdOrEmail));
         }
     }
 
     // =================================================================
-    // 1. LẤY DANH SÁCH LỊCH HẸN (CŨ - GIỮ NGUYÊN)
+    // 1. LẤY DANH SÁCH LỊCH HẸN
     // =================================================================
     @Override
     public List<PatientAppointmentResponse> getMyAppointments(String userIdOrEmail) {
         User user = findUser(userIdOrEmail);
         var patient = patientRepo.findByUserId(user.getId()).orElse(null);
         if (patient == null) return new ArrayList<>();
-        // Sử dụng patient.getId() thay vì getPatientId()
+
         List<Appointment> appointments = appointmentRepo.findByPatientIdOrderByStartDateTimeDesc(patient.getId());
         return appointments.stream().map(this::mapToDTO).collect(Collectors.toList());
     }
 
     // =================================================================
-    // 2. HỦY LỊCH HẸN (CŨ - GIỮ NGUYÊN)
+    // 2. HỦY LỊCH HẸN (ĐÃ CẬP NHẬT LOGIC GỬI MAIL)
     // =================================================================
     @Override
     @Transactional
     public void cancelAppointment(String userIdOrEmail, Integer appointmentId, String reason) {
         User user = findUser(userIdOrEmail);
+
+        // Tìm Patient
         var patient = patientRepo.findByUserId(user.getId())
                 .orElseThrow(() -> new RuntimeException("Hồ sơ bệnh nhân không tồn tại."));
 
         Appointment appt = appointmentRepo.findById(appointmentId)
                 .orElseThrow(() -> new RuntimeException("Không tìm thấy lịch hẹn."));
 
+        // Validate
         if (!appt.getPatient().getId().equals(patient.getId())) {
             throw new RuntimeException("Bạn không có quyền hủy lịch hẹn này.");
         }
-
         if ("COMPLETED".equalsIgnoreCase(appt.getStatus()) || "CANCELLED".equalsIgnoreCase(appt.getStatus())) {
             throw new RuntimeException("Lịch hẹn này đã hoàn thành hoặc đã bị hủy trước đó.");
         }
-
         if (appt.getStartDateTime().isBefore(Instant.now())) {
             throw new RuntimeException("Không thể hủy lịch hẹn đã diễn ra / quá hạn.");
         }
 
+        // Update DB
         appt.setStatus("CANCELLED");
         String oldNote = appt.getNote() == null ? "" : appt.getNote();
         appt.setNote(oldNote + " | [Khách hủy: " + reason + "]");
         appointmentRepo.save(appt);
 
-        // Gửi mail hủy
+        // Gửi Mail (Đã sửa để truyền object Patient)
         try {
             String serviceName = "Nha khoa tổng quát";
             if (!appt.getAppointmentServices().isEmpty() && appt.getAppointmentServices().get(0).getService() != null) {
                 serviceName = appt.getAppointmentServices().get(0).getService().getServiceName();
             }
+
             LocalDateTime ldt = LocalDateTime.ofInstant(appt.getStartDateTime(), ZoneId.systemDefault());
             String timeStr = ldt.format(DateTimeFormatter.ofPattern("HH:mm dd/MM/yyyy"));
 
-            mailService.sendCancellationEmail(user.getEmail(), user.getFullName(), String.valueOf(appt.getId()), serviceName, timeStr);
+            // --- ĐOẠN MÃ QUAN TRỌNG ĐÃ ĐƯỢC CẬP NHẬT ---
+            mailService.sendCancellationEmail(
+                    patient, // <--- Truyền object Patient vào đây
+                    String.valueOf(appt.getId()),
+                    serviceName,
+                    timeStr
+            );
+            // -------------------------------------------
+
         } catch (Exception e) {
             System.err.println("Lỗi gửi mail hủy lịch: " + e.getMessage());
+            e.printStackTrace();
         }
     }
 
     // =================================================================
-    // 3. ĐẶT LỊCH HẸN MỚI (CŨ - GIỮ NGUYÊN)
+    // 3. ĐẶT LỊCH HẸN MỚI
     // =================================================================
     @Override
     @Transactional
     public Appointment createAppointment(String userIdOrEmail, BookingRequest request) {
         User user = findUser(userIdOrEmail);
         Patient patient = patientRepo.findByUserId(user.getId())
-                .orElseThrow(() -> new RuntimeException("Hồ sơ bệnh nhân chưa được tạo."));
+                .orElseThrow(() -> new RuntimeException("Patient profile not found."));
         Clinic clinic = clinicRepo.findById(request.getClinicId())
                 .orElseThrow(() -> new RuntimeException("Clinic not found"));
         User doctor = userRepo.findById(request.getDoctorId())
@@ -136,10 +142,9 @@ public class PatientServiceImpl implements PatientService {
 
         long totalDurationMinutes = 0;
         List<ServiceVariant> selectedVariants = new ArrayList<>();
-
-        for (Integer variantId : request.getServiceIds()) {
-            ServiceVariant v = serviceVariantRepo.findById(variantId)
-                    .orElseThrow(() -> new RuntimeException("Service Variant not found: " + variantId));
+        for (Integer vid : request.getServiceIds()) {
+            ServiceVariant v = serviceVariantRepo.findById(vid)
+                    .orElseThrow(() -> new RuntimeException("Variant not found: " + vid));
             selectedVariants.add(v);
             totalDurationMinutes += (v.getDuration() != null ? v.getDuration() : 60);
         }
@@ -149,12 +154,8 @@ public class PatientServiceImpl implements PatientService {
         Instant end = start.plus(totalDurationMinutes, ChronoUnit.MINUTES);
 
         List<Appointment> conflicts = appointmentRepo.findConflictAppointments(doctor.getId(), null, start, end);
-        if (!conflicts.isEmpty()) {
-            throw new AppointmentConflictException("Bác sĩ bận trong khung giờ này.");
-        }
-        if (start.isBefore(Instant.now())) {
-            throw new RuntimeException("Không thể đặt lịch trong quá khứ.");
-        }
+        if (!conflicts.isEmpty()) throw new AppointmentConflictException("Bác sĩ bận giờ này.");
+        if (start.isBefore(Instant.now())) throw new RuntimeException("Không đặt lịch quá khứ.");
 
         Appointment appt = new Appointment();
         appt.setClinic(clinic);
@@ -185,15 +186,15 @@ public class PatientServiceImpl implements PatientService {
     }
 
     // =================================================================
-    // 4. [MỚI] DASHBOARD STATS (LOGIC WELLNESS + AI TỰ ĐỘNG)
+    // 4. DASHBOARD STATS
     // =================================================================
     @Override
     public PatientDashboardDTO getPatientDashboardStats(String userIdOrEmail) {
         User user = findUser(userIdOrEmail);
         Patient patient = patientRepo.findByUserId(user.getId())
-                .orElseThrow(() -> new RuntimeException("Patient profile not found"));
+                .orElseThrow(() -> new RuntimeException("Patient not found"));
 
-        // A. KHỐI LỊCH HẸN SẮP TỚI
+        // A. Upcoming
         List<Appointment> upcoming = appointmentRepo.findUpcomingAppointmentsByPatient(patient.getId());
         PatientDashboardDTO.UpcomingAppointmentDTO nextApptDTO = null;
 
@@ -205,7 +206,6 @@ public class PatientServiceImpl implements PatientService {
                     serviceName = next.getAppointmentServices().get(0).getService().getServiceName();
                 }
             }
-
             nextApptDTO = PatientDashboardDTO.UpcomingAppointmentDTO.builder()
                     .appointmentId(next.getId())
                     .startDateTime(LocalDateTime.ofInstant(next.getStartDateTime(), ZoneId.systemDefault()))
@@ -216,80 +216,59 @@ public class PatientServiceImpl implements PatientService {
                     .build();
         }
 
-        // B. KHỐI WELLNESS TRACKER (Trạng thái sức khỏe định kỳ)
+        // B. Health Status
         List<Appointment> history = appointmentRepo.findByPatientIdOrderByStartDateTimeDesc(patient.getId());
-
-        // Tìm lần khám đã HOÀN THÀNH gần nhất
         Appointment lastCompleted = history.stream()
                 .filter(a -> "COMPLETED".equalsIgnoreCase(a.getStatus()))
-                .findFirst()
-                .orElse(null);
+                .findFirst().orElse(null);
 
         String healthStatus = "New";
-        String healthMessage = "Chào mừng bạn! Hãy đặt lịch khám đầu tiên để bảo vệ nụ cười.";
+        String healthMessage = "Chào mừng bạn! Hãy đặt lịch khám đầu tiên.";
         long daysSince = -1;
 
         if (lastCompleted != null) {
             LocalDate lastDate = LocalDate.ofInstant(lastCompleted.getStartDateTime(), ZoneId.systemDefault());
             daysSince = ChronoUnit.DAYS.between(lastDate, LocalDate.now());
 
-            // Quy chuẩn: 6 tháng (180 ngày)
             if (daysSince < 180) {
                 healthStatus = "Excellent";
-                healthMessage = "Răng miệng đang được bảo vệ tốt. Hãy duy trì thói quen nhé!";
+                healthMessage = "Răng miệng tốt. Hãy duy trì thói quen!";
             } else if (daysSince < 365) {
                 healthStatus = "Warning";
-                healthMessage = "Đã đến hạn kiểm tra định kỳ (6 tháng). Hãy đặt lịch sớm.";
+                healthMessage = "Đã đến hạn kiểm tra định kỳ (6 tháng).";
             } else {
                 healthStatus = "Overdue";
-                healthMessage = "Đã quá lâu bạn chưa khám răng. Cần kiểm tra ngay!";
+                healthMessage = "Đã quá lâu chưa khám. Cần kiểm tra ngay!";
             }
         }
 
-        // C. KHỐI AI RECOMMENDATION (Tự động hóa)
+        // C. AI Tip
         AIRecommendation aiRec = aiRecommendationRepository.findLatestByPatientId(patient.getId());
         String aiTip;
-
         if (aiRec != null) {
-            // Ưu tiên 1: Lấy từ DB (do bác sĩ hoặc hệ thống AI trước đó tạo ra)
             aiTip = aiRec.getReason();
         } else if (lastCompleted != null) {
-            // Ưu tiên 2: Tự sinh lời khuyên dựa trên tên dịch vụ của lần khám cuối
             String lastService = "";
             if (!lastCompleted.getAppointmentServices().isEmpty() && lastCompleted.getAppointmentServices().get(0).getService() != null) {
                 lastService = lastCompleted.getAppointmentServices().get(0).getService().getServiceName().toLowerCase();
             }
-
-            // Logic gợi ý đơn giản
-            if (lastService.contains("nhổ") || lastService.contains("extraction")) {
-                aiTip = "Sau khi nhổ răng, hạn chế súc miệng mạnh và tránh dùng ống hút trong 24h đầu để vết thương mau lành.";
-            } else if (lastService.contains("cao răng") || lastService.contains("vôi răng") || lastService.contains("scaling")) {
-                aiTip = "Lợi có thể hơi nhạy cảm sau khi lấy cao răng. Hãy dùng bàn chải lông mềm và nước súc miệng dịu nhẹ.";
-            } else if (lastService.contains("tẩy trắng") || lastService.contains("whitening")) {
-                aiTip = "Để giữ màu răng trắng sáng, hãy hạn chế thực phẩm có màu đậm (cà phê, trà, nghệ) trong 2 tuần tới.";
-            } else if (lastService.contains("niềng") || lastService.contains("braces")) {
-                aiTip = "Hãy nhớ vệ sinh kỹ các mắc cài và dùng chỉ nha khoa chuyên dụng sau mỗi bữa ăn.";
-            } else {
-                aiTip = "Đừng quên thay bàn chải đánh răng định kỳ 3 tháng/lần để đảm bảo vệ sinh.";
-            }
+            if (lastService.contains("nhổ")) aiTip = "Hạn chế súc miệng mạnh sau nhổ răng.";
+            else if (lastService.contains("cao răng")) aiTip = "Dùng bàn chải mềm nếu lợi nhạy cảm.";
+            else aiTip = "Thay bàn chải 3 tháng/lần nhé.";
         } else {
-            // Mặc định cho người mới
-            aiTip = "Chải răng 2 lần/ngày và dùng chỉ nha khoa là cách đơn giản nhất để phòng ngừa sâu răng.";
+            aiTip = "Chải răng 2 lần/ngày để ngừa sâu răng.";
         }
 
-        // D. LỊCH SỬ HOẠT ĐỘNG (Recent Activity)
+        // D. Activity
         List<PatientDashboardDTO.ActivityDTO> activities = new ArrayList<>();
         int limit = Math.min(history.size(), 3);
-
         for(int i = 0; i < limit; i++) {
             Appointment a = history.get(i);
             String action = "Đặt lịch";
             if("COMPLETED".equals(a.getStatus())) action = "Khám xong";
             else if("CANCELLED".equals(a.getStatus())) action = "Đã hủy";
-            else if("NOSHOW".equals(a.getStatus())) action = "Vắng mặt";
 
             LocalDateTime ldt = LocalDateTime.ofInstant(a.getStartDateTime(), ZoneId.systemDefault());
-
             activities.add(PatientDashboardDTO.ActivityDTO.builder()
                     .title(action + " (" + (a.getDoctor() != null ? a.getDoctor().getFullName() : "BS") + ")")
                     .date(ldt.format(DateTimeFormatter.ofPattern("dd/MM/yyyy")))
@@ -311,7 +290,7 @@ public class PatientServiceImpl implements PatientService {
     }
 
     // =================================================================
-    // 5. CÁC HÀM PROFILE (MỚI)
+    // 5. PROFILE
     // =================================================================
     @Override
     public PatientProfileDTO getPatientProfile(String userIdOrEmail) {
@@ -320,7 +299,7 @@ public class PatientServiceImpl implements PatientService {
                 .orElseThrow(() -> new RuntimeException("Patient not found"));
 
         return PatientProfileDTO.builder()
-                .patientId(patient.getId()) // Sửa patientId -> getId()
+                .patientId(patient.getId())
                 .fullName(patient.getFullName())
                 .phone(patient.getPhone())
                 .email(patient.getEmail())
@@ -348,30 +327,26 @@ public class PatientServiceImpl implements PatientService {
         patientRepo.save(patient);
     }
 
-    // --- MAPPER (Giữ nguyên) ---
+    // --- MAPPER ---
     private PatientAppointmentResponse mapToDTO(Appointment appt) {
         boolean canCancel = false;
         String displayStatus = appt.getStatus();
         Instant now = Instant.now();
 
-        if (appt.getStartDateTime().isBefore(now)
-                && ("PENDING".equalsIgnoreCase(displayStatus) || "CONFIRMED".equalsIgnoreCase(displayStatus))) {
+        if (appt.getStartDateTime().isBefore(now) && ("PENDING".equalsIgnoreCase(displayStatus) || "CONFIRMED".equalsIgnoreCase(displayStatus))) {
             displayStatus = "NOSHOW";
             canCancel = false;
-        }
-        else if (("PENDING".equalsIgnoreCase(displayStatus) || "CONFIRMED".equalsIgnoreCase(displayStatus))
-                && appt.getStartDateTime().isAfter(now)) {
+        } else if (("PENDING".equalsIgnoreCase(displayStatus) || "CONFIRMED".equalsIgnoreCase(displayStatus)) && appt.getStartDateTime().isAfter(now)) {
             canCancel = true;
         }
 
         LocalDateTime startLocal = LocalDateTime.ofInstant(appt.getStartDateTime(), ZoneId.systemDefault());
-        LocalDateTime endLocal = (appt.getEndDateTime() != null) ?
-                LocalDateTime.ofInstant(appt.getEndDateTime(), ZoneId.systemDefault()) : null;
+        LocalDateTime endLocal = (appt.getEndDateTime() != null) ? LocalDateTime.ofInstant(appt.getEndDateTime(), ZoneId.systemDefault()) : null;
 
         String serviceName = "Dịch vụ nha khoa";
         String variantName = "";
         if (appt.getAppointmentServices() != null && !appt.getAppointmentServices().isEmpty()) {
-            sunshine_dental_care.entities.AppointmentService as = appt.getAppointmentServices().get(0);
+            AppointmentService as = appt.getAppointmentServices().get(0);
             if (as.getService() != null) serviceName = as.getService().getServiceName();
             if (as.getNote() != null) variantName = as.getNote();
         }
