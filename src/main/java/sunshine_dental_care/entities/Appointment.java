@@ -32,7 +32,6 @@ public class Appointment {
     @JoinColumn(name = "serviceId")
     private Service service;
 
-
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "roomId")
     private Room room;

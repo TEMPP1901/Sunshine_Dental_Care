@@ -1,5 +1,6 @@
 package sunshine_dental_care.services.doctor;
 
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
@@ -43,6 +44,27 @@ public class DoctorAppointmentImp implements DoctorAppointmentService{
 
     // Hàm chuyển đổi từ entity Appointment sang DTO DoctorAppointmentDTO
     private DoctorAppointmentDTO mapToDTO(Appointment appointment) {
+        List<String> detailNames = null;
+        if (appointment.getAppointmentServices() != null) {
+            detailNames = appointment.getAppointmentServices().stream()
+                    .map(as -> {
+                        if (as.getServiceVariant() != null) {
+                            return as.getServiceVariant().getVariantName();
+                        }
+                        if (as.getNote() != null && as.getNote().contains("[") && as.getNote().contains("]")) {
+                            try {
+                                // Cắt chuỗi để lấy phần trong ngoặc vuông
+                                int start = as.getNote().indexOf("[") + 1;
+                                int end = as.getNote().indexOf("]");
+                                return as.getNote().substring(start, end);
+                            } catch (Exception e) {
+                            }
+                        }
+                        // 3. FALLBACK: Nếu không có gì cả thì mới lấy tên Service Cha
+                        return as.getService() != null ? as.getService().getServiceName() : "N/A";
+                    })
+                    .collect(Collectors.toList());
+        }
         return DoctorAppointmentDTO.builder()
                 .appointmentId(appointment.getId())
                 .clinic(toClinicSummary(appointment.getClinic())) // Thông tin phòng khám
@@ -50,6 +72,7 @@ public class DoctorAppointmentImp implements DoctorAppointmentService{
                 .doctor(toDoctorSummary(appointment.getDoctor())) // Thông tin bác sĩ
                 .room(toRoomSummary(appointment.getRoom())) // Thông tin phòng khám chữa trị
                 .service(toServiceDTO(appointment.getService())) // Service object - load trực tiếp từ appointment.service
+                .serviceDetails(detailNames)
                 .startDateTime(appointment.getStartDateTime()) // Thời gian bắt đầu
                 .endDateTime(appointment.getEndDateTime()) // Thời gian kết thúc
                 .status(appointment.getStatus()) // Trạng thái lịch hẹn
@@ -168,6 +191,7 @@ public class DoctorAppointmentImp implements DoctorAppointmentService{
     }
 
     @Override
+    @Transactional(readOnly = true)
     // Lấy chi tiết lịch hẹn theo id lịch hẹn và id bác sĩ
     public DoctorAppointmentDTO findByIdAndDoctorId(Integer appointmentId, Integer doctorId) {
         var doctor = _doctorRepo.findById(doctorId)

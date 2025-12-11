@@ -191,6 +191,17 @@ public class ReceptionServiceImpl implements ReceptionService {
         appointment.setNote(request.getNote());
         appointment.setCreatedBy(creator);
 
+
+        // --- BỔ SUNG: Set Service Cha vào bảng Appointment (để Doctor View không bị lỗi) ---
+        if (!request.getServices().isEmpty()) {
+            Integer firstId = request.getServices().getFirst().getServiceId();
+
+            var variantOpt = serviceVariantRepo.findById(firstId);
+
+            if (variantOpt.isPresent()) {
+                appointment.setService(variantOpt.get().getService());
+            }
+        }
         // Set Type & Fee
         appointment.setAppointmentType(type);
         if (request.getBookingFee() != null) {
@@ -208,19 +219,25 @@ public class ReceptionServiceImpl implements ReceptionService {
             sunshine_dental_care.entities.ServiceVariant v = serviceVariantRepo.findById(req.getServiceId())
                     .orElseThrow(() -> new ResourceNotFoundException("Service Variant not found"));
 
-            AppointmentService as = new AppointmentService();
-            as.setAppointment(appointment);
-            as.setService(v.getService()); // Lưu cha để tương thích
-            as.setQuantity(req.getQuantity());
-            as.setUnitPrice(v.getPrice());
-            as.setDiscountPct(req.getDiscountPct());
-
-            String note = req.getNote() != null ? req.getNote() : "";
-            as.setNote(note + " [" + v.getVariantName() + "]"); // Lưu tên gói vào note
+            AppointmentService as = getAppointmentService(req, appointment, v);
 
             appointmentServiceRepo.save(as);
         }
         return appointmentMapper.mapToAppointmentResponse(appointment);
+    }
+
+    private static AppointmentService getAppointmentService(ServiceItemRequest req, Appointment appointment, ServiceVariant v) {
+        AppointmentService as = new AppointmentService();
+        as.setAppointment(appointment);
+        as.setService(v.getService()); // Lưu cha để tương thích
+        as.setServiceVariant(v);
+        as.setQuantity(req.getQuantity());
+        as.setUnitPrice(v.getPrice());
+        as.setDiscountPct(req.getDiscountPct());
+
+        String note = req.getNote() != null ? req.getNote() : "";
+        as.setNote(note + " [" + v.getVariantName() + "]"); // Lưu tên gói vào note
+        return as;
     }
 
     @Override
