@@ -137,4 +137,15 @@ public class HrEmployeeController {
         List<EmployeeResponse> doctors = hrEmployeeService.getAllDoctors();
         return ResponseEntity.ok(doctors);
     }
+
+    // Preview mã nhân viên sẽ được sinh (để hiển thị trên form)
+    @GetMapping("/preview-code")
+    @org.springframework.security.access.prepost.PreAuthorize("hasRole('HR')")
+    public ResponseEntity<Map<String, String>> previewEmployeeCode() {
+        log.info("Previewing employee code");
+        String code = hrEmployeeService.previewEmployeeCode();
+        Map<String, String> response = new java.util.HashMap<>();
+        response.put("code", code);
+        return ResponseEntity.ok(response);
+    }
 }

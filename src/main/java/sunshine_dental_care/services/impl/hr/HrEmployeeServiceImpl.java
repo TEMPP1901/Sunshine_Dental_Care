@@ -56,9 +56,9 @@ import sunshine_dental_care.repositories.hr.RoomRepo;
 import sunshine_dental_care.repositories.hr.UserClinicAssignmentRepo;
 import sunshine_dental_care.repositories.reception.AppointmentRepo;
 import sunshine_dental_care.security.CurrentUser;
-import sunshine_dental_care.services.interfaces.system.AuditLogService;
 import sunshine_dental_care.services.auth_service.MailService;
 import sunshine_dental_care.services.interfaces.hr.HrEmployeeService;
+import sunshine_dental_care.services.interfaces.system.AuditLogService;
 
 @Service
 @RequiredArgsConstructor
@@ -117,9 +117,18 @@ public class HrEmployeeServiceImpl implements HrEmployeeService {
             user.setUsername(username);
             user.setPasswordHash(passwordEncoder.encode(request.getPassword()));
 
+            // Tự động sinh mã nhân viên với format SDC_NV{number} nếu không có
+            String employeeCode;
             if (request.getCode() != null && !request.getCode().trim().isEmpty()) {
-                user.setCode(request.getCode().trim());
+                employeeCode = request.getCode().trim();
+                // Kiểm tra mã không trùng
+                if (userRepo.findByCodeIgnoreCase(employeeCode).isPresent()) {
+                    throw new EmployeeValidationException("Employee code already exists: " + employeeCode);
+                }
+            } else {
+                employeeCode = generateEmployeeCode();
             }
+            user.setCode(employeeCode);
             if (request.getAvatarUrl() != null && !request.getAvatarUrl().trim().isEmpty()) {
                 user.setAvatarUrl(request.getAvatarUrl().trim());
             }
@@ -166,10 +175,25 @@ public class HrEmployeeServiceImpl implements HrEmployeeService {
             Role role = roleRepo.findById(request.getRoleId())
                     .orElseThrow(() -> new EmployeeValidationException("Role not found"));
 
+            // RECEPTION (roleId: 4) và ACCOUNTANT (roleId: 5) phải có clinicId
+            int roleId = request.getRoleId();
+            if ((roleId == 4 || roleId == 5) && request.getClinicId() == null) {
+                throw new EmployeeValidationException(
+                    String.format("Clinic ID is required for %s (roleId: %d). " +
+                        "RECEPTION and ACCOUNTANT employees must be assigned to a clinic.",
+                        roleId == 4 ? "RECEPTION" : "ACCOUNTANT", roleId));
+            }
+
             Clinic clinic = null;
             if (request.getClinicId() != null) {
                 clinic = clinicRepo.findById(request.getClinicId())
                         .orElseThrow(() -> new EmployeeValidationException("Clinic not found"));
+            } else if (roleId == 4 || roleId == 5) {
+                // Double check: Nếu là RECEPTION hoặc ACCOUNTANT mà clinic vẫn null sau khi resolve
+                throw new EmployeeValidationException(
+                    String.format("Clinic not found or invalid for %s (roleId: %d). " +
+                        "RECEPTION and ACCOUNTANT employees must be assigned to a valid clinic.",
+                        roleId == 4 ? "RECEPTION" : "ACCOUNTANT", roleId));
             }
 
             if (request.getRoomId() != null) {
@@ -691,6 +715,63 @@ public class HrEmployeeServiceImpl implements HrEmployeeService {
             log.error("Error getting all doctors: {}", ex.getMessage(), ex);
             throw new EmployeeValidationException("Failed to get doctors: " + ex.getMessage(), ex);
         }
+    }
+
+    // Tự động sinh mã nhân viên với format SDC_NV000xxx (6 chữ số với leading zeros)
+    private String generateEmployeeCode() {
+        // Tìm tất cả mã nhân viên có format SDC_NV*
+        List<User> allUsers = userRepo.findAll();
+        int maxNumber = 0;
+        
+        for (User user : allUsers) {
+            String code = user.getCode();
+            if (code != null && code.toUpperCase().startsWith("SDC_NV")) {
+                try {
+                    // Lấy số sau "SDC_NV" (bỏ qua các số 0 đệm phía trước)
+                    String numberPart = code.substring(6); // "SDC_NV" có 6 ký tự
+                    // Loại bỏ leading zeros để parse số
+                    String numberPartTrimmed = numberPart.replaceFirst("^0+", "");
+                    if (numberPartTrimmed.isEmpty()) {
+                        numberPartTrimmed = "0"; // Nếu toàn bộ là số 0
+                    }
+                    int number = Integer.parseInt(numberPartTrimmed);
+                    if (number > maxNumber) {
+                        maxNumber = number;
+                    }
+                } catch (NumberFormatException e) {
+                    // Bỏ qua các mã không đúng format
+                    log.debug("Skipping invalid employee code format: {}", code);
+                }
+            }
+        }
+        
+        // Tăng số lên 1
+        int nextNumber = maxNumber + 1;
+        
+        // Format với 6 chữ số, có leading zeros: SDC_NV000001, SDC_NV000002, ...
+        String newCode = String.format("SDC_NV%06d", nextNumber);
+        
+        // Double check: Đảm bảo mã không trùng (trường hợp hiếm)
+        int retryCount = 0;
+        while (userRepo.findByCodeIgnoreCase(newCode).isPresent() && retryCount < 100) {
+            nextNumber++;
+            newCode = String.format("SDC_NV%06d", nextNumber);
+            retryCount++;
+        }
+        
+        if (retryCount >= 100) {
+            throw new EmployeeValidationException("Failed to generate unique employee code after 100 attempts");
+        }
+        
+        log.info("Generated employee code: {}", newCode);
+        return newCode;
+    }
+
+    // Preview mã nhân viên sẽ được sinh (để hiển thị trên form trước khi tạo)
+    @Override
+    @Transactional(readOnly = true)
+    public String previewEmployeeCode() {
+        return generateEmployeeCode();
     }
 
     // Lấy user hiện tại từ SecurityContext để ghi audit log (nếu không có thì bỏ qua log)

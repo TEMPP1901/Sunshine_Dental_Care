@@ -74,7 +74,7 @@ public class HRManagementServiceImpl implements HRManagementService {
             // chỉ lấy clinic đang active
             return clinics.stream()
                 .filter(c -> c.getIsActive() != null && c.getIsActive())
-                .map(c -> new ClinicResponse(c.getId(), c.getClinicName()))
+                .map(c -> new ClinicResponse(c.getId(), c.getClinicName(), c.getIsActive()))
                 .collect(Collectors.toList());
         } catch (DataAccessException ex) {
             log.error("Error while fetching clinics: {}", ex.getMessage(), ex);

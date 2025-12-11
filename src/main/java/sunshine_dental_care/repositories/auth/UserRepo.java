@@ -4,14 +4,18 @@ import java.util.List;
 import java.util.Optional;
 
 import org.springframework.data.jpa.repository.JpaRepository;
-
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
+
 import sunshine_dental_care.entities.User;
 
 public interface UserRepo extends JpaRepository<User, Integer> {
     Optional<User> findByEmailIgnoreCase(String email);
     Optional<User> findByUsernameIgnoreCase(String username);
+    
+    @Query("SELECT u FROM User u WHERE UPPER(u.code) = UPPER(:code)")
+    Optional<User> findByCodeIgnoreCase(@Param("code") String code);
+    
     Optional<User> findByResetPasswordToken(String token);
     Optional<User> findByPhone(String phone);
 

@@ -47,6 +47,7 @@ import sunshine_dental_care.repositories.auth.UserRepo;
 import sunshine_dental_care.repositories.auth.UserRoleRepo;
 import sunshine_dental_care.repositories.hr.AttendanceRepository;
 import sunshine_dental_care.repositories.hr.EmployeeFaceProfileRepo;
+import sunshine_dental_care.security.CurrentUser;
 import sunshine_dental_care.services.impl.hr.ClinicResolutionService;
 import sunshine_dental_care.services.impl.hr.attend.AttendanceVerificationService.VerificationResult;
 import sunshine_dental_care.services.impl.hr.wifi.WiFiHelperService;
@@ -175,6 +176,20 @@ public class AttendanceServiceImpl implements AttendanceService {
         }
 
         attendance.setLateMinutes(calculationHelper.calculateLateMinutes(checkInLocalTime, expectedStartTime));
+        
+        // Thông báo đến Reception nếu bác sĩ check-in trễ >= 30 phút
+        Integer lateMinutes = attendance.getLateMinutes();
+        if (isDoctor && lateMinutes != null && lateMinutes >= 30) {
+            try {
+                sendLateCheckInNotificationToReception(
+                    request.getUserId(), clinicId, lateMinutes, checkInTime, attendance.getId());
+            } catch (Exception e) {
+                log.error("Failed to send late check-in notification to reception for doctor {}: {}", 
+                    request.getUserId(), e.getMessage(), e);
+                // Không throw exception để không ảnh hưởng đến check-in
+            }
+        }
+        
         boolean faceVerified = faceResult.isVerified();
         boolean wifiValid = wifiResult.isValid();
         attendance.setVerificationStatus(faceVerified && wifiValid ? "VERIFIED" : "FAILED");
@@ -321,7 +336,7 @@ public class AttendanceServiceImpl implements AttendanceService {
 
         // Cảnh báo/phòng trường hợp thiếu checkin (chưa xử lý)
         if (attendance.getCheckInTime() == null) {
-            // TODO: xử lý nếu cần
+            
         }
 
         User user = userRepo.findById(attendance.getUserId())
@@ -385,6 +400,65 @@ public class AttendanceServiceImpl implements AttendanceService {
             notificationService.sendNotification(notiRequest);
         } catch (Exception e) {
             log.error("Failed to send check-out notification", e);
+        }
+    }
+
+    // Gửi notification đến Reception khi bác sĩ check-in trễ >= 30 phút
+    private void sendLateCheckInNotificationToReception(
+            Integer doctorUserId, Integer clinicId, Integer lateMinutes, Instant checkInTime, Integer attendanceId) {
+        try {
+            // Lấy thông tin bác sĩ và clinic
+            User doctor = userRepo.findById(doctorUserId)
+                    .orElseThrow(() -> new AttendanceNotFoundException("Doctor not found"));
+            Clinic clinic = clinicRepo.findById(clinicId)
+                    .orElseThrow(() -> new AttendanceNotFoundException("Clinic not found"));
+            
+            // Lấy danh sách Reception users
+            List<Integer> receptionUserIds = userRoleRepo.findUserIdsByRoleName("RECEPTION");
+            if (receptionUserIds == null || receptionUserIds.isEmpty()) {
+                log.warn("No RECEPTION users found to notify about late check-in");
+                return;
+            }
+            
+            String checkInTimeStr = checkInTime.atZone(ZoneId.systemDefault())
+                    .toLocalTime().toString().substring(0, 5);
+            String message = String.format(
+                    "Bác sĩ %s đã check-in trễ %d phút tại %s. Thời gian check-in: %s",
+                    doctor.getFullName(), lateMinutes, clinic.getClinicName(), checkInTimeStr);
+            
+            // Gửi notification realtime đến tất cả Reception users
+            // Mỗi notification sẽ tự động được gửi qua WebSocket, Firestore, và FCM sau khi transaction commit
+            int successCount = 0;
+            for (Integer receptionUserId : receptionUserIds) {
+                try {
+                    NotificationRequest notiRequest = NotificationRequest.builder()
+                            .userId(receptionUserId)
+                            .type("DOCTOR_LATE_CHECKIN")
+                            .priority("MEDIUM")
+                            .title("Bác sĩ check-in trễ")
+                            .message(message)
+                            .actionUrl("/hr/attendance")
+                            .relatedEntityType("ATTENDANCE")
+                            .relatedEntityId(attendanceId)
+                            .build();
+                    
+                    // Gửi notification - sẽ tự động distribute realtime qua WebSocket/FCM sau khi commit
+                    notificationService.sendNotification(notiRequest);
+                    successCount++;
+                    log.debug("Queued realtime notification for reception user {} about doctor {} late check-in", 
+                            receptionUserId, doctorUserId);
+                } catch (Exception e) {
+                    log.error("Failed to queue late check-in notification for reception user {}: {}", 
+                            receptionUserId, e.getMessage());
+                }
+            }
+            
+            log.info("Queued {} realtime notifications to {}/{} reception users for doctor {} late check-in ({} minutes late). " +
+                    "Notifications will be sent via WebSocket/FCM after transaction commit.",
+                    successCount, successCount, receptionUserIds.size(), doctorUserId, lateMinutes);
+        } catch (Exception e) {
+            log.error("Failed to send late check-in notification to reception: {}", e.getMessage(), e);
+            // Không throw exception để không ảnh hưởng đến check-in
         }
     }
 

@@ -20,7 +20,6 @@ import org.springframework.web.bind.annotation.RestController;
 import lombok.RequiredArgsConstructor;
 import sunshine_dental_care.dto.adminDTO.AdminClinicDto;
 import sunshine_dental_care.dto.adminDTO.ClinicActivationRequestDto;
-import sunshine_dental_care.dto.adminDTO.ClinicStaffDetailDto;
 import sunshine_dental_care.dto.adminDTO.ClinicUpdateRequestDto;
 import sunshine_dental_care.services.interfaces.admin.AdminClinicService;
 
@@ -45,14 +44,6 @@ public class AdminClinicController {
             @Validated @RequestBody ClinicActivationRequestDto request) {
         adminClinicService.updateActivation(id, request.getActive());
         return ResponseEntity.status(HttpStatus.NO_CONTENT).build();
-    }
-
-    // Lấy danh sách chi tiết nhân sự theo clinic và ngày
-    @GetMapping("/{id}/staff")
-    public ResponseEntity<List<ClinicStaffDetailDto>> getClinicStaffDetails(
-            @PathVariable Integer id,
-            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate date) {
-        return ResponseEntity.ok(adminClinicService.getClinicStaffDetails(id, date));
     }
 
     // Cập nhật thông tin phòng khám

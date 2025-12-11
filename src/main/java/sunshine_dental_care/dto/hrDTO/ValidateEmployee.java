@@ -52,6 +52,14 @@ public final class ValidateEmployee {
             if (!allowed) {
                 throw new EmployeeValidationException("HR can only create DOCTOR (roleId: 3), RECEPTION (roleId: 4), or ACCOUNTANT (roleId: 5) users. Provided roleId: " + roleId);
             }
+            
+            // RECEPTION (4) và ACCOUNTANT (5) phải có clinicId
+            if ((roleId == 4 || roleId == 5) && request.getClinicId() == null) {
+                throw new EmployeeValidationException(
+                    String.format("Clinic ID is required for %s (roleId: %d). " +
+                        "RECEPTION and ACCOUNTANT employees must be assigned to a clinic.",
+                        roleId == 4 ? "RECEPTION" : "ACCOUNTANT", roleId));
+            }
         }
     }
 

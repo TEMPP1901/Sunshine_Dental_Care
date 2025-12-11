@@ -35,4 +35,7 @@ public interface HrEmployeeService {
     
     // Lấy danh sách tất cả bác sĩ (public - không yêu cầu HR role)
     List<EmployeeResponse> getAllDoctors();
+    
+    // Preview mã nhân viên sẽ được sinh (để hiển thị trên form trước khi tạo)
+    String previewEmployeeCode();
 }

@@ -67,11 +67,13 @@ public class DoctorScheduleMapper {
     public ClinicResponse mapClinicToClinicResponse(Clinic clinic) {
         if (clinic == null) return null;
 
-        return new ClinicResponse(
+        ClinicResponse response = new ClinicResponse(
                 clinic.getId(),
-                clinic.getClinicCode(),
-                clinic.getClinicName()
+                clinic.getClinicName(),
+                clinic.getClinicCode()
         );
+        response.setIsActive(clinic.getIsActive());
+        return response;
     }
 
     /**
@@ -87,11 +89,13 @@ public class DoctorScheduleMapper {
 
         // 2. Map Clinic
         if (schedule.getClinic() != null) {
-            dto.setClinic(new ClinicResponse(
+            ClinicResponse clinicResponse = new ClinicResponse(
                     schedule.getClinic().getId(),
-                    schedule.getClinic().getClinicCode(),
-                    schedule.getClinic().getClinicName()
-            ));
+                    schedule.getClinic().getClinicName(),
+                    schedule.getClinic().getClinicCode()
+            );
+            clinicResponse.setIsActive(schedule.getClinic().getIsActive());
+            dto.setClinic(clinicResponse);
         }
 
         // 3. Map Room (Sử dụng constructor 2 tham số: id, roomName)

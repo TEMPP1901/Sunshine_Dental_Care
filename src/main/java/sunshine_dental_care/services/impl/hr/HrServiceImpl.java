@@ -309,6 +309,7 @@ public class HrServiceImpl implements HrService {
                 ClinicResponse clinicDto = new ClinicResponse();
                 clinicDto.setId(clinic.getId());
                 clinicDto.setClinicName(clinic.getClinicName());
+                clinicDto.setIsActive(clinic.getIsActive());
                 dto.setClinic(clinicDto);
             }
         }

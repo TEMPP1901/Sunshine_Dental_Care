@@ -12,8 +12,6 @@ public class AdminClinicDto {
     private String email;
     private String openingHours;
     private Boolean active;
-    private Integer activeDoctorsCount; // Số bác sĩ đang hoạt động
-    private Integer activeEmployeesCount; // Số nhân viên đang hoạt động
     private Instant createdAt;
     private Instant updatedAt;
 
@@ -115,25 +113,5 @@ public class AdminClinicDto {
     // Đặt thời điểm cập nhật phòng khám lần cuối
     public void setUpdatedAt(Instant updatedAt) {
         this.updatedAt = updatedAt;
-    }
-
-    // Lấy số bác sĩ đang hoạt động
-    public Integer getActiveDoctorsCount() {
-        return activeDoctorsCount;
-    }
-
-    // Đặt số bác sĩ đang hoạt động
-    public void setActiveDoctorsCount(Integer activeDoctorsCount) {
-        this.activeDoctorsCount = activeDoctorsCount;
-    }
-
-    // Lấy số nhân viên đang hoạt động
-    public Integer getActiveEmployeesCount() {
-        return activeEmployeesCount;
-    }
-
-    // Đặt số nhân viên đang hoạt động
-    public void setActiveEmployeesCount(Integer activeEmployeesCount) {
-        this.activeEmployeesCount = activeEmployeesCount;
     }
 }
