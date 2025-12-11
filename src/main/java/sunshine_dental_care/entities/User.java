@@ -6,6 +6,7 @@ import java.util.List;
 import org.hibernate.annotations.ColumnDefault;
 import org.hibernate.annotations.Nationalized;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 
 import jakarta.persistence.CascadeType;
@@ -80,7 +81,7 @@ public class User {
     @Column(name = "failedLoginAttempts")
     private Integer failedLoginAttempts = 0;
 
-    // --- TOKEN RESET PASSWORD (Cả 2 đều có) ---
+    // --- TOKEN RESET PASSWORD ---
     @Column(name = "resetPasswordToken", length = 64)
     private String resetPasswordToken;
 
@@ -102,7 +103,6 @@ public class User {
     private Instant otpExpiry;
 
     // --- AUDIT FIELDS ---
-
     @ColumnDefault("sysutcdatetime()")
     @Column(name = "createdAt", nullable = false)
     private Instant createdAt;
@@ -115,7 +115,6 @@ public class User {
     private Instant lastLoginAt;
 
     // --- RELATIONS ---
-
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "departmentId")
     private Department department;
@@ -125,10 +124,11 @@ public class User {
     private String specialty;
 
     @OneToMany(mappedBy = "doctor", cascade = CascadeType.ALL, fetch = FetchType.LAZY, orphanRemoval = true)
+    @JsonIgnore // [QUAN TRỌNG] Thêm annotation này của Long để tránh lỗi Loop
     private List<DoctorSpecialty> doctorSpecialties;
 
-    // --- [CỦA LONG] DANH SÁCH QUYỀN (ROLE) ---
     @OneToMany(mappedBy = "user", fetch = FetchType.LAZY)
+    @JsonIgnore // [QUAN TRỌNG] Thêm annotation này của Long để tránh lỗi Loop
     private List<UserRole> userRoles;
 
     // =================================================================
@@ -215,7 +215,6 @@ public class User {
     public List<DoctorSpecialty> getDoctorSpecialties() { return doctorSpecialties; }
     public void setDoctorSpecialties(List<DoctorSpecialty> doctorSpecialties) { this.doctorSpecialties = doctorSpecialties; }
 
-    // [CỦA LONG] - Getter Setter cho UserRoles
     public List<UserRole> getUserRoles() { return userRoles; }
     public void setUserRoles(List<UserRole> userRoles) { this.userRoles = userRoles; }
 

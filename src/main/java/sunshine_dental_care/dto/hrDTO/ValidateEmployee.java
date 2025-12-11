@@ -31,9 +31,12 @@ public final class ValidateEmployee {
             throw new EmployeeValidationException("Password must be at least 6 characters");
         }
 
-        if (userRepo.findByEmailIgnoreCase(request.getEmail()).isPresent()) {
-            throw new EmployeeValidationException("Email already exists: " + request.getEmail());
-        }
+        // Chỉ kiểm tra email của user đang active (cho phép tạo lại với email đã bị soft delete)
+        userRepo.findByEmailIgnoreCase(request.getEmail()).ifPresent(existing -> {
+            if (Boolean.TRUE.equals(existing.getIsActive())) {
+                throw new EmployeeValidationException("Email already exists: " + request.getEmail());
+            }
+        });
         // Username is optional - will be auto-generated from email if not provided
         if (request.getUsername() != null && !request.getUsername().trim().isEmpty()) {
             if (userRepo.findByUsernameIgnoreCase(request.getUsername()).isPresent()) {
@@ -41,12 +44,13 @@ public final class ValidateEmployee {
             }
         }
 
-        // Validate role: allow only DOCTOR(3), RECEPTIONIST(4), ACCOUNTANT(5)
+        // Validate role: allow only DOCTOR(3), RECEPTION(4), ACCOUNTANT(5)
+        // Note: RECEPTION có thể có roleId = 4 (tên là "RECEPTION" hoặc "RECEPTIONIST")
         if (request.getRoleId() != null) {
             int roleId = request.getRoleId();
             boolean allowed = roleId == 3 || roleId == 4 || roleId == 5;
             if (!allowed) {
-                throw new EmployeeValidationException("HR can only create DOCTOR, RECEPTIONIST or ACCOUNTANT users");
+                throw new EmployeeValidationException("HR can only create DOCTOR (roleId: 3), RECEPTION (roleId: 4), or ACCOUNTANT (roleId: 5) users. Provided roleId: " + roleId);
             }
         }
     }
@@ -99,4 +103,3 @@ public final class ValidateEmployee {
         }
     }
 }
-

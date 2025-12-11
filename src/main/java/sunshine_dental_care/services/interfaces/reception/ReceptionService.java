@@ -1,9 +1,8 @@
 package sunshine_dental_care.services.interfaces.reception;
 
+import org.springframework.data.domain.Page;
 import sunshine_dental_care.dto.hrDTO.DoctorScheduleDto;
-import sunshine_dental_care.dto.receptionDTO.AppointmentRequest;
-import sunshine_dental_care.dto.receptionDTO.AppointmentResponse;
-import sunshine_dental_care.dto.receptionDTO.RescheduleRequest;
+import sunshine_dental_care.dto.receptionDTO.*;
 import sunshine_dental_care.security.CurrentUser;
 
 import java.time.LocalDate;
@@ -29,4 +28,10 @@ public interface ReceptionService {
             Integer appointmentId,
             RescheduleRequest request
     );
+
+    Page<PatientResponse> getPatients(String keyword, int page, int size);
+
+    PatientResponse createPatient(PatientRequest request);
+
+    AppointmentResponse updateAppointment(Integer appointmentId, AppointmentUpdateRequest request);
 }

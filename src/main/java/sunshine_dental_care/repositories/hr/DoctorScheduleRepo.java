@@ -13,16 +13,18 @@ import sunshine_dental_care.entities.DoctorSchedule;
 @Repository
 public interface DoctorScheduleRepo extends JpaRepository<DoctorSchedule, Integer> {
 
+    // --- 1. CÁC HÀM CƠ BẢN (DÙNG BẢN CỦA LONG VÌ CÓ CHECK isActive = true) ---
+
     // Lấy lịch theo ngày cụ thể
-    @Query("SELECT d FROM DoctorSchedule d WHERE d.workDate = :workDate ORDER BY d.doctor.id")
+    @Query("SELECT d FROM DoctorSchedule d WHERE d.workDate = :workDate AND d.doctor.isActive = true ORDER BY d.doctor.id")
     List<DoctorSchedule> findByWorkDate(@Param("workDate") LocalDate workDate);
 
     // Lấy lịch cho cả tuần
-    @Query("SELECT d FROM DoctorSchedule d WHERE d.workDate >= :weekStart AND d.workDate <= :weekEnd ORDER BY d.workDate, d.doctor.id")
+    @Query("SELECT d FROM DoctorSchedule d WHERE d.workDate >= :weekStart AND d.workDate <= :weekEnd AND d.doctor.isActive = true ORDER BY d.workDate, d.doctor.id")
     List<DoctorSchedule> findByWeekRange(@Param("weekStart") LocalDate weekStart, @Param("weekEnd") LocalDate weekEnd);
 
-    // Lấy lịch của cơ sở theo ngày (Method cũ của bạn)
-    @Query("SELECT d FROM DoctorSchedule d WHERE d.clinic.id = :clinicId AND d.workDate = :workDate ORDER BY d.doctor.id")
+    // Lấy lịch của cơ sở theo ngày
+    @Query("SELECT d FROM DoctorSchedule d WHERE d.clinic.id = :clinicId AND d.workDate = :workDate AND d.doctor.isActive = true ORDER BY d.doctor.id")
     List<DoctorSchedule> findByClinicAndDate(@Param("clinicId") Integer clinicId,
                                              @Param("workDate") LocalDate workDate);
 
@@ -57,11 +59,34 @@ public interface DoctorScheduleRepo extends JpaRepository<DoctorSchedule, Intege
             @Param("startDate") LocalDate startDate,
             @Param("endDate") LocalDate endDate);
 
-    // --- [THÊM MỚI] Dùng cho chức năng Auto-Assign bác sĩ khi đặt lịch Standard ---
+    // --- 2. PHẦN CỦA TUẤN (CHO AUTO-ASSIGN) ---
     // Tìm tất cả bác sĩ có lịch làm việc ACTIVE tại cơ sở vào ngày khách chọn
     @Query("SELECT d FROM DoctorSchedule d WHERE d.clinic.id = :clinicId AND d.workDate = :workDate AND d.status = 'ACTIVE'")
     List<DoctorSchedule> findByClinicIdAndWorkDate(
             @Param("clinicId") Integer clinicId,
             @Param("workDate") LocalDate workDate
     );
+
+    // --- 3. PHẦN CỦA LONG (CHO XỬ LÝ HOLIDAY) ---
+
+    // Lấy lịch theo khoảng thời gian và clinic (dùng để tìm schedules trùng với holiday)
+    @Query("SELECT d FROM DoctorSchedule d WHERE d.workDate >= :startDate AND d.workDate <= :endDate " +
+            "AND (:clinicId IS NULL OR d.clinic.id = :clinicId) " +
+            "AND d.doctor.isActive = true " +
+            "AND (d.status IS NULL OR d.status = 'ACTIVE') " +
+            "ORDER BY d.workDate, d.clinic.id, d.doctor.id")
+    List<DoctorSchedule> findByDateRangeAndClinic(
+            @Param("startDate") LocalDate startDate,
+            @Param("endDate") LocalDate endDate,
+            @Param("clinicId") Integer clinicId);
+
+    // Lấy lịch theo khoảng thời gian và clinic bao gồm cả CANCELLED
+    @Query("SELECT d FROM DoctorSchedule d WHERE d.workDate >= :startDate AND d.workDate <= :endDate " +
+            "AND (:clinicId IS NULL OR d.clinic.id = :clinicId) " +
+            "AND d.doctor.isActive = true " +
+            "ORDER BY d.workDate, d.clinic.id, d.doctor.id")
+    List<DoctorSchedule> findByDateRangeAndClinicAllStatus(
+            @Param("startDate") LocalDate startDate,
+            @Param("endDate") LocalDate endDate,
+            @Param("clinicId") Integer clinicId);
 }

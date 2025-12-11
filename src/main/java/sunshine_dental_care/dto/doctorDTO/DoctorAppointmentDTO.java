@@ -6,6 +6,7 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
 
+import java.math.BigDecimal;
 import java.time.Instant;
 
 @Getter
@@ -35,4 +36,7 @@ public class DoctorAppointmentDTO {
     private Instant updatedAt;
 
     private ServiceDTO service;
+    
+    private String appointmentType; // "VIP" hoặc "STANDARD"
+    private BigDecimal bookingFee; // Phí đặt lịch hẹn
 }

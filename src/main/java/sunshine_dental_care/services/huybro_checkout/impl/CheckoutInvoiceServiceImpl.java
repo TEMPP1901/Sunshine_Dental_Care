@@ -26,9 +26,11 @@ import sunshine_dental_care.repositories.huybro_products.ProductRepository;
 import sunshine_dental_care.security.CurrentUser;
 import sunshine_dental_care.services.huybro_cart.interfaces.CartService;
 import sunshine_dental_care.services.huybro_checkout.interfaces.CheckoutInvoiceService;
+import sunshine_dental_care.services.interfaces.system.AuditLogService;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -44,22 +46,27 @@ public class CheckoutInvoiceServiceImpl implements CheckoutInvoiceService {
     private final ProductInvoiceRepository productInvoiceRepository;
     private final ProductInvoiceItemRepository productInvoiceItemRepository;
     private final UserCustomRepository userRepository;
+    private final AuditLogService auditLogService;
 
     @Override
     @Transactional
     public CheckoutInvoiceDto createInvoice(CheckoutCreateRequestDto request, HttpSession session) {
-        // 1. Khởi tạo Map chứa lỗi
+        LocalDateTime now = LocalDateTime.now();
         Map<String, String> errors = new HashMap<>();
 
-        // 2. Validate Giỏ hàng (Lỗi logic blocking)
-        CartViewDto cartView = cartService.getCartDetail(session);
+        // 1. Currency & Cart
+        String currencyRequest = normalize(request.getCurrency());
+        CartViewDto cartView = cartService.getCartPreviewByCurrency(session, currencyRequest);
+
         if (cartView == null || CollectionUtils.isEmpty(cartView.getItems())) {
             throw new IllegalStateException("Cart is empty");
         }
+        String finalCurrency = cartView.getCurrency();
 
-        // 3. Xác định User
+        // 2. Identify User & Create Item Note Tag
         boolean isLoggedIn = false;
         User currentUser = null;
+        String itemNoteTag; // Biến này để lưu vào ProductInvoiceItem
 
         Authentication auth = SecurityContextHolder.getContext().getAuthentication();
         if (auth != null && auth.isAuthenticated() && auth.getPrincipal() instanceof CurrentUser currentUserPrincipal) {
@@ -67,15 +74,18 @@ public class CheckoutInvoiceServiceImpl implements CheckoutInvoiceService {
             currentUser = userRepository.findById(userId)
                     .orElseThrow(() -> new IllegalStateException("User not found"));
             isLoggedIn = true;
+            // Tag cho Member
+            itemNoteTag = String.format("[MEMBER: ID #%d]", userId);
+        } else {
+            // Tag cho Guest
+            itemNoteTag = "[POTENTIAL]";
         }
 
-        // 4. Chuẩn hóa dữ liệu
+        // 3. Payment Validation
         String paymentType = normalize(request.getPaymentType());
         if (!"COD".equals(paymentType) && !"BANK_TRANSFER".equals(paymentType)) {
             throw new IllegalArgumentException("Unsupported payment type");
         }
-
-        // [RULE] Guest (N) cannot use COD -> Chặn ngay lập tức vì đây là lỗi logic luồng
         if ("COD".equals(paymentType) && !isLoggedIn) {
             throw new IllegalArgumentException("Guest users cannot use COD. Please login to continue.");
         }
@@ -85,77 +95,49 @@ public class CheckoutInvoiceServiceImpl implements CheckoutInvoiceService {
             paymentChannel = "COD".equals(paymentType) ? "CASH_ON_DELIVERY" : "PAYPAL";
         }
 
-        String currency = normalize(request.getCurrency());
-        if (currency == null) currency = normalize(cartView.getCurrency());
-        if (currency == null) currency = "USD";
-
-        // [RULE] Ràng buộc Tiền tệ - Kênh thanh toán
-        if ("PAYPAL".equals(paymentChannel) && !"USD".equals(currency)) {
+        if ("PAYPAL".equals(paymentChannel) && !"USD".equals(finalCurrency)) {
             throw new IllegalArgumentException("PAYPAL payment requires USD currency.");
         }
-        if ("VNPAY".equals(paymentChannel) && !"VND".equals(currency)) {
+        if ("VNPAY".equals(paymentChannel) && !"VND".equals(finalCurrency)) {
             throw new IllegalArgumentException("VNPAY payment requires VND currency.");
         }
 
-        // 5. Chuẩn bị dữ liệu khách hàng & Validate chi tiết
+        // 4. Customer Info
         String customerFullName;
         String customerEmail;
         String customerPhone;
         String shippingAddress = trimToNull(request.getShippingAddress());
-        String note = trimToNull(request.getNote());
+        String invoiceUserNote = trimToNull(request.getNote());
 
         if (isLoggedIn) {
-            // User đã đăng nhập: Lấy từ DB
             customerFullName = trimToNull(currentUser.getFullName());
             customerEmail = trimToNull(currentUser.getEmail());
-            // Phone: Ưu tiên form gửi lên (nếu user sửa sđt nhận hàng), fallback về DB
             String phoneFromRequest = trimToNull(request.getCustomerPhone());
             customerPhone = phoneFromRequest != null ? phoneFromRequest : trimToNull(currentUser.getPhone());
         } else {
-            // Guest: Lấy hoàn toàn từ Form
             customerFullName = trimToNull(request.getCustomerFullName());
             customerEmail = trimToNull(request.getCustomerEmail());
             customerPhone = trimToNull(request.getCustomerPhone());
         }
 
-        // --- VALIDATION LOGIC GOM LỖI ---
-
-        // 5.1 Validate Address (Bắt buộc cho cả User và Guest trong mọi trường hợp)
+        // 5. Validation Logic
         if (shippingAddress == null || shippingAddress.length() < 3) {
             errors.put("shippingAddress", "Shipping address is required (min 3 chars)");
         }
-
-        // 5.2 Validate thông tin cá nhân cho Guest
         if (!isLoggedIn) {
-            // Guest Transfer: Cần FullName, Email, Phone
-            // (Guest COD đã bị chặn ở trên rồi)
             if ("BANK_TRANSFER".equals(paymentType)) {
-                if (customerFullName == null) {
-                    errors.put("customerFullName", "Full name is required");
-                }
-                if (customerEmail == null) {
-                    errors.put("customerEmail", "Email is required");
-                }
-                if (customerPhone == null) {
-                    errors.put("customerPhone", "Phone number is required");
-                }
-            }
-        } else {
-            // User Logged In:
-            // Đã có Address check ở 5.1
-            // Có thể check thêm Phone nếu muốn chặt chẽ (tùy chọn)
-            if (customerPhone == null) {
-                // errors.put("customerPhone", "Phone number is required"); // Uncomment nếu muốn bắt buộc
+                if (customerFullName == null) errors.put("customerFullName", "Full name is required");
+                if (customerEmail == null) errors.put("customerEmail", "Email is required");
+                if (customerPhone == null) errors.put("customerPhone", "Phone number is required");
             }
         }
 
-        // 6. NẾU CÓ LỖI -> NÉM EXCEPTION CHỨA MAP LỖI
         if (!errors.isEmpty()) {
             throw new CheckoutValidationException(errors);
         }
 
         // =========================================================
-        // KHÔNG CÓ LỖI -> TIẾN HÀNH TẠO ĐƠN
+        // CREATE INVOICE
         // =========================================================
 
         BigDecimal subTotal = cartView.getTotals().getSubTotalBeforeTax();
@@ -167,17 +149,21 @@ public class CheckoutInvoiceServiceImpl implements CheckoutInvoiceService {
         invoice.setSubTotal(subTotal.setScale(2, RoundingMode.HALF_UP));
         invoice.setTaxTotal(taxTotal.setScale(2, RoundingMode.HALF_UP));
         invoice.setTotalAmount(totalAfterTax.setScale(2, RoundingMode.HALF_UP));
-        invoice.setCurrency(currency);
+        invoice.setCurrency(finalCurrency);
 
         invoice.setPaymentMethod(paymentType);
         invoice.setPaymentChannel(paymentChannel);
         invoice.setPaymentStatus("PENDING");
+        invoice.setInvoiceStatus("NEW");
 
         invoice.setCustomerFullName(customerFullName);
         invoice.setCustomerEmail(customerEmail);
         invoice.setCustomerPhone(customerPhone);
         invoice.setShippingAddress(shippingAddress);
-        invoice.setNotes(note);
+        invoice.setNotes(invoiceUserNote);
+
+        invoice.setCreatedAt(now);
+        invoice.setUpdatedAt(now);
 
         ProductInvoice savedInvoice = productInvoiceRepository.save(invoice);
 
@@ -197,7 +183,9 @@ public class CheckoutInvoiceServiceImpl implements CheckoutInvoiceService {
             item.setLineTotalAmount(cartItem.getLineTotalAmount());
             item.setProductNameSnapshot(cartItem.getProductName());
             item.setSkuSnapshot(cartItem.getSku());
-            item.setNote(null);
+            item.setNote(itemNoteTag);
+
+            item.setCreatedAt(now);
 
             if (product.getUnit() != null) {
                 int remaining = product.getUnit() - cartItem.getQuantity();
@@ -206,20 +194,37 @@ public class CheckoutInvoiceServiceImpl implements CheckoutInvoiceService {
                 }
                 item.setRemainingQuantityAfterSale(remaining);
 
-                // Trừ kho
                 product.setUnit(remaining);
+                if (remaining == 0) {
+                    product.setIsActive(false);
+                    log.info("Product id={} has reached 0 stock. Auto-deactivating.", product.getId());
+                }
                 productRepository.save(product);
             } else {
                 item.setRemainingQuantityAfterSale(null);
             }
-
             invoiceItems.add(item);
         }
 
         productInvoiceItemRepository.saveAll(invoiceItems);
-
-        // Xóa giỏ hàng sau khi thành công
         cartService.clearCart(session);
+
+        // Ghi audit log tạo hóa đơn
+        User actor = resolveCurrentUserEntity();
+        if (actor != null) {
+            auditLogService.logAction(
+                    actor,
+                    "CREATE_INVOICE",
+                    "PRODUCT_INVOICE",
+                    savedInvoice.getId(),
+                    null,
+                    String.format("Invoice %s total %s %s via %s/%s",
+                            savedInvoice.getInvoiceCode(),
+                            savedInvoice.getTotalAmount(),
+                            savedInvoice.getCurrency(),
+                            savedInvoice.getPaymentMethod(),
+                            savedInvoice.getPaymentChannel()));
+        }
 
         return mapToCheckoutInvoiceDto(savedInvoice, invoiceItems);
     }
@@ -234,13 +239,17 @@ public class CheckoutInvoiceServiceImpl implements CheckoutInvoiceService {
         dto.setTaxTotal(invoice.getTaxTotal());
         dto.setTotalAmount(invoice.getTotalAmount());
         dto.setCurrency(invoice.getCurrency());
+
         dto.setPaymentStatus(invoice.getPaymentStatus());
+        dto.setInvoiceStatus(invoice.getInvoiceStatus());
+
         dto.setPaymentMethod(invoice.getPaymentMethod());
         dto.setPaymentChannel(invoice.getPaymentChannel());
         dto.setPaymentCompletedAt(invoice.getPaymentCompletedAt());
-        dto.setInvoiceDate(invoice.getInvoiceDate());
+
         dto.setCreatedAt(invoice.getCreatedAt());
         dto.setUpdatedAt(invoice.getUpdatedAt());
+
         dto.setCustomerFullName(invoice.getCustomerFullName());
         dto.setCustomerEmail(invoice.getCustomerEmail());
         dto.setCustomerPhone(invoice.getCustomerPhone());
@@ -275,5 +284,19 @@ public class CheckoutInvoiceServiceImpl implements CheckoutInvoiceService {
 
     private String trimToNull(String value) {
         return StringUtils.trimToNull(value);
+    }
+
+    // Helper: lấy actor từ SecurityContext để ghi audit log
+    private User resolveCurrentUserEntity() {
+        try {
+            Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+            if (auth != null && auth.isAuthenticated() && auth.getPrincipal() instanceof CurrentUser currentUser) {
+                Integer userId = currentUser.userId();
+                return userRepository.findById(userId).orElse(null);
+            }
+        } catch (Exception e) {
+            log.warn("Cannot resolve current user for audit log: {}", e.getMessage());
+        }
+        return null;
     }
 }

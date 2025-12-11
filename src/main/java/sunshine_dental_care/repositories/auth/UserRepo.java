@@ -5,41 +5,39 @@ import java.util.Optional;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
+import org.springframework.stereotype.Repository;
 import sunshine_dental_care.entities.User;
-import java.util.Optional;
 
+@Repository
 public interface UserRepo extends JpaRepository<User, Integer> {
+
+    // --- PHẦN CHUNG ---
+    Optional<User> findByEmailIgnoreCase(String email);
+
+    // [FIX LỖI] Thêm dòng này để khớp với PatientService
     Optional<User> findByEmail(String email);
 
-    // --- PHẦN CHUNG (Cả 2 đều có) ---
-    Optional<User> findByEmailIgnoreCase(String email);
     Optional<User> findByUsernameIgnoreCase(String username);
     Optional<User> findByResetPasswordToken(String token);
 
-    // --- PHẦN CỦA TUẤN (Login/Auth) ---
+    // --- PHẦN CỦA TUẤN (Auth) ---
     Optional<User> findByVerificationToken(String token);
 
-    // [QUAN TRỌNG] Phải có dòng này mới login bằng SĐT được
+    // [QUAN TRỌNG] Login bằng SĐT
     Optional<User> findByPhone(String phone);
 
-    // --- PHẦN CỦA LONG (Doctor/Clinic Logic) ---
+    // --- PHẦN CỦA LONG (Doctor Logic) ---
     @Query("SELECT u FROM User u LEFT JOIN FETCH u.doctorSpecialties WHERE u.id = :userId")
     Optional<User> findByIdWithSpecialties(@Param("userId") Integer userId);
 
-    /**
-     * 1. Hàm lấy Bác sĩ theo Clinic (Không lọc chuyên khoa)
-     * Dùng khi khách chưa chọn chuyên khoa hoặc chọn "Tất cả"
-     */
+    // Hàm lấy Bác sĩ theo Clinic (Không lọc chuyên khoa)
     @Query("SELECT u FROM User u JOIN u.userRoles ur " +
             "WHERE ur.role.id = 3 " +
             "AND u.isActive = true " +
             "AND EXISTS (SELECT uca FROM UserClinicAssignment uca WHERE uca.user.id = u.id AND uca.clinic.id = :clinicId)")
     List<User> findDoctorsByClinicId(@Param("clinicId") Integer clinicId);
 
-    /**
-     * 2. Hàm lấy Bác sĩ theo Clinic và DANH SÁCH Chuyên khoa
-     * Logic: Tìm Bác sĩ có đủ TẤT CẢ các chuyên khoa trong danh sách yêu cầu.
-     */
+    // Hàm lấy Bác sĩ theo Clinic và DANH SÁCH Chuyên khoa
     @Query("SELECT DISTINCT u FROM User u " +
             "JOIN u.userRoles ur " +
             "WHERE ur.role.id = 3 " + // Role Doctor

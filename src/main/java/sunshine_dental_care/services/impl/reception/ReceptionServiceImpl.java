@@ -4,6 +4,11 @@ import java.time.LocalDate;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
+
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Sort;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service; // Annotation của Spring
 import org.springframework.transaction.annotation.Transactional;
 
@@ -11,10 +16,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
 import sunshine_dental_care.dto.hrDTO.DoctorScheduleDto;
-import sunshine_dental_care.dto.receptionDTO.AppointmentRequest;
-import sunshine_dental_care.dto.receptionDTO.AppointmentResponse;
-import sunshine_dental_care.dto.receptionDTO.RescheduleRequest;
-import sunshine_dental_care.dto.receptionDTO.ServiceItemRequest;
+import sunshine_dental_care.dto.receptionDTO.*;
 import sunshine_dental_care.dto.receptionDTO.mapper.AppointmentMapper;
 import sunshine_dental_care.entities.*;
 import sunshine_dental_care.exceptions.reception.AccessDeniedException;
@@ -25,6 +27,8 @@ import sunshine_dental_care.dto.receptionDTO.mapper.DoctorScheduleMapper;
 import sunshine_dental_care.repositories.auth.ClinicRepo;
 import sunshine_dental_care.repositories.auth.PatientRepo;
 import sunshine_dental_care.repositories.auth.UserRepo;
+import sunshine_dental_care.repositories.auth.RoleRepo;
+import sunshine_dental_care.repositories.auth.UserRoleRepo;
 import sunshine_dental_care.repositories.hr.DoctorScheduleRepo;
 import sunshine_dental_care.repositories.hr.RoomRepo;
 import sunshine_dental_care.repositories.hr.UserClinicAssignmentRepo;
@@ -33,6 +37,8 @@ import sunshine_dental_care.repositories.reception.AppointmentServiceRepo;
 import sunshine_dental_care.repositories.reception.ServiceVariantRepo;
 import sunshine_dental_care.repositories.system.LogRepo;
 import sunshine_dental_care.security.CurrentUser;
+import sunshine_dental_care.services.auth_service.MailService;
+import sunshine_dental_care.services.auth_service.PatientCodeService;
 import sunshine_dental_care.services.interfaces.reception.ReceptionService;
 
 @Service
@@ -46,13 +52,18 @@ public class ReceptionServiceImpl implements ReceptionService {
     private final PatientRepo patientRepo;
     private final RoomRepo roomRepo;
     private final UserRepo userRepo;
+    private final RoleRepo roleRepo;
+    private final UserRoleRepo userRoleRepo;
     private final ClinicRepo clinicRepo;
     private final AppointmentServiceRepo appointmentServiceRepo;
     private final LogRepo logRepo;
     private final ServiceVariantRepo serviceVariantRepo;
-
+    private final PatientCodeService patientCodeService;
     private final DoctorScheduleMapper doctorScheduleMapper;
     private final AppointmentMapper appointmentMapper;
+    private final PasswordEncoder passwordEncoder;
+    private final MailService mailService;
+
 
     private Integer getReceptionistClinicId(CurrentUser currentUser) {
         if (currentUser == null) throw new AccessDeniedException("User context is missing.");
@@ -297,4 +308,117 @@ public class ReceptionServiceImpl implements ReceptionService {
         return appointmentMapper.mapToAppointmentResponse(appointmentRepo.save(appointment));
     }
 
+    @Override
+    public Page<PatientResponse> getPatients(String keyword, int page, int size) {
+        PageRequest pageRequest = PageRequest.of(page, size, Sort.by("createdAt").descending());
+
+        Page<Patient> patientPage = patientRepo.searchPatients(keyword, pageRequest);
+
+        // SỬ DỤNG HÀM MAPPER ĐÃ PUBLIC TỪ APPOINTMENT MAPPER
+        return patientPage.map(appointmentMapper::mapPatientToPatientResponse);
+    }
+
+    @Override
+    @Transactional
+    public PatientResponse createPatient(PatientRequest request) {
+        log.info("Creating new walk-in patient: {}", request.getFullName());
+
+        // Chuẩn hóa dữ liệu đầu vào
+        String fullName = request.getFullName() != null ? request.getFullName().trim() : null;
+        String phone    = request.getPhone()    != null ? request.getPhone().trim()    : null;
+        String rawEmail = request.getEmail();
+        String email    = (rawEmail == null || rawEmail.isBlank())
+                ? null
+                : rawEmail.trim();
+
+        // Nếu muốn thì set ngược lại vào request (cho nhất quán)
+        request.setFullName(fullName);
+        request.setPhone(phone);
+        request.setEmail(email);
+
+        // 1. Kiểm tra trùng SĐT
+        if (userRepo.findByPhone(phone).isPresent()) {
+            throw new AppointmentConflictException("Số điện thoại " + phone + " đã được đăng ký.");
+        }
+
+        // 2. Tạo User
+        User newUser = new User();
+        newUser.setFullName(fullName);
+        newUser.setPhone(phone);
+        newUser.setEmail(email); // email đã được chuẩn hóa: "" -> null
+
+        // Username = Phone
+        newUser.setUsername(phone);
+
+        // Password = Phone (Mã hóa)
+        newUser.setPasswordHash(passwordEncoder.encode(phone));
+
+        newUser.setIsActive(true);
+        newUser.setProvider("local");
+
+        newUser = userRepo.save(newUser);
+
+        // 3. Gán Role USER (ID = 6)
+        Role roleUser = roleRepo.findById(6)
+                .orElseThrow(() -> new ResourceNotFoundException("Role USER (ID=6) not found"));
+
+        UserRole userRole = new UserRole();
+        userRole.setUser(newUser);
+        userRole.setRole(roleUser);
+        userRole.setIsActive(true);
+        userRole.setAssignedDate(Instant.now());
+
+        userRoleRepo.save(userRole);
+
+        // 4. Tạo Patient
+        Patient newPatient = new Patient();
+        newPatient.setUser(newUser);
+        newPatient.setFullName(fullName);
+        newPatient.setPhone(phone);
+        newPatient.setGender(request.getGender());
+        newPatient.setDateOfBirth(request.getDateOfBirth());
+        newPatient.setAddress(request.getAddress());
+        newPatient.setEmail(email); // dùng cùng email đã normalize
+        newPatient.setIsActive(true);
+
+        // Sinh mã Patient Code bằng Service
+        String generatedCode = patientCodeService.nextPatientCode();
+        newPatient.setPatientCode(generatedCode);
+
+        newPatient = patientRepo.save(newPatient);
+        log.info("Created patient profile: {} ({})", newPatient.getFullName(), generatedCode);
+
+        // 5. Gửi Email Welcome
+        if (email != null) {
+            try {
+                mailService.sendWelcomeEmail(newPatient, phone);
+                log.info("Queued welcome email for patient: {}", email);
+            } catch (Exception e) {
+                log.error("Failed to send welcome email: {}", e.getMessage());
+            }
+        }
+
+        return appointmentMapper.mapPatientToPatientResponse(newPatient);
+    }
+
+    @Override
+    public AppointmentResponse updateAppointment(Integer appointmentId, AppointmentUpdateRequest request) {
+        Appointment appointment = appointmentRepo.findById(appointmentId)
+                .orElseThrow(() -> new ResourceNotFoundException("Appointment not found"));
+
+        // Cập nhật trạng thái nếu có
+        if (request.getStatus() != null && !request.getStatus().isEmpty()) {
+            appointment.setStatus(request.getStatus());
+        }
+
+        // Cập nhật ghi chú nếu có
+        if (request.getNote() != null) {
+            appointment.setNote(request.getNote());
+        }
+
+        // (Optional) Nếu muốn log lại lịch sử sửa
+        // logRepo.save(new Log(..., "UPDATE_INFO", ...));
+
+        return appointmentMapper.mapToAppointmentResponse(appointmentRepo.save(appointment));
+    }
 }

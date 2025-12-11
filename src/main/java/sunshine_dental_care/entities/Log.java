@@ -40,6 +40,7 @@ public class Log {
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "userId")
+    @JsonIgnoreProperties({"userRoles", "doctorSpecialties", "hibernateLazyInitializer", "handler"})
     private User user;
 
     @Column(name = "type", nullable = false, length = 50)

@@ -24,29 +24,28 @@ public interface AttendanceService {
     AttendanceResponse checkIn(AttendanceCheckInRequest request);
 
     // Chấm công ra
-    AttendanceResponse checkOut(AttendanceCheckOutRequest request);
+    AttendanceResponse checkOut(AttendanceCheckOutRequest request, Integer requesterId);
 
     // Lấy thông tin chấm công của user trong ngày hiện tại
     AttendanceResponse getTodayAttendance(Integer userId);
 
-    // Lấy danh sách tất cả attendance của user trong ngày hiện tại (cho bác sĩ có nhiều ca)
+    // Lấy danh sách tất cả attendance của user trong ngày hiện tại (cho bác sĩ có
+    // nhiều ca)
     List<AttendanceResponse> getTodayAttendanceList(Integer userId);
 
     Page<AttendanceResponse> getAttendanceHistory(
-        Integer userId,
-        Integer clinicId,
-        LocalDate startDate,
-        LocalDate endDate,
-        int page,
-        int size
-    );
+            Integer userId,
+            Integer clinicId,
+            LocalDate startDate,
+            LocalDate endDate,
+            int page,
+            int size);
 
     Map<String, Object> getAttendanceStatistics(
-        Integer userId,
-        Integer clinicId,
-        LocalDate startDate,
-        LocalDate endDate
-    );
+            Integer userId,
+            Integer clinicId,
+            LocalDate startDate,
+            LocalDate endDate);
 
     // Lấy chi tiết attendance theo id
     AttendanceResponse getAttendanceById(Integer attendanceId);
@@ -55,19 +54,20 @@ public interface AttendanceService {
     List<DailySummaryResponse> getDailySummary(LocalDate workDate);
 
     Page<DailyAttendanceListItemResponse> getDailyAttendanceList(
-        LocalDate workDate, Integer departmentId, Integer clinicId, int page, int size);
+            LocalDate workDate, Integer departmentId, Integer clinicId, int page, int size);
 
     // Lấy tổng hợp attendance theo phòng ban trong tháng
     List<MonthlySummaryResponse> getMonthlySummary(Integer year, Integer month);
 
     Page<MonthlyAttendanceListItemResponse> getMonthlyAttendanceList(
-        Integer year, Integer month, Integer departmentId, Integer clinicId, int page, int size);
+            Integer year, Integer month, Integer departmentId, Integer clinicId, int page, int size);
 
     // Admin lấy danh sách chấm công theo ngày/phòng khám/trạng thái
     List<AttendanceResponse> getAttendanceForAdmin(LocalDate workDate, Integer clinicId, String status);
 
     // Admin cập nhật trạng thái và ghi chú của chấm công
-    AttendanceResponse updateAttendanceStatus(Integer attendanceId, String newStatus, String adminNote, Integer adminUserId);
+    AttendanceResponse updateAttendanceStatus(Integer attendanceId, String newStatus, String adminNote,
+            Integer adminUserId);
 
     // Nhân viên xem danh sách chấm công cần giải trình
     List<AttendanceExplanationResponse> getAttendanceNeedingExplanation(Integer userId);

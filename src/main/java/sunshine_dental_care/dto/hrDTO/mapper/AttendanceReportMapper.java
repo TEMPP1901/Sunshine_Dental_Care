@@ -14,7 +14,8 @@ import sunshine_dental_care.entities.Attendance;
 import sunshine_dental_care.entities.DoctorSchedule;
 import sunshine_dental_care.entities.User;
 import sunshine_dental_care.repositories.hr.DoctorScheduleRepo;
-import sunshine_dental_care.services.impl.hr.AttendanceStatusCalculator;
+import sunshine_dental_care.services.impl.hr.attend.AttendanceStatusCalculator;
+import sunshine_dental_care.utils.WorkHoursConstants;
 
 /**
  * Mapper để chuyển đổi Attendance entities sang Report Response DTOs.
@@ -74,6 +75,10 @@ public class AttendanceReportMapper {
                     item.setStatus("Approved Leave");
                     item.setStatusColor("blue");
                     break;
+                case "HOLIDAY":
+                    item.setStatus("Holiday");
+                    item.setStatusColor("purple");
+                    break;
                 default:
                     item.setStatus("Unknown");
                     item.setStatusColor("gray");
@@ -87,13 +92,52 @@ public class AttendanceReportMapper {
             item.setStatusColor("blue");
         }
 
-        // Tính worked hours
+        // Tính worked hours: ưu tiên actualWorkHours (đã trừ lunch break), nếu không có thì tính và trừ lunch break
         if (hasCheckIn && hasCheckOut) {
-            long minutes = java.time.Duration.between(
-                    attendance.getCheckInTime(),
-                    attendance.getCheckOutTime()).toMinutes();
-            long hours = minutes / 60;
-            long remainingMinutes = minutes % 60;
+            BigDecimal actualHours = null;
+            long adjustedMinutes = 0;
+            
+            // Ưu tiên dùng actualWorkHours nếu có và > 0 (đã được tính đúng với lunch break)
+            if (attendance.getActualWorkHours() != null && 
+                attendance.getActualWorkHours().compareTo(BigDecimal.ZERO) > 0) {
+                actualHours = attendance.getActualWorkHours();
+            } else {
+                // Tính từ check-in/check-out và trừ lunch break (11:00-13:00 = 120 phút)
+                long totalMinutes = java.time.Duration.between(
+                        attendance.getCheckInTime(),
+                        attendance.getCheckOutTime()).toMinutes();
+                
+                LocalTime checkInLocalTime = attendance.getCheckInTime()
+                        .atZone(java.time.ZoneId.systemDefault())
+                        .toLocalTime();
+                LocalTime checkOutLocalTime = attendance.getCheckOutTime()
+                        .atZone(java.time.ZoneId.systemDefault())
+                        .toLocalTime();
+                
+                // Kiểm tra xem có phải bác sĩ không (dựa vào có schedule hay không)
+                List<DoctorSchedule> userSchedules = doctorScheduleRepo
+                        .findByUserIdAndClinicIdAndWorkDate(user.getId(), attendance.getClinicId(), workDate);
+                boolean isDoctor = !userSchedules.isEmpty();
+                
+                // Sử dụng WorkHoursConstants để tính lunch break (nhân viên mới trừ, bác sĩ không trừ)
+                int lunchBreakMinutes = WorkHoursConstants.calculateLunchBreakMinutes(
+                        checkInLocalTime, checkOutLocalTime, isDoctor);
+                
+                adjustedMinutes = totalMinutes - lunchBreakMinutes;
+                if (adjustedMinutes < 0) {
+                    adjustedMinutes = 0;
+                }
+                actualHours = BigDecimal.valueOf(adjustedMinutes)
+                        .divide(BigDecimal.valueOf(60), 2, java.math.RoundingMode.HALF_UP);
+            }
+            
+            // Chuyển đổi BigDecimal sang hours và minutes
+            long hours = actualHours.longValue();
+            BigDecimal fractionalHours = actualHours.subtract(BigDecimal.valueOf(hours));
+            long remainingMinutes = fractionalHours.multiply(BigDecimal.valueOf(60))
+                    .setScale(0, java.math.RoundingMode.HALF_UP)
+                    .longValue();
+            
             item.setWorkedHours(hours);
             item.setWorkedMinutes(remainingMinutes);
             item.setWorkedDisplay(String.format("%d hr %02d min", hours, remainingMinutes));
@@ -108,6 +152,7 @@ public class AttendanceReportMapper {
                 .findByUserIdAndClinicIdAndWorkDate(user.getId(), attendance.getClinicId(), workDate);
 
         if (!schedules.isEmpty()) {
+            // Bác sĩ có schedule
             DoctorSchedule schedule = schedules.get(0);
             item.setShiftStartTime(schedule.getStartTime());
             item.setShiftEndTime(schedule.getEndTime());
@@ -115,12 +160,14 @@ public class AttendanceReportMapper {
             long shiftHours = java.time.Duration.between(schedule.getStartTime(), schedule.getEndTime()).toHours();
             item.setShiftHours(shiftHours + " hr Shift: A");
         } else {
-            LocalTime defaultStart = attendanceStatusCalculator.getDefaultStartTime();
-            LocalTime defaultEnd = defaultStart.plusHours(9);
+            // Nhân viên không có schedule → dùng giờ mặc định
+            LocalTime defaultStart = WorkHoursConstants.EMPLOYEE_START_TIME;
+            LocalTime defaultEnd = WorkHoursConstants.EMPLOYEE_END_TIME;
             item.setShiftStartTime(defaultStart);
             item.setShiftEndTime(defaultEnd);
             item.setShiftDisplay(formatTime(defaultStart) + " - " + formatTime(defaultEnd));
-            item.setShiftHours("9 hr Shift: A");
+            // Nhân viên: 8 giờ làm việc (10 giờ tổng - 2 giờ nghỉ trưa)
+            item.setShiftHours(WorkHoursConstants.EMPLOYEE_EXPECTED_HOURS + " hr Shift: A");
         }
 
         item.setRemarks(attendance.getNote() != null ? attendance.getNote() : "Fixed Attendance");
@@ -200,16 +247,44 @@ public class AttendanceReportMapper {
                 totalEarlyMinutes += attendance.getEarlyMinutes();
             }
 
-            if (attendance.getActualWorkHours() != null) {
-                totalWorkHours = totalWorkHours.add(attendance.getActualWorkHours());
+            // Tính giờ làm việc: ưu tiên actualWorkHours > 0, fallback tính từ checkIn/checkOut và trừ lunch break
+            BigDecimal workHours = BigDecimal.ZERO;
+
+            if (attendance.getActualWorkHours() != null &&
+                    attendance.getActualWorkHours().compareTo(BigDecimal.ZERO) > 0) {
+                // Có actualWorkHours và > 0 → dùng nó (đã trừ lunch break)
+                workHours = attendance.getActualWorkHours();
             } else if (attendance.getCheckInTime() != null && attendance.getCheckOutTime() != null) {
-                long minutes = java.time.Duration.between(
+                // Không có actualWorkHours hoặc = 0 → tính từ checkIn/checkOut và trừ lunch break (11:00-13:00 = 120 phút)
+                long totalMinutes = java.time.Duration.between(
                         attendance.getCheckInTime(),
                         attendance.getCheckOutTime()).toMinutes();
-                BigDecimal hours = BigDecimal.valueOf(minutes)
+                
+                LocalTime checkInLocalTime = attendance.getCheckInTime()
+                        .atZone(java.time.ZoneId.systemDefault())
+                        .toLocalTime();
+                LocalTime checkOutLocalTime = attendance.getCheckOutTime()
+                        .atZone(java.time.ZoneId.systemDefault())
+                        .toLocalTime();
+                
+                // Kiểm tra xem có phải bác sĩ không (dựa vào shiftType)
+                boolean isDoctorForMonthly = attendance.getShiftType() != null 
+                        && (attendance.getShiftType().equals("MORNING") || attendance.getShiftType().equals("AFTERNOON"));
+                
+                // Sử dụng WorkHoursConstants để tính lunch break (nhân viên mới trừ, bác sĩ không trừ)
+                int lunchBreakMinutes = WorkHoursConstants.calculateLunchBreakMinutes(
+                        checkInLocalTime, checkOutLocalTime, isDoctorForMonthly);
+                
+                long adjustedMinutes = totalMinutes - lunchBreakMinutes;
+                if (adjustedMinutes < 0) {
+                    adjustedMinutes = 0;
+                }
+                workHours = BigDecimal.valueOf(adjustedMinutes)
                         .divide(BigDecimal.valueOf(60), 2, java.math.RoundingMode.HALF_UP);
-                totalWorkHours = totalWorkHours.add(hours);
             }
+            // Nếu không có thông tin nào → workHours = 0 (không cộng vào)
+
+            totalWorkHours = totalWorkHours.add(workHours);
         }
 
         item.setWorkingDays(workingDays);

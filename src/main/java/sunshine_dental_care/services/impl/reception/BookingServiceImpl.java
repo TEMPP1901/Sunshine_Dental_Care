@@ -7,6 +7,7 @@ import org.springframework.transaction.annotation.Transactional;
 import sunshine_dental_care.dto.receptionDTO.AppointmentRequest;
 import sunshine_dental_care.dto.receptionDTO.ServiceItemRequest;
 import sunshine_dental_care.dto.receptionDTO.bookingDto.BookingSlotRequest;
+import sunshine_dental_care.dto.receptionDTO.bookingDto.SessionAvailabilityResponse;
 import sunshine_dental_care.dto.receptionDTO.bookingDto.TimeSlotResponse;
 import sunshine_dental_care.entities.*;
 import sunshine_dental_care.exceptions.reception.ResourceNotFoundException;
@@ -21,6 +22,7 @@ import sunshine_dental_care.services.auth_service.MailService;
 import sunshine_dental_care.services.interfaces.reception.BookingService;
 
 import java.math.BigDecimal;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
 import java.time.ZoneId;
@@ -33,27 +35,35 @@ import java.util.List;
 @Slf4j
 public class BookingServiceImpl implements BookingService {
 
+    // --- Repositories Chung ---
     private final DoctorScheduleRepo doctorScheduleRepo;
     private final AppointmentRepo appointmentRepo;
     private final ServiceVariantRepo serviceVariantRepo;
-    private final MailService mailService;
 
-    // --- Repos bổ sung ---
+    // --- Repositories Của Tuấn (Cho createAppointment & Mail) ---
     private final ClinicRepo clinicRepo;
     private final PatientRepo patientRepo;
     private final DoctorRepo doctorRepo;
     private final AppointmentServiceRepo appointmentServiceRepo;
+    private final MailService mailService;
 
+    // Các khung giờ cố định
     private static final List<LocalTime> FIXED_SLOTS = List.of(
             LocalTime.of(8, 0), LocalTime.of(9, 0), LocalTime.of(10, 0),
             LocalTime.of(11, 0),
+            // Nghỉ trưa 12:00 - 13:00
             LocalTime.of(13, 0), LocalTime.of(14, 0), LocalTime.of(15, 0),
             LocalTime.of(16, 0), LocalTime.of(17, 0), LocalTime.of(18, 0)
     );
 
+    // ========================================================================
+    // 1. HÀM GET AVAILABLE SLOTS (LẤY GIỜ TRỐNG) - MERGED
+    // ========================================================================
     @Override
     public List<TimeSlotResponse> getAvailableSlots(BookingSlotRequest request) {
         List<TimeSlotResponse> responseSlots = new ArrayList<>();
+
+        // 1. Tính tổng thời gian
         List<Integer> variantIds = request.getServiceIds();
         if (variantIds == null || variantIds.isEmpty()) return generateAllBusySlots();
 
@@ -61,38 +71,51 @@ public class BookingServiceImpl implements BookingService {
         int totalMinutes = selectedVariants.stream().mapToInt(v -> v.getDuration() != null ? v.getDuration() : 60).sum();
         int durationMinutes = Math.max(60, totalMinutes);
 
-        // Nếu là Standard (doctorId null), ta vẫn check lịch chung (hoặc trả về full slot nếu muốn)
-        // Nhưng logic check slot này chủ yếu dùng cho VIP.
-        if (request.getDoctorId() == null) {
-            // Logic tạm cho standard: Coi như lúc nào cũng available (hoặc logic khác tùy bạn)
-            // Ở đây giữ nguyên logic cũ, nếu null nó sẽ tìm theo điều kiện khác hoặc trả về busy/free tùy db
-        }
+        log.info("Calculating Slots for Doctor {}. Total Duration: {} mins", request.getDoctorId(), durationMinutes);
 
-        List<DoctorSchedule> validSchedules = doctorScheduleRepo.findByUserIdAndClinicIdAndWorkDate(request.getDoctorId(), request.getClinicId(), request.getDate());
+        // 2. Lấy lịch làm việc
+        List<DoctorSchedule> validSchedules = doctorScheduleRepo.findByUserIdAndClinicIdAndWorkDate(
+                request.getDoctorId(), request.getClinicId(), request.getDate()
+        );
+
         if (validSchedules.isEmpty()) return generateAllBusySlots();
 
+        // 3. Lấy lịch đã đặt (Bận)
         List<Appointment> bookedApps = appointmentRepo.findBusySlotsByDoctorAndDate(request.getDoctorId(), request.getDate());
+
+        // 4. Duyệt Slot
         for (LocalTime slotStart : FIXED_SLOTS) {
             LocalTime slotEnd = slotStart.plusMinutes(durationMinutes);
-            if (slotEnd.isBefore(slotStart)) continue;
+            if (slotEnd.isBefore(slotStart)) continue; // Qua ngày hôm sau
+
             boolean isAvailable = false;
+
+            // Check nằm trong ca làm việc
             for (DoctorSchedule sch : validSchedules) {
                 if (!slotStart.isBefore(sch.getStartTime()) && !slotEnd.isAfter(sch.getEndTime())) {
                     isAvailable = true;
                     break;
                 }
             }
+
+            // Check trùng lịch hẹn khác
             if (isAvailable) {
                 if (isTimeOverlap(slotStart, slotEnd, bookedApps)) isAvailable = false;
             }
-            if (request.getDate().equals(java.time.LocalDate.now())) {
+
+            // Check quá khứ (Logic của Tuấn)
+            if (request.getDate().equals(LocalDate.now())) {
                 if (slotStart.isBefore(LocalTime.now())) isAvailable = false;
             }
+
             responseSlots.add(new TimeSlotResponse(slotStart.toString(), isAvailable));
         }
         return responseSlots;
     }
 
+    // ========================================================================
+    // 2. HÀM CREATE APPOINTMENT (TẠO LỊCH) - CỦA TUẤN
+    // ========================================================================
     @Override
     @Transactional
     public Appointment createAppointment(AppointmentRequest request) {
@@ -105,50 +128,32 @@ public class BookingServiceImpl implements BookingService {
                 .orElseThrow(() -> new ResourceNotFoundException("Patient not found"));
 
         User doctor = null;
-
-        // --- LOGIC CHỌN BÁC SĨ (ĐƠN GIẢN HÓA) ---
         if (request.getDoctorId() != null) {
-            // TRƯỜNG HỢP 1: KHÁM VIP (Có chọn bác sĩ)
             doctor = doctorRepo.findById(request.getDoctorId())
                     .orElseThrow(() -> new ResourceNotFoundException("Doctor not found"));
         }
-        // TRƯỜNG HỢP 2: KHÁM TIÊU CHUẨN -> doctor = null (Để Reception xếp sau)
-        // Vì DB đã cho phép NULL nên không cần Auto-Assign nữa.
-        // ----------------------------------------
 
         Appointment appointment = new Appointment();
         appointment.setClinic(clinic);
         appointment.setPatient(patient);
-
-        // Lưu Doctor (có thể là null)
         appointment.setDoctor(doctor);
-
         appointment.setStartDateTime(request.getStartDateTime());
 
         if (request.getEndDateTime() != null) {
             appointment.setEndDateTime(request.getEndDateTime());
         } else {
-            appointment.setEndDateTime(request.getStartDateTime().plusSeconds(3600));
+            appointment.setEndDateTime(request.getStartDateTime().plusSeconds(3600)); // Mặc định 1 tiếng
         }
 
         appointment.setStatus("PENDING");
         appointment.setChannel(request.getChannel() != null ? request.getChannel() : "WEB_BOOKING");
         appointment.setNote(request.getNote());
-
-        if (request.getBookingFee() != null) {
-            appointment.setBookingFee(request.getBookingFee());
-        } else {
-            appointment.setBookingFee(BigDecimal.ZERO);
-        }
-
-        if (request.getAppointmentType() != null) {
-            appointment.setAppointmentType(request.getAppointmentType());
-        } else {
-            appointment.setAppointmentType("STANDARD");
-        }
+        appointment.setBookingFee(request.getBookingFee() != null ? request.getBookingFee() : BigDecimal.ZERO);
+        appointment.setAppointmentType(request.getAppointmentType() != null ? request.getAppointmentType() : "STANDARD");
 
         Appointment savedAppointment = appointmentRepo.save(appointment);
 
+        // Lưu Services đi kèm
         if (request.getServices() != null && !request.getServices().isEmpty()) {
             List<AppointmentService> appointmentServices = new ArrayList<>();
             for (ServiceItemRequest item : request.getServices()) {
@@ -168,10 +173,55 @@ public class BookingServiceImpl implements BookingService {
             savedAppointment.setAppointmentServices(appointmentServices);
         }
 
+        // Gửi Mail (Logic của Tuấn)
         notifyBookingSuccess(savedAppointment);
         return savedAppointment;
     }
 
+    // ========================================================================
+    // 3. HÀM CHECK SESSION AVAILABILITY - CỦA LONG (MỚI)
+    // ========================================================================
+    @Override
+    public SessionAvailabilityResponse checkSessionAvailability(Integer clinicId, LocalDate date) {
+        if (date.getDayOfWeek() == java.time.DayOfWeek.SUNDAY) {
+            return new SessionAvailabilityResponse(false, false, "Phòng khám nghỉ Chủ Nhật");
+        }
+        if (date.isBefore(LocalDate.now())) {
+            return new SessionAvailabilityResponse(false, false, "Không thể chọn ngày quá khứ");
+        }
+
+        // Lấy lịch làm việc của TẤT CẢ bác sĩ tại Clinic ngày hôm đó
+        List<DoctorSchedule> schedules = doctorScheduleRepo.findByClinicAndDate(clinicId, date);
+
+        if (schedules.isEmpty()) {
+            return new SessionAvailabilityResponse(false, false, "Chưa có lịch làm việc cho ngày này");
+        }
+
+        boolean hasMorning = false;
+        boolean hasAfternoon = false;
+
+        // Quy ước: Sáng (08:00 - 12:00), Chiều (13:00 - 17:00)
+        LocalTime morningEnd = LocalTime.of(12, 0);
+        LocalTime afternoonStart = LocalTime.of(13, 0);
+
+        for (DoctorSchedule s : schedules) {
+            // Check Sáng
+            if (s.getStartTime().isBefore(morningEnd)) {
+                hasMorning = true;
+            }
+            // Check Chiều
+            if (s.getEndTime().isAfter(afternoonStart)) {
+                hasAfternoon = true;
+            }
+        }
+        return new SessionAvailabilityResponse(hasMorning, hasAfternoon, null);
+    }
+
+    // ========================================================================
+    // 4. HELPER METHODS
+    // ========================================================================
+
+    @Override
     public void notifyBookingSuccess(Appointment appt) {
         try {
             if (appt.getPatient() != null && appt.getPatient().getUser() != null) {

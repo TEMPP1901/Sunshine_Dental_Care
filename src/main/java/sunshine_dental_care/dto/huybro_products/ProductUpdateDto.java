@@ -11,7 +11,7 @@ import java.util.List;
 public class ProductUpdateDto {
 
     @NotBlank(message = "SKU must not be empty")
-    @Size(min = 5, max = 64, message = "SKU must be between 5 and 64 characters")
+    @Size(min = 3, max = 64, message = "SKU must be between 5 and 64 characters")
     private String sku;
 
     @NotBlank(message = "Product name must not be empty")

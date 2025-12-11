@@ -31,8 +31,6 @@ public class CheckoutInvoiceDto {
 
     private Instant paymentCompletedAt;
 
-    private LocalDate invoiceDate;
-
     private LocalDateTime createdAt;
 
     private LocalDateTime updatedAt;
@@ -48,6 +46,8 @@ public class CheckoutInvoiceDto {
     private String paymentReference;
 
     private String notes;
+
+    private String invoiceStatus;
 
     private List<CheckoutInvoiceItemDto> items;
 }

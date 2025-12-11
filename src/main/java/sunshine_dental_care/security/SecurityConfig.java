@@ -21,7 +21,6 @@ import lombok.RequiredArgsConstructor;
 @Configuration
 @RequiredArgsConstructor
 @EnableMethodSecurity(prePostEnabled = true)
-
 public class SecurityConfig {
 
     private final JwtAuthFilter jwtAuthFilter;
@@ -31,9 +30,14 @@ public class SecurityConfig {
     @Bean
     public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
         http
+                // 1. CORS & CSRF
                 .cors(Customizer.withDefaults())
                 .csrf(AbstractHttpConfigurer::disable)
+
+                // 2. Stateless Session (Vì dùng JWT)
                 .sessionManagement(sm -> sm.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+
+                // 3. Xử lý lỗi 401 & 403 trả về JSON
                 .exceptionHandling(e -> e
                         .authenticationEntryPoint((req, res, ex) -> {
                             String uri = req.getRequestURI();
@@ -56,25 +60,19 @@ public class SecurityConfig {
                             }
                         })
                 )
+
+                // 4. PHÂN QUYỀN URL (MERGED TUAN & LONG)
                 .authorizeHttpRequests(auth -> auth
+                        // --- PREFLIGHT REQUESTS ---
                         .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
+
+                        // --- PUBLIC STATIC RESOURCES ---
                         .requestMatchers("/locale").permitAll()
                         .requestMatchers("/uploads_avatar/**").permitAll()
-                        .requestMatchers("/uploads/**").permitAll() // Public product images *huybro
-                        .requestMatchers("/api/auth/sign-up", "/api/auth/login").permitAll()
-                        .requestMatchers("/api/auth/google", "/oauth2/**", "/login/oauth2/**").permitAll()
-                        .requestMatchers( "/api/products/**").permitAll() // Public endpoints products *huybro
-                        .requestMatchers("/ws/**").permitAll() // WebSocket endpoint (authentication handled in WebSocket layer)
+                        .requestMatchers("/uploads/**").permitAll() // Product images
+                        .requestMatchers("/ws/**").permitAll() // WebSocket
 
-                        .requestMatchers("/api/doctor/**","/api/patients/{patientId}/records/**").hasRole("DOCTOR") // Chỉ bác sĩ được phép,
-                        .requestMatchers("/auth/sign-up").permitAll()  // Cho phép đăng ký PATIENT * đổi vị trí vì đây là public
-
-                        // Products
-                        .requestMatchers("/api/products/accountant/**").hasRole("ACCOUNTANT")
-                        .requestMatchers("/api/products/**").permitAll()
-                        .requestMatchers("/api/cart/**").permitAll()
-                        .requestMatchers("/api/checkout/**").permitAll()
-                        // Auth Endpoints
+                        // --- PUBLIC API (AUTH, PRODUCTS, ETC.) ---
                         .requestMatchers(
                                 "/api/auth/sign-up",
                                 "/api/auth/login",
@@ -83,44 +81,55 @@ public class SecurityConfig {
                                 "/login/oauth2/**",
                                 "/api/auth/forgot-password",
                                 "/api/auth/reset-password",
-                                "/api/auth/verify-account",
+                                "/api/auth/verify-account", // Của Tuấn
+                                "/api/auth/resend-verification", // Của Tuấn
 
-                                // [MỚI] API OTP
+                                // [MỚI CỦA TUẤN] API OTP & PHONE LOGIN
                                 "/api/auth/login-phone/step1",
                                 "/api/auth/login-phone/step2",
-
-                                // [MỚI] API Login SĐT + Pass
                                 "/api/auth/login-phone/password",
 
-                                "/api/auth/resend-verification"
+                                // Public Shop API
+                                "/api/products/**",
+                                "/api/cart/**",
+                                "/api/checkout/**",
+                                "/api/public/**"
                         ).permitAll()
 
+                        // --- AUTHENTICATED USER (LOGGED IN) ---
                         .requestMatchers(HttpMethod.POST, "/api/auth/change-password").authenticated()
-                        .requestMatchers("/api/hr/employees/**").hasRole("HR")
+                        .requestMatchers("/api/booking/**").authenticated() // Mọi user đều được đặt lịch
+                        .requestMatchers("/api/hr/employees/doctors").authenticated() // Xem danh sách bác sĩ
+
+                        // --- DOCTOR ROLE ---
+                        .requestMatchers("/api/doctor/**", "/api/patients/{patientId}/records/**").hasRole("DOCTOR")
+
+                        // --- ACCOUNTANT ROLE (Admin cũng được vào) ---
+                        .requestMatchers("/api/products/accountant/**").hasAnyRole("ACCOUNTANT", "ADMIN")
+
+                        // --- HR ROLE (Admin cũng được vào một số mục cấu hình) ---
+                        .requestMatchers("/api/hr/management/departments", "/api/hr/management/clinics",
+                                "/api/hr/management/roles", "/api/hr/management/rooms").hasAnyRole("HR", "ADMIN")
                         .requestMatchers("/api/hr/management/**").hasRole("HR")
-                        .requestMatchers("/api/public/**").permitAll()
+                        .requestMatchers("/api/hr/employees/**").hasRole("HR")
 
-                        // Cho phép mọi user đã login (bao gồm Patient) xem slot và đặt lịch
-                        .requestMatchers("/api/booking/**").authenticated()
-
-                        // === only Reception and Admin can access role reception API  ===
+                        // --- RECEPTION ROLE (Admin cũng được vào) ---
                         .requestMatchers("/api/reception/**").hasAnyRole("RECEPTION", "ADMIN")
 
-                        // Additional auth endpoints
-                        .requestMatchers("/auth/sign-up").permitAll()  // Cho phép đăng ký PATIENT
-                        .requestMatchers("/api/hr/employees/doctors").authenticated()  // Cho phép authenticated users xem danh sách bác sĩ
-                        .requestMatchers("/api/hr/employees/**").hasRole("HR")  // Chỉ HR được phép các endpoint khác
+                        // --- ADMIN ROLE ---
                         .requestMatchers("/api/admin/**").hasRole("ADMIN")
-                        .requestMatchers("/api/hr/management/**").hasRole("HR")  // HR Management endpoints
 
-                        .requestMatchers("/api/hr/employees/**").hasRole("HR")  // Chỉ HR được phép
-                        .requestMatchers("/api/admin/**").hasRole("ADMIN")
+                        // --- MẶC ĐỊNH CÒN LẠI ---
                         .anyRequest().authenticated()
                 )
+
+                // 5. OAuth2 Login
                 .oauth2Login(oauth -> oauth
                         .userInfoEndpoint(u -> u.userService(oAuth2UserService))
                         .successHandler(oAuth2SuccessHandler)
                 )
+
+                // 6. JWT Filter
                 .addFilterBefore(jwtAuthFilter, UsernamePasswordAuthenticationFilter.class);
 
         return http.build();

@@ -7,6 +7,7 @@ import lombok.NoArgsConstructor;
 import lombok.Setter;
 
 import java.time.Instant;
+import java.util.List;
 
 /**
  * DTO cho Service (Dịch vụ nha khoa)
@@ -26,5 +27,6 @@ public class ServiceDTO {
     private Boolean isActive;
     private Instant createdAt;
     private Instant updatedAt;
+    private List<ServiceVariantDTO> variants;
 }
 
