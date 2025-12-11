@@ -14,6 +14,12 @@ import sunshine_dental_care.entities.Appointment;
 @Repository
 public interface AppointmentRepo extends JpaRepository<Appointment, Integer> {
 
+    // --- 1. PHẦN CỦA BẠN: LẤY LỊCH SỬ KHÁM BỆNH NHÂN ---
+    List<Appointment> findByPatientIdOrderByStartDateTimeDesc(Integer patientId);
+
+    // --- 2. PHẦN CHUNG (LOGIC TÌM XUNG ĐỘT & SLOT TRỐNG) ---
+    // (Dùng bản của Long vì có comment rõ ràng, logic SQL giống hệt nhau)
+
     @Query("SELECT a FROM Appointment a " +
             "WHERE a.status IN ('CONFIRMED', 'SCHEDULED', 'PENDING') " +
             "AND (" +
@@ -30,8 +36,6 @@ public interface AppointmentRepo extends JpaRepository<Appointment, Integer> {
 
     /**
      * Lấy danh sách các lịch hẹn ĐÃ CÓ của bác sĩ trong ngày cụ thể.
-     * Dùng để tô đen các ô giờ đã bị người khác đặt.
-     * (Không cần lọc theo Clinic, vì bác sĩ bận ở đâu thì cũng là bận).
      */
     @Query("SELECT a FROM Appointment a " +
             "WHERE a.doctor.id = :doctorId " +
@@ -44,8 +48,6 @@ public interface AppointmentRepo extends JpaRepository<Appointment, Integer> {
 
     /**
      * Lấy tất cả lịch hẹn của một Clinic trong ngày cụ thể.
-     * Dùng cho Reception Dashboard.
-     * Sắp xếp theo giờ bắt đầu để hiển thị đẹp hơn.
      */
     @Query("SELECT a FROM Appointment a " +
             "WHERE a.clinic.id = :clinicId " +
@@ -56,11 +58,38 @@ public interface AppointmentRepo extends JpaRepository<Appointment, Integer> {
             @Param("date") LocalDate date
     );
 
-    //Lấy TẤT CẢ lịch hẹn trong ngày (không filter theo clinic).
+    // --- 3. PHẦN CỦA LONG (MỚI THÊM) ---
+    // Lấy TẤT CẢ lịch hẹn trong ngày (không filter theo clinic).
     @Query("SELECT a FROM Appointment a " +
             "WHERE CAST(a.startDateTime AS date) = :date " +
             "ORDER BY a.startDateTime ASC")
     List<Appointment> findAllByDate(
             @Param("date") LocalDate date
     );
+
+    // --- 4. PHẦN CỦA BẠN: LOGIC NHẮC LỊCH (SCHEDULER) ---
+
+    // Query nhắc 24h (Cũ)
+    @Query("SELECT a FROM Appointment a WHERE a.status = 'CONFIRMED' " +
+            "AND (a.isReminderSent IS NULL OR a.isReminderSent = false) " +
+            "AND a.startDateTime BETWEEN :start AND :end")
+    List<Appointment> findAppointmentsToRemind(@Param("start") Instant start,
+                                               @Param("end") Instant end);
+
+    // Query nhắc gấp 2h (Check cột isUrgentReminderSent)
+    @Query("SELECT a FROM Appointment a WHERE a.status = 'CONFIRMED' " +
+            "AND (a.isUrgentReminderSent IS NULL OR a.isUrgentReminderSent = false) " +
+            "AND a.startDateTime BETWEEN :start AND :end")
+    List<Appointment> findUrgentAppointmentsToRemind(@Param("start") Instant start,
+                                                     @Param("end") Instant end);
+
+    // --- 5. PHẦN CỦA BẠN: DASHBOARD BỆNH NHÂN ---
+
+    // Lấy lịch hẹn sắp tới (Chưa diễn ra) để hiển thị Countdown
+    @Query("SELECT a FROM Appointment a WHERE a.patient.id = :patientId AND a.startDateTime > CURRENT_TIMESTAMP AND a.status IN ('CONFIRMED', 'PENDING', 'SCHEDULED') ORDER BY a.startDateTime ASC")
+    List<Appointment> findUpcomingAppointmentsByPatient(@Param("patientId") Integer patientId);
+
+    // Đếm số lịch hẹn đã hoàn thành để tính điểm sức khỏe
+    @Query("SELECT COUNT(a) FROM Appointment a WHERE a.patient.id = :patientId AND a.status = 'COMPLETED'")
+    long countCompletedAppointments(@Param("patientId") Integer patientId);
 }
