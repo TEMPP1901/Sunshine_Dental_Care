@@ -17,4 +17,6 @@ public interface InventoryService {
     InventoryViewDto getInventoryDetail(Integer inventoryId);
 
     PageResponseDto<ProductStockHistoryDto> getProductStockHistory(Integer productId, int page, int size);
+
+    void restoreStockForCancelledInvoice(Integer clinicId, Integer productId, Integer quantityToRestore);
 }

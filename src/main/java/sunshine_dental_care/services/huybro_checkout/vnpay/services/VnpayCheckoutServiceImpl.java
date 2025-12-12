@@ -1,4 +1,4 @@
-package sunshine_dental_care.services.huybro_checkout.vnpay.services.impl;
+package sunshine_dental_care.services.huybro_checkout.vnpay.services;
 
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpSession;

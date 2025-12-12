@@ -9,11 +9,13 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+import sunshine_dental_care.dto.huybro_invoices.InvoiceStatisticDto;
 import sunshine_dental_care.dto.huybro_invoices.ProductInvoiceDetailDto;
 import sunshine_dental_care.dto.huybro_invoices.ProductInvoiceListDto;
 import sunshine_dental_care.dto.huybro_invoices.UpdateInvoiceStatusRequestDto;
 import sunshine_dental_care.services.huybro_products.interfaces.ProductInvoiceService;
 
+import java.util.List;
 import java.util.Map;
 
 @Slf4j
@@ -42,6 +44,12 @@ public class ProductInvoiceController {
 
         Page<ProductInvoiceListDto> result = productInvoiceService.getInvoices(status, keyword, pageable);
         return ResponseEntity.ok(result);
+    }
+
+    @GetMapping("/statistics")
+    public ResponseEntity<List<InvoiceStatisticDto>> getInvoiceStatistics() {
+        List<InvoiceStatisticDto> stats = productInvoiceService.getInvoiceStatistics();
+        return ResponseEntity.ok(stats);
     }
 
     // ... (Các API getDetail và updateStatus giữ nguyên như cũ)

@@ -78,13 +78,30 @@ public class GeminiProductImageFlowService {
                 .count();
 
         if (validCount == 0) {
-            log.warn("[GeminiFlow] Moderation: all images are unsafe or not relevant, note={}",
-                    moderationResult.getNote());
-            throw new IllegalArgumentException(
-                    moderationResult.getNote() != null
-                            ? moderationResult.getNote()
-                            : "All images are unsafe or not relevant"
-            );
+            List<String> errorDetails = new ArrayList<>();
+
+            for (GeminiModerationImageResult img : images) {
+                if (!img.isSafe() || !img.isProductRelevant()) {
+                    // 1. Lấy lý do cụ thể do AI trả về (AI Log)
+                    String reason = img.getSafetyReason();
+                    if (reason == null || reason.isEmpty()) {
+                        reason = img.getRelevanceReason();
+                    }
+                    if (reason == null || reason.isEmpty()) {
+                        reason = "Unsafe or Irrelevant";
+                    }
+                    // 2. Format Index
+                    int displayIndex = img.getIndex() + 1;
+
+                    // 3. Ghép chuỗi
+                    errorDetails.add("Image " + displayIndex + ": " + reason);
+                }
+            }
+
+            String errorMsg = String.join(" | ", errorDetails);
+
+            log.warn("[GeminiFlow] Moderation failed: {}", errorMsg);
+            throw new IllegalArgumentException(errorMsg);
         }
 
         if (moderationResult.isNeedBetterImages()) {

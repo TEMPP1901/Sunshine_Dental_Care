@@ -6,16 +6,14 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-import sunshine_dental_care.dto.huybro_invoices.ProductInvoiceDetailDto;
-import sunshine_dental_care.dto.huybro_invoices.ProductInvoiceItemDto;
-import sunshine_dental_care.dto.huybro_invoices.ProductInvoiceListDto;
-import sunshine_dental_care.dto.huybro_invoices.UpdateInvoiceStatusRequestDto;
+import sunshine_dental_care.dto.huybro_invoices.*;
 import sunshine_dental_care.entities.huybro_product_invoices.ProductInvoice;
 import sunshine_dental_care.entities.huybro_product_invoices.ProductInvoiceItem;
 import sunshine_dental_care.repositories.huybro_products.ProductInventoryRepository;
 import sunshine_dental_care.repositories.huybro_products.ProductInvoiceItemRepository;
 import sunshine_dental_care.repositories.huybro_products.ProductInvoiceRepository;
 import sunshine_dental_care.services.huybro_checkout.email.client.EmailService;
+import sunshine_dental_care.services.huybro_products.interfaces.InventoryService;
 import sunshine_dental_care.services.huybro_products.interfaces.ProductInvoiceService;
 import sunshine_dental_care.utils.huybro_utils.EmailTemplateUtils;
 
@@ -33,7 +31,7 @@ public class ProductInvoiceServiceImpl implements ProductInvoiceService {
     private final ProductInvoiceItemRepository invoiceItemRepository;
     private final ProductInventoryRepository productInventoryRepository;
     private final EmailService emailService;;
-
+    private final InventoryService  inventoryService;
     @Override
     @Transactional(readOnly = true)
     public ProductInvoiceDetailDto getInvoiceDetail(Integer invoiceId) {
@@ -51,6 +49,12 @@ public class ProductInvoiceServiceImpl implements ProductInvoiceService {
     public Page<ProductInvoiceListDto> getInvoices(String status, String keyword, Pageable pageable) {
         return invoiceRepository.findAllSortedByLatestActivity(status, keyword, pageable)
                 .map(this::mapToListDto);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<InvoiceStatisticDto> getInvoiceStatistics() {
+        return invoiceRepository.getInvoiceStatistics();
     }
 
     @Override
@@ -87,10 +91,9 @@ public class ProductInvoiceServiceImpl implements ProductInvoiceService {
                 if (!"PROCESSING".equalsIgnoreCase(currentStatus)) {
                     throw new IllegalStateException("Cannot COMPLETE an invoice that is " + currentStatus);
                 }
-                // [Logic] Đánh dấu thanh toán & Trừ kho thực tế (nếu logic yêu cầu trừ lúc này)
+                // [Logic] Đánh dấu thanh toán
                 invoice.setPaymentCompletedAt(Instant.now());
                 invoice.setPaymentStatus("PAID");
-                // TODO: Gọi hàm trừ kho thực tế ở đây (deductStock)
                 break;
 
             case "CANCELLED":
@@ -98,7 +101,11 @@ public class ProductInvoiceServiceImpl implements ProductInvoiceService {
                 if ("COMPLETED".equalsIgnoreCase(currentStatus)) {
                     throw new IllegalStateException("Cannot CANCEL a COMPLETED invoice");
                 }
-                // [Logic] Nếu đã trừ kho (ở bước trước đó), phải hoàn kho lại (Restock logic)
+                if (!"CANCELLED".equalsIgnoreCase(currentStatus)) {
+
+                    restoreInventoryForInvoice(invoice);
+
+                }
                 break;
 
             default:
@@ -197,5 +204,26 @@ public class ProductInvoiceServiceImpl implements ProductInvoiceService {
                 .createdAt(inv.getCreatedAt())
                 .updatedAt(inv.getUpdatedAt())
                 .build();
+    }
+    private void restoreInventoryForInvoice(ProductInvoice invoice) {
+        if (invoice.getClinic() == null) {
+            log.error("Invoice #{} missing Clinic info. Cannot restock.", invoice.getId());
+            return;
+        }
+        Integer clinicId = invoice.getClinic().getId();
+
+        // Lấy lại danh sách item của invoice này
+        List<ProductInvoiceItem> items = invoiceItemRepository.findAllByInvoiceIdWithProduct(invoice.getId());
+
+        for (ProductInvoiceItem item : items) {
+            if (item.getProduct() != null) {
+                // Gọi InventoryService (Hàm này đã được viết đảm bảo an toàn UnitOnly)
+                inventoryService.restoreStockForCancelledInvoice(
+                        clinicId,
+                        item.getProduct().getId(),
+                        item.getQuantity()
+                );
+            }
+        }
     }
 }

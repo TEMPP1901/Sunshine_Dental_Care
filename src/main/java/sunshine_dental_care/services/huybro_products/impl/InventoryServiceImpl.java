@@ -27,6 +27,7 @@ import java.math.RoundingMode;
 import java.nio.file.Paths;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Optional;
 
 @Service
 @RequiredArgsConstructor
@@ -307,8 +308,84 @@ public class InventoryServiceImpl implements InventoryService {
         return mapToViewDto(inventory);
     }
 
+    // --- [LOGIC QUAN TRỌNG] HOÀN KHO KHI HỦY ĐƠN ---
+    @Override
+    public void restoreStockForCancelledInvoice(Integer clinicId, Integer productId, Integer quantityToRestore) {
+        if (quantityToRestore == null || quantityToRestore <= 0) return;
+
+        Product product = productRepository.findById(productId)
+                .orElseThrow(() -> new RuntimeException("Product not found"));
+
+        // 1. Cộng số lượng vào kho (Logic cũ)
+        ProductInventory inventory = productInventoryRepository.findByProductIdAndClinicId(productId, clinicId)
+                .orElseGet(() -> {
+                    Clinic clinic = clinicRepository.findById(clinicId).orElseThrow();
+                    ProductInventory newInv = new ProductInventory();
+                    newInv.setProduct(product);
+                    newInv.setClinic(clinic);
+                    newInv.setQuantity(0);
+                    return newInv;
+                });
+
+        inventory.setQuantity(inventory.getQuantity() + quantityToRestore);
+        inventory.setLastUpdated(LocalDateTime.now());
+        productInventoryRepository.save(inventory);
+
+        // 2. Ghi Log Receipt (ĐÃ SỬA: Lấy giá cũ đắp vào để không bị Null hay 0)
+        ProductStockReceipt receipt = new ProductStockReceipt();
+        receipt.setProduct(product);
+        receipt.setClinic(inventory.getClinic());
+        receipt.setQuantityAdded(quantityToRestore);
+
+        // [LOGIC MỚI] Tìm phiếu nhập gần nhất để copy giá
+        Optional<ProductStockReceipt> lastReceiptOpt = stockReceiptRepository.findTopByProduct_IdOrderByCreatedAtDesc(productId);
+
+        if (lastReceiptOpt.isPresent()) {
+            ProductStockReceipt lastReceipt = lastReceiptOpt.get();
+            // Copy nguyên xi giá cũ -> Biến động 0% -> Mũi tên đỏ biến mất
+            receipt.setImportPrice(lastReceipt.getImportPrice());
+            receipt.setProfitMargin(lastReceipt.getProfitMargin());
+        } else {
+            // Trường hợp đường cùng (Chưa từng nhập bao giờ): Buộc phải để 0 để không lỗi DB
+            receipt.setImportPrice(BigDecimal.ZERO);
+            receipt.setProfitMargin(BigDecimal.ZERO);
+        }
+
+        // Giá bán hiện tại (chỉ để tham khảo)
+        receipt.setNewRetailPrice(product.getDefaultRetailPrice());
+        receipt.setCurrency(product.getCurrency());
+
+        receipt.setNote("AUTO-RESTOCK: Order Cancelled");
+        receipt.setCreatedAt(LocalDateTime.now());
+        stockReceiptRepository.save(receipt);
+
+        // 3. [AN TOÀN] Gọi hàm updateQuantityOnly (1 tham số)
+        // Tuyệt đối không gọi hàm syncProductTotalState(3 tham số) ở đây
+        updateProductQuantityOnly(product);
+
+        log.info("Restocked {} items for Product #{}. Price history preserved.", quantityToRestore, productId);
+    }
+
     // --- PRIVATE HELPERS ---
 
+    // [HÀM RIÊNG] Chỉ update Unit và Active. Không đụng đến Price.
+    private void updateProductQuantityOnly(Product product) {
+        Integer totalUnit = productInventoryRepository.sumTotalQuantityByProductId(product.getId());
+        if (totalUnit == null) totalUnit = 0;
+
+        product.setUnit(totalUnit);
+
+        // Logic Active/Inactive
+        if (totalUnit == 0) {
+            product.setIsActive(false);
+        } else {
+            if (Boolean.FALSE.equals(product.getIsActive())) {
+                product.setIsActive(true);
+            }
+        }
+        product.setUpdatedAt(LocalDateTime.now());
+        productRepository.save(product);
+    }
     // Helper: Logic Siết Chặt Trạng Thái (Dùng chung cho cả Import và Update)
     private void syncProductTotalState(Product product, BigDecimal newPrice, String currency) {
         // 1. Tính tổng lại Unit từ tất cả các kho (Dựa vào dữ liệu thật trong DB)

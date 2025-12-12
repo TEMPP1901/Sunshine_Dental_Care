@@ -6,6 +6,7 @@ import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
+import sunshine_dental_care.dto.huybro_invoices.InvoiceStatisticDto;
 import sunshine_dental_care.dto.huybro_reports.RevenueChartDataDto;
 import sunshine_dental_care.entities.huybro_product_invoices.ProductInvoice;
 
@@ -95,4 +96,8 @@ public interface ProductInvoiceRepository extends JpaRepository<ProductInvoice, 
             @Param("startDate") LocalDateTime startDate,
             @Param("endDate") LocalDateTime endDate
     );
+    @Query("SELECT new sunshine_dental_care.dto.huybro_invoices.InvoiceStatisticDto(i.invoiceStatus, COUNT(i)) " +
+            "FROM ProductInvoice i " +
+            "GROUP BY i.invoiceStatus")
+    List<InvoiceStatisticDto> getInvoiceStatistics();
 }
