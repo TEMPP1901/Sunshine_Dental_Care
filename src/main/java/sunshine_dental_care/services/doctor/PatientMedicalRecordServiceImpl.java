@@ -1,18 +1,32 @@
 package sunshine_dental_care.services.doctor;
 
-import lombok.RequiredArgsConstructor;
+import java.io.IOException;
+import java.time.Instant;
+import java.time.LocalDate;
+import java.util.ArrayList;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Optional;
+import java.util.Set;
+import java.util.stream.Collectors;
+
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
+
+import com.lowagie.text.DocumentException;
+
+import lombok.RequiredArgsConstructor;
 import sunshine_dental_care.dto.doctorDTO.ClinicDTO;
 import sunshine_dental_care.dto.doctorDTO.DoctorDTO;
-import sunshine_dental_care.dto.doctorDTO.PatientDTO;
 import sunshine_dental_care.dto.doctorDTO.MedicalRecordDTO;
-import sunshine_dental_care.dto.doctorDTO.MedicalRecordRequest;
 import sunshine_dental_care.dto.doctorDTO.MedicalRecordImageDTO;
+import sunshine_dental_care.dto.doctorDTO.MedicalRecordRequest;
+import sunshine_dental_care.dto.doctorDTO.PatientDTO;
 import sunshine_dental_care.dto.doctorDTO.ServiceDTO;
 import sunshine_dental_care.dto.doctorDTO.ServiceVariantDTO;
 import sunshine_dental_care.entities.Appointment;
+import sunshine_dental_care.entities.AppointmentService;
 import sunshine_dental_care.entities.Clinic;
 import sunshine_dental_care.entities.MedicalRecord;
 import sunshine_dental_care.entities.MedicalRecordImage;
@@ -20,20 +34,11 @@ import sunshine_dental_care.entities.Patient;
 import sunshine_dental_care.entities.User;
 import sunshine_dental_care.repositories.auth.ClinicRepo;
 import sunshine_dental_care.repositories.auth.PatientRepo;
-import sunshine_dental_care.repositories.doctor.DoctorRepo;
 import sunshine_dental_care.repositories.doctor.AppointmentRepository;
 import sunshine_dental_care.repositories.doctor.DentalServiceRepository;
+import sunshine_dental_care.repositories.doctor.DoctorRepo;
 import sunshine_dental_care.repositories.doctor.MedicalRecordRepository;
 import sunshine_dental_care.services.upload_file.ImageStorageService;
-
-import java.time.Instant;
-import java.time.LocalDate;
-import java.util.ArrayList;
-import java.util.LinkedHashSet;
-import java.util.List;
-import java.util.Optional;
-import java.util.stream.Collectors;
-import java.util.Set;
 
 @Service
 @RequiredArgsConstructor
@@ -65,6 +70,44 @@ public class PatientMedicalRecordServiceImpl implements PatientMedicalRecordServ
                 .stream()
                 .map(this::toDTO)
                 .toList();
+    }
+
+    // Build a simple list of service detail strings for the medical record
+    private List<String> toServiceDetails(MedicalRecord record) {
+        List<String> details = new ArrayList<>();
+
+        // If medical record is linked to an appointment, prefer appointment services
+        if (record.getAppointment() != null && record.getAppointment().getAppointmentServices() != null
+                && !record.getAppointment().getAppointmentServices().isEmpty()) {
+            for (AppointmentService apptService : record.getAppointment().getAppointmentServices()) {
+                StringBuilder sb = new StringBuilder();
+                if (apptService.getService() != null) {
+                    sb.append(apptService.getService().getServiceName());
+                } else {
+                    sb.append("Unknown Service");
+                }
+                if (apptService.getServiceVariant() != null) {
+                    sb.append(" (").append(apptService.getServiceVariant().getVariantName()).append(")");
+                }
+                sb.append(" x").append(apptService.getQuantity());
+                if (apptService.getUnitPrice() != null) {
+                    sb.append(" - ").append(apptService.getUnitPrice().toPlainString());
+                }
+                if (apptService.getNote() != null && !apptService.getNote().isBlank()) {
+                    sb.append(" (Note: ").append(apptService.getNote()).append(")");
+                }
+                details.add(sb.toString());
+            }
+            return details;
+        }
+
+        // Fallback: if MedicalRecord has a direct service reference
+        if (record.getService() != null) {
+            details.add(record.getService().getServiceName());
+            return details;
+        }
+
+        return List.of();
     }
 
     // Tạo mới một hồ sơ bệnh án cho bệnh nhân
@@ -272,7 +315,9 @@ public class PatientMedicalRecordServiceImpl implements PatientMedicalRecordServ
                 .patient(toPatientDTO(record.getPatient()))
                 .doctor(toDoctorDTO(record.getDoctor()))
                 .appointmentId(record.getAppointment() != null ? record.getAppointment().getId() : null)
-                .service(toServiceDTO(record.getService())) // Map service thành ServiceDTO object
+                .service(toServiceDTO(record.getService()))
+                .serviceDetails(toServiceDetails(record))
+                // Map service thành ServiceDTO object
                 .diagnosis(record.getDiagnosis())
                 .treatmentPlan(record.getTreatmentPlan())
                 .prescriptionNote(record.getPrescriptionNote())
@@ -385,6 +430,64 @@ public class PatientMedicalRecordServiceImpl implements PatientMedicalRecordServ
                 .updatedAt(service.getUpdatedAt())
                 .variants(variantDTOs)
                 .build();
+    }
+
+    // Export hồ sơ bệnh án ra file PDF
+    @Override
+    @Transactional(readOnly = true)
+    public byte[] exportRecordToPDF(Integer patientId, Integer recordId) {
+        // Lấy hồ sơ bệnh án từ database
+        MedicalRecord record = getRecord(patientId, recordId);
+        
+        // Đảm bảo các lazy-loaded relationships được fetch
+        // Fetch clinic
+        if (record.getClinic() != null) {
+            record.getClinic().getClinicName();
+        }
+        
+        // Fetch patient
+        if (record.getPatient() != null) {
+            record.getPatient().getFullName();
+            record.getPatient().getPatientCode();
+        }
+        
+        // Fetch doctor
+        if (record.getDoctor() != null) {
+            record.getDoctor().getFullName();
+        }
+        
+        // Fetch appointment và appointment services nếu có
+        if (record.getAppointment() != null) {
+            Appointment appointment = record.getAppointment();
+            if (appointment.getAppointmentServices() != null) {
+                for (AppointmentService apptService : appointment.getAppointmentServices()) {
+                    if (apptService.getService() != null) {
+                        apptService.getService().getServiceName();
+                    }
+                    if (apptService.getServiceVariant() != null) {
+                        apptService.getServiceVariant().getVariantName();
+                    }
+                }
+            }
+        }
+        
+        // Fetch service nếu có
+        if (record.getService() != null) {
+            record.getService().getServiceName();
+        }
+        
+        // Fetch images nếu có
+        if (record.getMedicalRecordImages() != null) {
+            record.getMedicalRecordImages().size();
+        }
+        
+        // Tạo PDF exporter và export
+        try {
+            MedicalRecordPDFExporter exporter = new MedicalRecordPDFExporter(record);
+            return exporter.export();
+        } catch (DocumentException | IOException e) {
+            throw new RuntimeException("Failed to export medical record to PDF", e);
+        }
     }
 
     // Lấy hồ sơ bệnh án theo id bệnh nhân và id hồ sơ

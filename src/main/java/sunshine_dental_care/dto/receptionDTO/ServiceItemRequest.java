@@ -17,4 +17,6 @@ public class ServiceItemRequest {
     private BigDecimal unitPrice;
     private BigDecimal discountPct;
     private String note;
+
+
 }

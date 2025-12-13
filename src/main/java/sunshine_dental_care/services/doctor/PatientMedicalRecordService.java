@@ -17,5 +17,7 @@ public interface PatientMedicalRecordService {
     MedicalRecordImageDTO uploadImage(Integer patientId, Integer recordId, MultipartFile file, String description, String aiTag);
 
     void deleteImage(Integer patientId, Integer recordId, Integer imageId);
+
+    byte[] exportRecordToPDF(Integer patientId, Integer recordId);
 }
 

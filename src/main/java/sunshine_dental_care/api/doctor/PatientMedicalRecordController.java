@@ -2,6 +2,8 @@ package sunshine_dental_care.api.doctor;
 
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -81,6 +83,29 @@ public class PatientMedicalRecordController {
         patientMedicalRecordService.deleteImage(patientId, recordId, imageId);
         // Trả về kết quả xóa thành công, không có nội dung (204 No Content)
         return ResponseEntity.noContent().build();
+    }
+
+    // Xuất hồ sơ bệnh án ra file PDF
+    @GetMapping("/{recordId}/export/pdf")
+    public ResponseEntity<byte[]> exportRecordToPDF(
+            @PathVariable Integer patientId,
+            @PathVariable Integer recordId
+    ) {
+        // Gọi service để export hồ sơ bệnh án ra PDF
+        byte[] pdfBytes = patientMedicalRecordService.exportRecordToPDF(patientId, recordId);
+        
+        // Tạo filename với timestamp
+        String filename = "-MedicalRecord-" + recordId + "-" + System.currentTimeMillis() + ".pdf";
+        
+        // Trả về PDF với proper headers
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.APPLICATION_PDF);
+        headers.setContentDispositionFormData("attachment", filename);
+        headers.setContentLength(pdfBytes.length);
+        
+        return ResponseEntity.ok()
+                .headers(headers)
+                .body(pdfBytes);
     }
 }
 
