@@ -29,7 +29,6 @@ public class MedicalRecordDTO {
     private String treatmentPlan;
     private String prescriptionNote;
     private String note;
-    private List<String> serviceDetails;
 
     private LocalDate recordDate;
     private Instant createdAt;

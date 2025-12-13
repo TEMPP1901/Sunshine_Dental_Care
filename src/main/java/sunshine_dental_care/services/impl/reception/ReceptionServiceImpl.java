@@ -200,7 +200,6 @@ public class ReceptionServiceImpl implements ReceptionService {
             AppointmentService as = new AppointmentService();
             as.setAppointment(appointment);
             as.setService(v.getService()); // Lưu cha để tương thích
-            as.setServiceVariant(v);
             as.setQuantity(req.getQuantity());
             as.setUnitPrice(v.getPrice());
             as.setDiscountPct(req.getDiscountPct());
