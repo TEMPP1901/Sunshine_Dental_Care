@@ -9,6 +9,7 @@ import sunshine_dental_care.dto.doctorDTO.RoomDTO;
 import sunshine_dental_care.dto.doctorDTO.ServiceDTO;
 import sunshine_dental_care.dto.doctorDTO.ServiceVariantDTO;
 import sunshine_dental_care.entities.Appointment;
+import sunshine_dental_care.entities.AppointmentService;
 import sunshine_dental_care.repositories.doctor.DoctorAppointmentRepo;
 import sunshine_dental_care.repositories.doctor.DoctorRepo;
 
@@ -30,13 +31,28 @@ public class DoctorAppointmentImp implements DoctorAppointmentService{
 
     // Hàm chuyển đổi từ entity Appointment sang DTO DoctorAppointmentDTO
     private DoctorAppointmentDTO mapToDTO(Appointment appointment) {
+        // Lấy service và variant từ AppointmentService (ưu tiên từ appointmentServices đầu tiên)
+        sunshine_dental_care.entities.Service service = null;
+        sunshine_dental_care.entities.ServiceVariant serviceVariant = null;
+        
+        if (appointment.getAppointmentServices() != null && !appointment.getAppointmentServices().isEmpty()) {
+            // Lấy service và variant từ AppointmentService đầu tiên
+            AppointmentService firstAppointmentService = appointment.getAppointmentServices().get(0);
+            service = firstAppointmentService.getService();
+            serviceVariant = firstAppointmentService.getServiceVariant();
+        } else if (appointment.getService() != null) {
+            // Fallback: nếu không có appointmentServices, lấy từ service trực tiếp (backward compatibility)
+            service = appointment.getService();
+        }
+        
         return DoctorAppointmentDTO.builder()
                 .appointmentId(appointment.getId())
                 .clinic(toClinicSummary(appointment.getClinic())) // Thông tin phòng khám
                 .patient(toPatientSummary(appointment.getPatient())) // Thông tin bệnh nhân
                 .doctor(toDoctorSummary(appointment.getDoctor())) // Thông tin bác sĩ
                 .room(toRoomSummary(appointment.getRoom())) // Thông tin phòng khám chữa trị
-                .service(toServiceDTO(appointment.getService())) // Service object - load trực tiếp từ appointment.service
+                .service(toServiceDTO(service)) // Service object - lấy từ AppointmentService
+                .serviceVariant(toServiceVariantDTO(serviceVariant)) // Variant từ AppointmentService
                 .startDateTime(appointment.getStartDateTime()) // Thời gian bắt đầu
                 .endDateTime(appointment.getEndDateTime()) // Thời gian kết thúc
                 .status(appointment.getStatus()) // Trạng thái lịch hẹn
@@ -85,6 +101,23 @@ public class DoctorAppointmentImp implements DoctorAppointmentService{
                 .createdAt(service.getCreatedAt())
                 .updatedAt(service.getUpdatedAt())
                 .variants(variantDTOs)
+                .build();
+    }
+
+    // Chuyển entity ServiceVariant sang ServiceVariantDTO
+    private ServiceVariantDTO toServiceVariantDTO(sunshine_dental_care.entities.ServiceVariant serviceVariant) {
+        if (serviceVariant == null) {
+            return null;
+        }
+        
+        return ServiceVariantDTO.builder()
+                .variantId(serviceVariant.getId())
+                .variantName(serviceVariant.getVariantName())
+                .duration(serviceVariant.getDuration())
+                .price(serviceVariant.getPrice())
+                .description(serviceVariant.getDescription())
+                .currency(serviceVariant.getCurrency())
+                .isActive(serviceVariant.getIsActive())
                 .build();
     }
 

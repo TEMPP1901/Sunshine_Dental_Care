@@ -8,8 +8,8 @@ import sunshine_dental_care.entities.AppointmentService;
 import java.util.List;
 
 public interface AppointmentServiceRepository extends JpaRepository<AppointmentService, Integer> {
-    // Query với JOIN FETCH để load Service entity cùng lúc, tránh LazyInitializationException
-    @Query("SELECT aps FROM AppointmentService aps JOIN FETCH aps.service WHERE aps.appointment.id = :appointmentId")
+    // Query với JOIN FETCH để load Service và ServiceVariant entity cùng lúc, tránh LazyInitializationException
+    @Query("SELECT aps FROM AppointmentService aps JOIN FETCH aps.service JOIN FETCH aps.serviceVariant WHERE aps.appointment.id = :appointmentId")
     List<AppointmentService> findByAppointmentId(@Param("appointmentId") Integer appointmentId);
 }
 

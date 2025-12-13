@@ -41,6 +41,14 @@ public class MedicalRecord {
     @JoinColumn(name = "serviceId")
     private Service service;
 
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "variantId")
+    private ServiceVariant serviceVariant;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "appointmentServiceId")
+    private AppointmentService appointmentService;
+
     @Nationalized
     @Lob
     @Column(name = "diagnosis")

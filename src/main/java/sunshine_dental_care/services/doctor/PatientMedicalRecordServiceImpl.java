@@ -13,17 +13,21 @@ import sunshine_dental_care.dto.doctorDTO.MedicalRecordImageDTO;
 import sunshine_dental_care.dto.doctorDTO.ServiceDTO;
 import sunshine_dental_care.dto.doctorDTO.ServiceVariantDTO;
 import sunshine_dental_care.entities.Appointment;
+import sunshine_dental_care.entities.AppointmentService;
 import sunshine_dental_care.entities.Clinic;
 import sunshine_dental_care.entities.MedicalRecord;
 import sunshine_dental_care.entities.MedicalRecordImage;
 import sunshine_dental_care.entities.Patient;
+import sunshine_dental_care.entities.ServiceVariant;
 import sunshine_dental_care.entities.User;
 import sunshine_dental_care.repositories.auth.ClinicRepo;
 import sunshine_dental_care.repositories.auth.PatientRepo;
 import sunshine_dental_care.repositories.doctor.DoctorRepo;
 import sunshine_dental_care.repositories.doctor.AppointmentRepository;
+import sunshine_dental_care.repositories.doctor.AppointmentServiceRepository;
 import sunshine_dental_care.repositories.doctor.DentalServiceRepository;
 import sunshine_dental_care.repositories.doctor.MedicalRecordRepository;
+import sunshine_dental_care.repositories.reception.ServiceVariantRepo;
 import sunshine_dental_care.services.upload_file.ImageStorageService;
 
 import java.time.Instant;
@@ -52,7 +56,9 @@ public class PatientMedicalRecordServiceImpl implements PatientMedicalRecordServ
     private final ClinicRepo clinicRepo;
     private final DoctorRepo doctorRepo;
     private final AppointmentRepository appointmentRepository;
+    private final AppointmentServiceRepository appointmentServiceRepository;
     private final DentalServiceRepository dentalServiceRepository;
+    private final ServiceVariantRepo serviceVariantRepo;
     private final ImageStorageService imageStorageService;
 
     // Lấy danh sách hồ sơ bệnh án của một bệnh nhân
@@ -76,7 +82,30 @@ public class PatientMedicalRecordServiceImpl implements PatientMedicalRecordServ
         Clinic clinic = getClinic(request.clinicId());
         User doctor = getDoctor(request.doctorId());
         Appointment appointment = getAppointment(request.appointmentId());
-        sunshine_dental_care.entities.Service service = getService(request.serviceId());
+        
+        // Ưu tiên sử dụng appointmentServiceId để lấy cả service và variant
+        AppointmentService appointmentService = null;
+        sunshine_dental_care.entities.Service service = null;
+        ServiceVariant serviceVariant = null;
+        
+        if (request.appointmentServiceId() != null) {
+            // Nếu có appointmentServiceId, lấy từ đó
+            appointmentService = getAppointmentService(request.appointmentServiceId());
+            service = appointmentService.getService();
+            serviceVariant = appointmentService.getServiceVariant();
+        } else if (appointment != null && appointment.getAppointmentServices() != null 
+                   && !appointment.getAppointmentServices().isEmpty()) {
+            // Nếu có appointment nhưng không có appointmentServiceId, lấy appointmentService đầu tiên từ appointment
+            appointmentService = appointment.getAppointmentServices().get(0);
+            service = appointmentService.getService();
+            serviceVariant = appointmentService.getServiceVariant();
+        } else if (request.serviceId() != null) {
+            // Fallback: lấy trực tiếp từ serviceId và variantId nếu có
+            service = getService(request.serviceId());
+            if (request.variantId() != null) {
+                serviceVariant = getServiceVariant(request.variantId());
+            }
+        }
 
         // Tạo mới entity MedicalRecord và set giá trị
         MedicalRecord record = new MedicalRecord();
@@ -85,6 +114,8 @@ public class PatientMedicalRecordServiceImpl implements PatientMedicalRecordServ
         record.setDoctor(doctor);
         record.setAppointment(appointment);
         record.setService(service);
+        record.setServiceVariant(serviceVariant);
+        record.setAppointmentService(appointmentService);
         applyRequest(record, request); // set các trường thông tin khác
 
         // Thiết lập thời gian tạo và cập nhật
@@ -113,9 +144,36 @@ public class PatientMedicalRecordServiceImpl implements PatientMedicalRecordServ
             record.setDoctor(getDoctor(request.doctorId()));
         }
 
-        // Cập nhật lịch hẹn, dịch vụ nếu có
-        record.setAppointment(getAppointment(request.appointmentId()));
-        record.setService(getService(request.serviceId()));
+        // Cập nhật lịch hẹn
+        Appointment appointment = getAppointment(request.appointmentId());
+        record.setAppointment(appointment);
+        
+        // Ưu tiên sử dụng appointmentServiceId để lấy cả service và variant
+        if (request.appointmentServiceId() != null) {
+            // Nếu có appointmentServiceId, lấy từ đó
+            AppointmentService appointmentService = getAppointmentService(request.appointmentServiceId());
+            record.setAppointmentService(appointmentService);
+            record.setService(appointmentService.getService());
+            record.setServiceVariant(appointmentService.getServiceVariant());
+        } else if (appointment != null && appointment.getAppointmentServices() != null 
+                   && !appointment.getAppointmentServices().isEmpty()) {
+            // Nếu có appointment nhưng không có appointmentServiceId, lấy appointmentService đầu tiên từ appointment
+            AppointmentService appointmentService = appointment.getAppointmentServices().get(0);
+            record.setAppointmentService(appointmentService);
+            record.setService(appointmentService.getService());
+            record.setServiceVariant(appointmentService.getServiceVariant());
+        } else {
+            // Fallback: cập nhật dịch vụ và variant nếu có
+            if (request.serviceId() != null) {
+                record.setService(getService(request.serviceId()));
+            }
+            if (request.variantId() != null) {
+                record.setServiceVariant(getServiceVariant(request.variantId()));
+            } else {
+                record.setServiceVariant(null);
+            }
+            record.setAppointmentService(null);
+        }
 
         // Gán thông tin từ request và cập nhật thời gian sửa đổi
         applyRequest(record, request);
@@ -244,13 +302,15 @@ public class PatientMedicalRecordServiceImpl implements PatientMedicalRecordServ
                 .orElseThrow(() -> new IllegalArgumentException("Doctor not found"));
     }
 
-    // Lấy lịch hẹn theo id (có thể null)
+    // Lấy lịch hẹn theo id (có thể null) - load cả appointmentServices để lấy service và variant
     private Appointment getAppointment(Integer appointmentId) {
         if (appointmentId == null) {
             return null;
         }
-        return appointmentRepository.findById(appointmentId)
-                .orElseThrow(() -> new IllegalArgumentException("Appointment not found"));
+        // Ưu tiên sử dụng query có JOIN FETCH appointmentServices
+        return appointmentRepository.findByIdWithAppointmentServices(appointmentId)
+                .orElseGet(() -> appointmentRepository.findById(appointmentId)
+                        .orElseThrow(() -> new IllegalArgumentException("Appointment not found")));
     }
 
     // Lấy dịch vụ theo id (có thể null)
@@ -262,17 +322,45 @@ public class PatientMedicalRecordServiceImpl implements PatientMedicalRecordServ
                 .orElseThrow(() -> new IllegalArgumentException("Service not found"));
     }
 
+    // Lấy AppointmentService theo id (có thể null)
+    private AppointmentService getAppointmentService(Integer appointmentServiceId) {
+        if (appointmentServiceId == null) {
+            return null;
+        }
+        return appointmentServiceRepository.findById(appointmentServiceId)
+                .orElseThrow(() -> new IllegalArgumentException("AppointmentService not found"));
+    }
+
+    // Lấy ServiceVariant theo id (có thể null)
+    private ServiceVariant getServiceVariant(Integer variantId) {
+        if (variantId == null) {
+            return null;
+        }
+        return serviceVariantRepo.findById(variantId)
+                .orElseThrow(() -> new IllegalArgumentException("ServiceVariant not found"));
+    }
+
     // --- Các hàm chuyển đổi entity sang DTO để trả dữ liệu ra ngoài ---
 
     // Chuyển entity MedicalRecord sang MedicalRecordDTO
     private MedicalRecordDTO toDTO(MedicalRecord record) {
+        // Nếu có appointmentService, ưu tiên lấy service và variant từ đó
+        sunshine_dental_care.entities.Service service = record.getService();
+        ServiceVariant serviceVariant = record.getServiceVariant();
+        
+        if (record.getAppointmentService() != null) {
+            service = record.getAppointmentService().getService();
+            serviceVariant = record.getAppointmentService().getServiceVariant();
+        }
+        
         return MedicalRecordDTO.builder()
                 .recordId(record.getId())
                 .clinic(toClinicDTO(record.getClinic()))
                 .patient(toPatientDTO(record.getPatient()))
                 .doctor(toDoctorDTO(record.getDoctor()))
                 .appointmentId(record.getAppointment() != null ? record.getAppointment().getId() : null)
-                .service(toServiceDTO(record.getService())) // Map service thành ServiceDTO object
+                .service(toServiceDTO(service)) // Map service thành ServiceDTO object
+                .serviceVariant(toServiceVariantDTO(serviceVariant)) // Map variant thành ServiceVariantDTO
                 .diagnosis(record.getDiagnosis())
                 .treatmentPlan(record.getTreatmentPlan())
                 .prescriptionNote(record.getPrescriptionNote())
@@ -384,6 +472,23 @@ public class PatientMedicalRecordServiceImpl implements PatientMedicalRecordServ
                 .createdAt(service.getCreatedAt())
                 .updatedAt(service.getUpdatedAt())
                 .variants(variantDTOs)
+                .build();
+    }
+
+    // Chuyển entity ServiceVariant sang ServiceVariantDTO
+    private ServiceVariantDTO toServiceVariantDTO(ServiceVariant serviceVariant) {
+        if (serviceVariant == null) {
+            return null;
+        }
+        
+        return ServiceVariantDTO.builder()
+                .variantId(serviceVariant.getId())
+                .variantName(serviceVariant.getVariantName())
+                .duration(serviceVariant.getDuration())
+                .price(serviceVariant.getPrice())
+                .description(serviceVariant.getDescription())
+                .currency(serviceVariant.getCurrency())
+                .isActive(serviceVariant.getIsActive())
                 .build();
     }
 

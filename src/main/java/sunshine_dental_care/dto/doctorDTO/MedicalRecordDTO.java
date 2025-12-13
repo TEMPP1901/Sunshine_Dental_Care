@@ -24,6 +24,7 @@ public class MedicalRecordDTO {
     private Integer appointmentId;
     
     private ServiceDTO service;
+    private ServiceVariantDTO serviceVariant;
 
     private String diagnosis;
     private String treatmentPlan;
