@@ -34,4 +34,6 @@ public interface ReceptionService {
     PatientResponse createPatient(PatientRequest request);
 
     AppointmentResponse updateAppointment(Integer appointmentId, AppointmentUpdateRequest request);
+
+    AppointmentResponse assignRoomToAppointment(Integer appointmentId, Integer roomId);
 }

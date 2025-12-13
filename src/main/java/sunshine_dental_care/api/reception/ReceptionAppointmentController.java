@@ -125,4 +125,16 @@ public class ReceptionAppointmentController {
 
         return ResponseEntity.ok(receptionService.updateAppointment(id, request));
     }
+
+    // API: Gán phòng cho lịch hẹn
+    // URL: PUT /api/reception/appointments/{id}/assign-room?roomId=5
+    @PutMapping("/appointments/{id}/assign-room")
+    @PreAuthorize("hasAnyRole('RECEPTION', 'ADMIN')")
+    public ResponseEntity<AppointmentResponse> assignRoom(
+            @PathVariable Integer id,
+            @RequestParam Integer roomId) {
+
+        AppointmentResponse response = receptionService.assignRoomToAppointment(id, roomId);
+        return ResponseEntity.ok(response);
+    }
 }

@@ -2,6 +2,7 @@ package sunshine_dental_care.dto.receptionDTO.mapper;
 
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
+import sunshine_dental_care.dto.doctorDTO.RoomDTO;
 import sunshine_dental_care.dto.receptionDTO.AppointmentResponse;
 import sunshine_dental_care.dto.receptionDTO.PatientResponse;
 import sunshine_dental_care.dto.receptionDTO.ServiceItemResponse;
@@ -58,6 +59,16 @@ public class AppointmentMapper {
                     .map(this::mapAppointmentServiceToServiceItemResponse)
                     .collect(Collectors.toList());
             response.setServices(services);
+        }
+
+        // Map Room
+        if (appointment.getRoom() != null) {
+            RoomDTO roomDto = new RoomDTO();
+            roomDto.setId(appointment.getRoom().getId());
+            roomDto.setRoomName(appointment.getRoom().getRoomName());
+            roomDto.setIsPrivate(appointment.getRoom().getIsPrivate());
+
+            response.setRoom(roomDto);
         }
 
         return response;

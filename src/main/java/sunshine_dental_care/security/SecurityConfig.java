@@ -116,6 +116,10 @@ public class SecurityConfig {
                         // Cho phép mọi user đã login (bao gồm Patient) xem slot và đặt lịch
                         .requestMatchers("/api/booking/**").authenticated()
 
+                        // Cho phép User đã đăng nhập (ROLE_USER) gọi API thanh toán & API Booking
+                        .requestMatchers("/api/booking/payment/**").authenticated()
+                        .requestMatchers("/api/booking/appointments").authenticated()
+
                         // === only Reception and Admin can access role reception API  ===
                         .requestMatchers("/api/reception/**").hasAnyRole("RECEPTION", "ADMIN")
 

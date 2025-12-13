@@ -5,6 +5,7 @@ import java.util.List;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
+import jakarta.validation.ValidationException;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
@@ -204,6 +205,7 @@ public class ReceptionServiceImpl implements ReceptionService {
         }
         // Set Type & Fee
         appointment.setAppointmentType(type);
+        appointment.setPaymentStatus("UNPAID");
         if (request.getBookingFee() != null) {
             appointment.setBookingFee(request.getBookingFee());
         } else {
@@ -437,5 +439,43 @@ public class ReceptionServiceImpl implements ReceptionService {
         // logRepo.save(new Log(..., "UPDATE_INFO", ...));
 
         return appointmentMapper.mapToAppointmentResponse(appointmentRepo.save(appointment));
+    }
+
+    // Hàm xếp phòng cho lịch hẹn
+    @Override
+    @Transactional
+    public AppointmentResponse assignRoomToAppointment(Integer appointmentId, Integer roomId) {
+        // 1. Lấy thông tin lịch hẹn
+        Appointment appt = appointmentRepo.findById(appointmentId)
+                .orElseThrow(() -> new ResourceNotFoundException("Appointment not found"));
+
+        // 2. Lấy thông tin phòng
+        Room room = roomRepo.findById(roomId)
+                .orElseThrow(() -> new ResourceNotFoundException("Room not found"));
+
+        // 3. Kiểm tra phòng có thuộc đúng cơ sở của lịch hẹn không
+        if (!room.getClinic().getId().equals(appt.getClinic().getId())) {
+            throw new ValidationException("Lỗi: Phòng " + room.getRoomName() + " không thuộc cơ sở này!");
+        }
+
+        // 4. Double check (Chống xung đột) xem có ai vừa đặt phòng này không
+        // (Hàm existsByRoomIdAndDateOverlap đã thêm ở Repo)
+        boolean isOccupied = appointmentRepo.existsByRoomIdAndDateOverlap(
+                roomId,
+                appointmentId,
+                appt.getStartDateTime(),
+                appt.getEndDateTime()
+        );
+
+        if (isOccupied) {
+            throw new AppointmentConflictException("Phòng " + room.getRoomName() + " vừa có người khác đặt. Vui lòng chọn phòng khác!");
+        }
+
+        // 5. Gán phòng và Lưu
+        appt.setRoom(room);
+        Appointment savedAppt = appointmentRepo.save(appt);
+
+        // 6. Map dữ liệu vừa lưu sang DTO và trả về cho Controller
+        return appointmentMapper.mapToAppointmentResponse(savedAppt);
     }
 }

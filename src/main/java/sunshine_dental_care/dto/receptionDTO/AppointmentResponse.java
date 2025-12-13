@@ -5,8 +5,8 @@ import java.time.Instant;
 import java.util.List;
 
 import lombok.Data;
+import sunshine_dental_care.dto.doctorDTO.RoomDTO;
 import sunshine_dental_care.dto.hrDTO.ClinicResponse;
-import sunshine_dental_care.dto.hrDTO.RoomResponse;
 import sunshine_dental_care.dto.hrDTO.HrDocDto;
 
 @Data
@@ -15,7 +15,7 @@ public class AppointmentResponse {
     private ClinicResponse clinic;
     private PatientResponse patient;
     private HrDocDto doctor;
-    private RoomResponse room;
+    private RoomDTO room;
     private Instant startDateTime;
     private Instant endDateTime;
     private String status;

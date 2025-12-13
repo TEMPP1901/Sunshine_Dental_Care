@@ -73,6 +73,12 @@ public class Appointment {
     @Column(name = "bookingFee")
     private BigDecimal bookingFee; // Phí đặt lịch hẹn
 
+    @Column(name = "paymentStatus", length = 50)
+    private String paymentStatus; // UNPAID, PAID
+
+    @Column(name = "transactionRef", length = 100)
+    private String transactionRef; // Mã giao dịch VNPay/PayPal
+
     // Mỗi Lịch hẹn (Appointment) có thể chứa nhiều (Many) bản ghi Chi tiết Dịch vụ Lịch hẹn (AppointmentService).
     @OneToMany(mappedBy = "appointment", cascade = CascadeType.ALL, fetch = FetchType.LAZY)
     private List<AppointmentService> appointmentServices;
@@ -203,6 +209,19 @@ public class Appointment {
 
     public BigDecimal getBookingFee() { return bookingFee; }
     public void setBookingFee(BigDecimal bookingFee) { this.bookingFee = bookingFee; }
+
+    public String getPaymentStatus() {
+        return paymentStatus;
+    }
+    public void setPaymentStatus(String paymentStatus) {
+        this.paymentStatus = paymentStatus;
+    }
+    public String getTransactionRef() {
+        return transactionRef;
+    }
+    public void setTransactionRef(String transactionRef) {
+        this.transactionRef = transactionRef;
+    }
 
     @PrePersist
     public void prePersist() {
