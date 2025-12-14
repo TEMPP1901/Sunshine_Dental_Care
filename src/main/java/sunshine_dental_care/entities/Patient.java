@@ -4,6 +4,7 @@ import jakarta.persistence.*;
 import org.hibernate.annotations.ColumnDefault;
 import org.hibernate.annotations.Nationalized;
 
+import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.LocalDate;
 
@@ -175,4 +176,16 @@ public class Patient {
     void preUpdate() {
         updatedAt = Instant.now();
     }
+
+    @Column(name = "accumulated_spending")
+    private BigDecimal accumulatedSpending = BigDecimal.ZERO;
+
+    @Column(name = "membership_rank")
+    private String membershipRank = "MEMBER";
+
+    // Getters & Setters
+    public BigDecimal getAccumulatedSpending() { return accumulatedSpending; }
+    public void setAccumulatedSpending(BigDecimal accumulatedSpending) { this.accumulatedSpending = accumulatedSpending; }
+    public String getMembershipRank() { return membershipRank; }
+    public void setMembershipRank(String membershipRank) { this.membershipRank = membershipRank; }
 }
