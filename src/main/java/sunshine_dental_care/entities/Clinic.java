@@ -53,6 +53,11 @@ public class Clinic {
     @Column(name = "isActive", nullable = false)
     private Boolean isActive = false;
 
+    // Đánh dấu cơ sở bị vô hiệu do holiday (phục vụ khôi phục tự động)
+    @ColumnDefault("0")
+    @Column(name = "deactivatedByHoliday", nullable = false)
+    private Boolean deactivatedByHoliday = false;
+
     @ColumnDefault("sysutcdatetime()")
     @Column(name = "createdAt", nullable = false)
     private Instant createdAt;
@@ -123,6 +128,14 @@ public class Clinic {
 
     public void setIsActive(Boolean isActive) {
         this.isActive = isActive;
+    }
+
+    public Boolean getDeactivatedByHoliday() {
+        return deactivatedByHoliday;
+    }
+
+    public void setDeactivatedByHoliday(Boolean deactivatedByHoliday) {
+        this.deactivatedByHoliday = deactivatedByHoliday;
     }
 
     public Instant getCreatedAt() {

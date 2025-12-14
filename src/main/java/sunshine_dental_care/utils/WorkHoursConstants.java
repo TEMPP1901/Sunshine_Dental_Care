@@ -10,6 +10,9 @@ public final class WorkHoursConstants {
         throw new UnsupportedOperationException("Utility class");
     }
 
+    // Múi giờ Việt Nam (Asia/Ho_Chi_Minh) - dùng thay cho ZoneId.systemDefault() để tránh lệch múi giờ
+    public static final ZoneId VN_TIMEZONE = ZoneId.of("Asia/Ho_Chi_Minh");
+
     // Giờ bắt đầu và kết thúc nghỉ trưa
     public static final LocalTime LUNCH_BREAK_START = LocalTime.of(11, 0);
     public static final LocalTime LUNCH_BREAK_END = LocalTime.of(13, 0);
@@ -63,17 +66,23 @@ public final class WorkHoursConstants {
         return SHIFT_TYPE_FULL_DAY;
     }
 
-    // Tính số phút trừ nghỉ trưa, chỉ trừ cho nhân viên checkin trước 11h và checkout sau 13h
+    // Tính số phút trừ nghỉ trưa, trừ cho nhân viên nếu khoảng thời gian làm việc bao gồm giờ nghỉ trưa (11:00-13:00)
     public static int calculateLunchBreakMinutes(LocalTime checkInTime, LocalTime checkOutTime, boolean isDoctor) {
         // Bác sĩ không trừ nghỉ trưa
         if (isDoctor) {
             return 0;
         }
-        // Nhân viên: check-in trước 11h và check-out sau 13h mới trừ
-        if (checkInTime != null && checkOutTime != null
-                && checkInTime.isBefore(LUNCH_BREAK_START)
-                && checkOutTime.isAfter(LUNCH_BREAK_END)) {
+        // Nhân viên: trừ nghỉ trưa nếu khoảng thời gian làm việc bao gồm giờ nghỉ trưa (11:00-13:00)
+        // Điều kiện: check-in <= 13:00 và check-out >= 11:00 (tức là làm việc qua giờ nghỉ trưa)
+        if (checkInTime != null && checkOutTime != null) {
+            // Kiểm tra xem khoảng thời gian làm việc có bao gồm giờ nghỉ trưa không
+            // checkInTime <= 13:00 (bắt đầu trước hoặc trong giờ nghỉ trưa)
+            // checkOutTime >= 11:00 (kết thúc sau hoặc trong giờ nghỉ trưa)
+            boolean includesLunchBreak = (checkInTime.isBefore(LUNCH_BREAK_END) || checkInTime.equals(LUNCH_BREAK_END))
+                    && (checkOutTime.isAfter(LUNCH_BREAK_START) || checkOutTime.equals(LUNCH_BREAK_START));
+            if (includesLunchBreak) {
             return LUNCH_BREAK_MINUTES;
+            }
         }
         return 0;
     }

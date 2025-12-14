@@ -44,7 +44,7 @@ public class AdminInventoryServiceImpl implements AdminInventoryService {
 
         // Tổng quan sản phẩm
         long totalProducts = productRepo.count();
-        long activeProducts = productRepo.findByIsActiveTrue().size();
+        long activeProducts = productRepo.countByIsActiveTrue();
         long inactiveProducts = totalProducts - activeProducts;
 
         stats.setTotalProducts(totalProducts);
@@ -145,8 +145,22 @@ public class AdminInventoryServiceImpl implements AdminInventoryService {
     // Đếm số bác sĩ đang hoạt động tại phòng khám
     private int countActiveDoctorsByClinic(Integer clinicId) {
         try {
-            List<User> doctors = userRepo.findDoctorsByClinicId(clinicId);
-            return doctors != null ? doctors.size() : 0;
+            // Tối ưu: Dùng query COUNT thay vì load toàn bộ danh sách
+            String jpql = """
+                SELECT COUNT(DISTINCT u.id)
+                FROM User u
+                JOIN u.userRoles ur
+                WHERE ur.role.id = 3
+                  AND u.isActive = true
+                  AND EXISTS (
+                      SELECT uca FROM UserClinicAssignment uca 
+                      WHERE uca.user.id = u.id AND uca.clinic.id = :clinicId
+                  )
+                """;
+            jakarta.persistence.TypedQuery<Long> query = entityManager.createQuery(jpql, Long.class);
+            query.setParameter("clinicId", clinicId);
+            Long count = query.getSingleResult();
+            return count != null ? count.intValue() : 0;
         } catch (Exception e) {
             log.warn("Error counting doctors for clinic {}: {}", clinicId, e.getMessage());
             return 0;

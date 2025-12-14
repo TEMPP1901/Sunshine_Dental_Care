@@ -29,7 +29,9 @@ public class FaceRecognitionServiceImpl implements FaceRecognitionService {
     @Value("${app.face-recognition.model-path:models/arcface.onnx}")
     private String modelPath;
 
-    @Value("${app.face-recognition.similarity-threshold:0.70}")
+    // Tăng threshold mặc định lên 0.85 để đảm bảo chỉ mặt đúng mới pass
+    // Threshold 0.70 quá thấp, có thể cho phép false positive
+    @Value("${app.face-recognition.similarity-threshold:0.85}")
     private double similarityThreshold;
 
     private final ObjectMapper objectMapper = new ObjectMapper();

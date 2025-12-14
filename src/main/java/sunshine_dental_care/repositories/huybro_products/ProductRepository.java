@@ -1,14 +1,15 @@
 package sunshine_dental_care.repositories.huybro_products;
 
-import org.springframework.data.domain.Page;
-import org.springframework.data.domain.Pageable;
-import org.springframework.data.jpa.repository.Query;
-import org.springframework.data.repository.query.Param;
-import org.springframework.data.jpa.repository.JpaRepository;
-import sunshine_dental_care.entities.huybro_products.Product;
-
 import java.math.BigDecimal;
 import java.util.List;
+
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
+
+import sunshine_dental_care.entities.huybro_products.Product;
 
 public interface ProductRepository extends JpaRepository<Product, Integer> {
 
@@ -53,4 +54,7 @@ public interface ProductRepository extends JpaRepository<Product, Integer> {
     @Query("SELECT COALESCE(MAX(p.id), 0) FROM Product p")
     Integer findMaxId();
     List<Product> findByIsActiveTrue();
+    
+    // Đếm số sản phẩm đang hoạt động
+    long countByIsActiveTrue();
 }

@@ -1,9 +1,6 @@
 package sunshine_dental_care.services.impl.admin;
 
-import java.util.Comparator;
-import java.util.List;
 import java.util.NoSuchElementException;
-import java.util.stream.Collectors;
 
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
@@ -27,23 +24,33 @@ public class AdminCustomerServiceImpl implements AdminCustomerService {
 
     @Override
     @Transactional(readOnly = true)
-    public List<AdminCustomerDto> getCustomers(String search) {
-        log.debug("Fetching admin customer list with search: {}", search);
+    public Page<AdminCustomerDto> getCustomers(String search, int page, int size) {
+        log.debug("Fetching admin customer list with search: {}, page: {}, size: {}", search, page, size);
 
-        // Lấy danh sách khách hàng, có tìm kiếm hoặc không
-        List<Patient> patients;
-        if (search != null && !search.trim().isEmpty()) {
-            Pageable pageable = PageRequest.of(0, 1000); // Lấy tối đa 1000 bản ghi nếu tìm kiếm
-            Page<Patient> patientPage = patientRepo.searchPatients(search.trim(), pageable);
-            patients = patientPage.getContent();
-        } else {
-            patients = patientRepo.findAll(); // Lấy toàn bộ khách hàng
+        // Validate pagination parameters
+        if (page < 0) {
+            throw new IllegalArgumentException("Page number cannot be negative");
+        }
+        if (size <= 0) {
+            throw new IllegalArgumentException("Page size must be greater than 0");
+        }
+        if (size > 100) {
+            throw new IllegalArgumentException("Page size cannot exceed 100");
         }
 
-        return patients.stream()
-                .map(this::mapToDto)
-                .sorted(Comparator.comparing(AdminCustomerDto::getFullName, String.CASE_INSENSITIVE_ORDER))
-                .collect(Collectors.toList());
+        Pageable pageable = PageRequest.of(page, size);
+        
+        // Lấy danh sách khách hàng có phân trang
+        Page<Patient> patientPage;
+        if (search != null && !search.trim().isEmpty()) {
+            patientPage = patientRepo.searchPatients(search.trim(), pageable);
+        } else {
+            // Nếu không có search, dùng findAll với pagination
+            patientPage = patientRepo.findAll(pageable);
+        }
+
+        // Map sang DTO và giữ nguyên pagination info
+        return patientPage.map(this::mapToDto);
     }
 
     @Override

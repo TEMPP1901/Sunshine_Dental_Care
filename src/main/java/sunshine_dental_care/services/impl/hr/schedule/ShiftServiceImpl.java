@@ -29,14 +29,17 @@ public class ShiftServiceImpl implements ShiftService {
         return WorkHoursConstants.determineShiftForDoctor(currentTime);
     }
 
-    // chỉ ca CHIỀU thì không thể check-in trước 13h
+    // chỉ ca CHIỀU thì không thể check-in trước 12:45 (cho phép check-in sớm hơn 13:00 một chút để tiện lợi)
     @Override
     public void validateCheckInTime(String shiftType, LocalTime currentTime) {
-        if (WorkHoursConstants.SHIFT_TYPE_AFTERNOON.equals(shiftType) 
-                && currentTime.isBefore(WorkHoursConstants.AFTERNOON_SHIFT_START)) {
+        if (WorkHoursConstants.SHIFT_TYPE_AFTERNOON.equals(shiftType)) {
+            // Cho phép check-in từ 12:45 trở đi (15 phút trước giờ bắt đầu ca chiều)
+            LocalTime earliestCheckInTime = WorkHoursConstants.AFTERNOON_SHIFT_START.minusMinutes(15);
+            if (currentTime.isBefore(earliestCheckInTime)) {
             throw new AttendanceValidationException(
                 String.format("Không thể check-in ca CHIỀU trước %s. Giờ hiện tại: %s", 
-                    WorkHoursConstants.AFTERNOON_SHIFT_START, currentTime));
+                        earliestCheckInTime, currentTime));
+            }
         }
     }
 

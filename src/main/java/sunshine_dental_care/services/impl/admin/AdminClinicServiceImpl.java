@@ -40,6 +40,8 @@ public class AdminClinicServiceImpl implements AdminClinicService {
         Clinic clinic = clinicRepo.findById(clinicId)
                 .orElseThrow(() -> new ClinicNotFoundException(clinicId));
         clinic.setIsActive(active);
+        // Admin thao tác: bỏ cờ holiday để không bị restore sai
+        clinic.setDeactivatedByHoliday(false);
         clinicRepo.save(clinic);
     }
 

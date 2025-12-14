@@ -36,9 +36,9 @@ public class ArcFaceOnnx {
     private OrtSession session;
     
     // Face detector flag (using feature-based detection)
-    // Tạm thời tắt edge detection vì có thể crop sai vùng
-    // Sử dụng smart center crop thay thế (hoạt động tốt hơn với ảnh từ mobile)
-    private boolean useFeatureDetection = false;
+    // BẮT BUỘC phải bật để đảm bảo chỉ tạo embedding khi detect được face
+    // Nếu tắt, hệ thống sẽ fallback về center crop và có thể tạo embedding từ ảnh không có face
+    private boolean useFeatureDetection = true;
 
     private static final int INPUT_WIDTH = 112;
     private static final int INPUT_HEIGHT = 112;
@@ -212,20 +212,28 @@ public class ArcFaceOnnx {
     // Detect và crop face từ ảnh sử dụng feature-based detection
     // Fallback về center crop nếu không detect được face
     private Mat detectAndCropFace(Mat img) {
+        // Bắt buộc phải detect được face - không cho phép fallback về center crop
+        // Vì center crop có thể tạo embedding từ ảnh không có face, dẫn đến check-in hộ
+        Mat faceCrop = null;
+        
         // Thử detect face bằng feature-based detection (edge detection)
         if (useFeatureDetection) {
             try {
-                Mat faceCrop = detectFaceWithCascade(img);
+                faceCrop = detectFaceWithCascade(img);
                 if (faceCrop != null && !faceCrop.empty()) {
+                    log.info("Face detected successfully using feature-based detection");
                     return faceCrop;
                 }
             } catch (Exception e) {
-                log.debug("Feature-based face detection failed: {}. Falling back to center crop.", e.getMessage());
+                log.warn("Feature-based face detection failed: {}", e.getMessage());
             }
         }
         
-        // Fallback: sử dụng center crop thông minh
-        return centerCropImage(img);
+        // Nếu không detect được face, throw exception thay vì fallback
+        // Điều này đảm bảo chỉ ảnh có face thật mới được xử lý
+        log.error("CRITICAL: No face detected in image! Cannot create embedding without valid face detection.");
+        throw new IllegalStateException(
+                "Không phát hiện được khuôn mặt trong ảnh. Vui lòng chụp lại ảnh với khuôn mặt rõ ràng, đảm bảo ánh sáng tốt và nhìn thẳng vào camera.");
     }
     
     // Detect face sử dụng OpenCV để tìm vùng có nhiều features (edge detection + feature detection)
@@ -245,10 +253,28 @@ public class ArcFaceOnnx {
             }
             
             try {
-                // Use Canny edge detection to find regions with many edges (likely face)
+                // Pre-process: Enhance contrast để tăng edge detection accuracy
+                Mat enhanced = new Mat();
+                opencv_imgproc.equalizeHist(gray, enhanced);
+                
+                // Use Canny edge detection với adaptive thresholds để detect tốt hơn
+                // Thử nhiều threshold levels để tìm edges trong các điều kiện ánh sáng khác nhau
                 Mat edges = new Mat();
                 try {
-                    opencv_imgproc.Canny(gray, edges, 50, 150);
+                    // Adaptive Canny: thử với thresholds thấp hơn để detect edges trong ảnh mờ/ánh sáng yếu
+                    // Threshold thấp hơn (30, 100) sẽ detect nhiều edges hơn, phù hợp với ảnh có ánh sáng mềm
+                    opencv_imgproc.Canny(enhanced, edges, 30, 100);
+                    
+                    // Nếu không tìm được đủ edges, thử với threshold thấp hơn nữa
+                    int edgeCount = opencv_core.countNonZero(edges);
+                    double totalPixels = imgWidth * imgHeight;
+                    double globalEdgeDensity = edgeCount / totalPixels;
+                    
+                    if (globalEdgeDensity < 0.02) {
+                        // Ảnh có ít edges, thử với threshold thấp hơn
+                        log.debug("Low global edge density ({}), trying lower Canny thresholds", String.format("%.4f", globalEdgeDensity));
+                        opencv_imgproc.Canny(enhanced, edges, 20, 80);
+                    }
                     
                     // Find region with most edges in upper-center part (where face usually is)
                     int searchWidth = Math.min(imgWidth, imgHeight);
@@ -269,8 +295,8 @@ public class ArcFaceOnnx {
                             Mat roi = new Mat(edges, window);
                             try {
                                 // Count non-zero pixels (edges)
-                                int edgeCount = opencv_core.countNonZero(roi);
-                                double density = (double) edgeCount / (windowSize * windowSize);
+                                int localEdgeCount = opencv_core.countNonZero(roi);
+                                double density = (double) localEdgeCount / (windowSize * windowSize);
                                 
                                 if (density > maxDensity) {
                                     maxDensity = density;
@@ -283,19 +309,42 @@ public class ArcFaceOnnx {
                         }
                     }
                     
+                    // Adaptive threshold: điều chỉnh dựa trên kích thước ảnh và global edge density
+                    // Với ảnh lớn hoặc ánh sáng mềm, edge density có thể thấp hơn nhưng vẫn là face
+                    double minEdgeDensity;
+                    if (imgWidth * imgHeight > 500000) {
+                        // Ảnh lớn (> 500k pixels): threshold thấp hơn (3%)
+                        minEdgeDensity = 0.03;
+                    } else if (globalEdgeDensity < 0.05) {
+                        // Ảnh có ít edges toàn cục: threshold thấp hơn (3%)
+                        minEdgeDensity = 0.03;
+                    } else {
+                        // Ảnh bình thường: threshold 5% (giảm từ 8% để cho phép nhiều trường hợp hơn)
+                        minEdgeDensity = 0.05;
+                    }
+                    
+                    log.debug("Edge detection: maxDensity={}, minThreshold={}, globalEdgeDensity={}", 
+                            String.format("%.4f", maxDensity), String.format("%.4f", minEdgeDensity), 
+                            String.format("%.4f", globalEdgeDensity));
+                    
                     // If we found a good region, crop it
-                    if (maxDensity > 0.05) { // At least 5% edge density
+                    if (maxDensity > minEdgeDensity) {
                         Rect faceRect = new Rect(bestX, bestY, windowSize, windowSize);
                         Mat faceCrop = new Mat(img, faceRect);
                         Mat result = faceCrop.clone();
                         faceCrop.close();
                         
-                        log.info("Face region detected using edge detection: density={:.2f}, crop={}x{} from position ({}, {})", 
-                                String.format("%.2f", maxDensity), windowSize, windowSize, bestX, bestY);
+                        log.info("Face region detected using edge detection: density={}, crop={}x{} from position ({}, {})", 
+                                String.format("%.4f", maxDensity), windowSize, windowSize, bestX, bestY);
                         return result;
+                    } else {
+                        log.warn("Edge density ({}) is below threshold ({}) - no face detected. Global edge density: {}", 
+                                String.format("%.4f", maxDensity), String.format("%.4f", minEdgeDensity),
+                                String.format("%.4f", globalEdgeDensity));
                     }
                 } finally {
                     edges.close();
+                    enhanced.close();
                 }
             } finally {
                 if (gray != img) {

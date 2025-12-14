@@ -31,6 +31,7 @@ import sunshine_dental_care.services.auth_service.MailService;
 import sunshine_dental_care.services.impl.hr.attend.AttendanceStatusCalculator;
 import sunshine_dental_care.services.impl.notification.NotificationService;
 import sunshine_dental_care.services.interfaces.hr.LeaveRequestService;
+import sunshine_dental_care.utils.WorkHoursConstants;
 
 @Service
 @RequiredArgsConstructor
@@ -580,6 +581,12 @@ public class LeaveRequestServiceImpl implements LeaveRequestService {
         Integer clinicId = leaveRequest.getClinic().getId();
         LocalDate startDate = leaveRequest.getStartDate();
         LocalDate endDate = leaveRequest.getEndDate();
+        String leaveShiftType = leaveRequest.getShiftType(); // MORNING, AFTERNOON, FULL_DAY, hoặc null
+
+        // Kiểm tra xem user có phải là bác sĩ không
+        List<UserRole> userRoles = userRoleRepo.findActiveByUserId(userId);
+        boolean isDoctor = userRoles != null && userRoles.stream()
+                .anyMatch(ur -> attendanceStatusCalculator.isDoctorRole(ur));
 
         LocalDate currentDate = startDate;
         int totalCreated = 0;
@@ -591,33 +598,120 @@ public class LeaveRequestServiceImpl implements LeaveRequestService {
                 continue;
             }
 
-            java.util.Optional<sunshine_dental_care.entities.Attendance> existingAttendance = attendanceRepository
-                    .findByUserIdAndClinicIdAndWorkDate(userId, clinicId, currentDate);
-
-            sunshine_dental_care.entities.Attendance attendance;
-            if (existingAttendance.isPresent()) {
-                attendance = existingAttendance.get();
-                if (attendance.getCheckInTime() == null) {
+            if (isDoctor) {
+                // BÁC SĨ: một ngày có thể có 2 bản ghi (MORNING và AFTERNOON)
+                if (leaveShiftType != null && !leaveShiftType.isEmpty() && !"FULL_DAY".equals(leaveShiftType)) {
+                    // Nghỉ một ca cụ thể (MORNING hoặc AFTERNOON) - tạo 1 bản ghi cho ca đó
+                    java.util.Optional<sunshine_dental_care.entities.Attendance> existingAttendance = 
+                            attendanceRepository.findByUserIdAndClinicIdAndWorkDateAndShiftType(
+                                    userId, clinicId, currentDate, leaveShiftType);
+                    
+                    sunshine_dental_care.entities.Attendance attendance;
+                    if (existingAttendance.isPresent()) {
+                        attendance = existingAttendance.get();
+                        if (attendance.getCheckInTime() == null) {
+                            attendance.setAttendanceStatus("APPROVED_ABSENCE");
+                            attendance.setShiftType(leaveShiftType); // Đảm bảo shiftType đúng
+                            attendanceRepository.save(attendance);
+                            totalCreated++;
+                        }
+                    } else {
+                        attendance = new sunshine_dental_care.entities.Attendance();
+                        attendance.setUserId(userId);
+                        attendance.setClinicId(clinicId);
+                        attendance.setWorkDate(currentDate);
+                        attendance.setShiftType(leaveShiftType);
+                        attendance.setAttendanceStatus("APPROVED_ABSENCE");
+                        attendance.setCreatedAt(Instant.now());
+                        attendance.setUpdatedAt(Instant.now());
+                        attendanceRepository.save(attendance);
+                        totalCreated++;
+                    }
+                } else {
+                    // Nghỉ cả ngày (FULL_DAY hoặc null): tạo attendance cho mỗi ca có schedule
+                    // Mỗi ca = 1 bản ghi riêng (có thể có 2 bản ghi: MORNING và AFTERNOON)
+                    List<DoctorSchedule> schedules = doctorScheduleRepo.findByDoctorIdAndWorkDate(userId, currentDate);
+                    if (schedules != null && !schedules.isEmpty()) {
+                        // Tạo attendance cho mỗi ca có schedule tại clinic này
+                        for (DoctorSchedule schedule : schedules) {
+                            if (schedule == null || schedule.getClinic() == null) continue;
+                            Integer scheduleClinicId = schedule.getClinic().getId();
+                            if (scheduleClinicId == null) continue;
+                            
+                            // Chỉ tạo cho clinic trong leave request
+                            if (!scheduleClinicId.equals(clinicId)) continue;
+                            
+                            LocalTime startTime = schedule.getStartTime();
+                            if (startTime == null) continue;
+                            
+                            String shiftType = WorkHoursConstants.determineShiftType(startTime);
+                            // Chỉ xử lý MORNING và AFTERNOON, bỏ qua FULL_DAY
+                            if ("FULL_DAY".equals(shiftType)) continue;
+                            
+                            // Tìm hoặc tạo attendance cho ca này (MORNING hoặc AFTERNOON)
+                            java.util.Optional<sunshine_dental_care.entities.Attendance> existingAttendance = 
+                                    attendanceRepository.findByUserIdAndClinicIdAndWorkDateAndShiftType(
+                                            userId, clinicId, currentDate, shiftType);
+                            
+                            sunshine_dental_care.entities.Attendance attendance;
+                            if (existingAttendance.isPresent()) {
+                                attendance = existingAttendance.get();
+                                if (attendance.getCheckInTime() == null) {
+                                    attendance.setAttendanceStatus("APPROVED_ABSENCE");
+                                    attendance.setShiftType(shiftType); // Đảm bảo shiftType đúng (MORNING hoặc AFTERNOON)
+                                    attendanceRepository.save(attendance);
+                                    totalCreated++;
+                                }
+                            } else {
+                                attendance = new sunshine_dental_care.entities.Attendance();
+                                attendance.setUserId(userId);
+                                attendance.setClinicId(clinicId);
+                                attendance.setWorkDate(currentDate);
+                                attendance.setShiftType(shiftType); // MORNING hoặc AFTERNOON
+                                attendance.setAttendanceStatus("APPROVED_ABSENCE");
+                                attendance.setCreatedAt(Instant.now());
+                                attendance.setUpdatedAt(Instant.now());
+                                attendanceRepository.save(attendance);
+                                totalCreated++;
+                            }
+                        }
+                    }
+                    // Nếu không có schedule, không tạo attendance record (bác sĩ không có lịch thì không cần attendance)
+                }
+            } else {
+                // Nhân viên thường: nghỉ cả ngày (FULL_DAY)
+                java.util.Optional<sunshine_dental_care.entities.Attendance> existingAttendance = 
+                        attendanceRepository.findByUserIdAndClinicIdAndWorkDate(userId, clinicId, currentDate);
+                
+                sunshine_dental_care.entities.Attendance attendance;
+                if (existingAttendance.isPresent()) {
+                    attendance = existingAttendance.get();
+                    if (attendance.getCheckInTime() == null) {
+                        attendance.setAttendanceStatus("APPROVED_ABSENCE");
+                        if (attendance.getShiftType() == null) {
+                            attendance.setShiftType("FULL_DAY");
+                        }
+                        attendanceRepository.save(attendance);
+                        totalCreated++;
+                    }
+                } else {
+                    attendance = new sunshine_dental_care.entities.Attendance();
+                    attendance.setUserId(userId);
+                    attendance.setClinicId(clinicId);
+                    attendance.setWorkDate(currentDate);
+                    attendance.setShiftType("FULL_DAY");
                     attendance.setAttendanceStatus("APPROVED_ABSENCE");
+                    attendance.setCreatedAt(Instant.now());
+                    attendance.setUpdatedAt(Instant.now());
                     attendanceRepository.save(attendance);
                     totalCreated++;
                 }
-            } else {
-                attendance = new sunshine_dental_care.entities.Attendance();
-                attendance.setUserId(userId);
-                attendance.setClinicId(clinicId);
-                attendance.setWorkDate(currentDate);
-                attendance.setAttendanceStatus("APPROVED_ABSENCE");
-                attendance.setCreatedAt(Instant.now());
-                attendance.setUpdatedAt(Instant.now());
-                attendanceRepository.save(attendance);
-                totalCreated++;
             }
             currentDate = currentDate.plusDays(1);
         }
 
-        log.info("Created/updated {} attendance records with APPROVED_ABSENCE for user {} from {} to {}",
-                totalCreated, userId, startDate, endDate);
+        log.info("Created/updated {} attendance records with APPROVED_ABSENCE for user {} from {} to {} (shiftType: {})",
+                totalCreated, userId, startDate, endDate, leaveShiftType != null ? leaveShiftType : "FULL_DAY");
     }
 
     // Chuyển Entity LeaveRequest sang DTO trả về
@@ -666,13 +760,13 @@ public class LeaveRequestServiceImpl implements LeaveRequestService {
         response.setCreatedAt(leaveRequest.getCreatedAt());
         response.setUpdatedAt(leaveRequest.getUpdatedAt());
 
-        // Tính số ngày nghỉ đã dùng trong tháng hiện tại
+        // Tính số ngày nghỉ trong tháng hiện tại từ bảng Attendance (không tính Chủ nhật)
         LocalDate now = LocalDate.now();
         int currentYear = now.getYear();
         int currentMonth = now.getMonthValue();
-        Integer usedDaysThisMonth = leaveRequestRepo.countApprovedLeaveDaysInMonth(
+        Long leaveDaysThisMonth = attendanceRepository.countLeaveDaysInMonthExcludingSunday(
                 leaveRequest.getUser().getId(), currentYear, currentMonth);
-        response.setLeaveBalance(usedDaysThisMonth != null ? usedDaysThisMonth : 0);
+        response.setLeaveBalance(leaveDaysThisMonth != null ? leaveDaysThisMonth.intValue() : 0);
 
         // Tìm người thay thế tiềm năng (bác sĩ khác cùng ca)
         findPotentialReplacements(leaveRequest, response);

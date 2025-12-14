@@ -23,8 +23,10 @@ public class AdminStaffController {
 
     // Lấy danh sách nhân viên (ADMIN)
     @GetMapping
-    public ResponseEntity<List<AdminStaffDto>> getStaff(
-            @RequestParam(value = "search", required = false) String search) {
-        return ResponseEntity.ok(adminStaffService.getStaff(search));
+    public ResponseEntity<org.springframework.data.domain.Page<AdminStaffDto>> getStaff(
+            @RequestParam(value = "search", required = false) String search,
+            @RequestParam(value = "page", defaultValue = "0") int page,
+            @RequestParam(value = "size", defaultValue = "10") int size) {
+        return ResponseEntity.ok(adminStaffService.getStaff(search, page, size));
     }
 }

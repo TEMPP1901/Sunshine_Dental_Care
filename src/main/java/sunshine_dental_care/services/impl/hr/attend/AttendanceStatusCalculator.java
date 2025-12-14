@@ -3,7 +3,6 @@ package sunshine_dental_care.services.impl.hr.attend;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalTime;
-import java.time.ZoneId;
 import java.util.List;
 import java.util.Optional;
 
@@ -60,21 +59,49 @@ public class AttendanceStatusCalculator {
     // Đánh giá trạng thái chấm công so với giờ làm chuẩn
     public String determineAttendanceStatus(Integer userId, Integer clinicId, LocalDate workDate, Instant checkInTime) {
         LocalTime expectedStartTime = WorkHoursConstants.EMPLOYEE_START_TIME;
-        LocalTime checkInLocalTime = checkInTime.atZone(ZoneId.systemDefault()).toLocalTime();
+        LocalTime checkInLocalTime = checkInTime.atZone(WorkHoursConstants.VN_TIMEZONE).toLocalTime();
 
         boolean hasApprovedLeave = leaveRequestRepo.hasApprovedLeaveOnDate(userId, workDate);
 
-        if (checkInLocalTime.isBefore(expectedStartTime) || checkInLocalTime.equals(expectedStartTime)) {
-            log.info("User {} checked in ON_TIME: {} (expected: {})", userId, checkInLocalTime, expectedStartTime);
-            return "ON_TIME";
-        } else {
+        // Tính số phút đi muộn
+        long minutesLate = 0;
+        if (checkInLocalTime.isAfter(expectedStartTime)) {
+            minutesLate = java.time.Duration.between(expectedStartTime, checkInLocalTime).toMinutes();
+        }
+
+        // Nếu check-in sau 2 giờ (120 phút) từ giờ bắt đầu → ABSENT (vắng)
+        if (minutesLate >= 120) {
             if (hasApprovedLeave) {
-                long minutesLate = java.time.Duration.between(expectedStartTime, checkInLocalTime).toMinutes();
+                log.info("User {} checked in APPROVED_ABSENCE: {} minutes late (>= 2 hours) (expected: {}, actual: {}) - has leave but absent",
+                        userId, minutesLate, expectedStartTime, checkInLocalTime);
+                return "APPROVED_ABSENCE";
+            } else {
+                log.info("User {} checked in ABSENT: {} minutes late (>= 2 hours) (expected: {}, actual: {})",
+                        userId, minutesLate, expectedStartTime, checkInLocalTime);
+                return "ABSENT";
+            }
+        }
+
+        // Nếu có đơn nghỉ phép đã duyệt nhưng vẫn chấm công (trong 2 giờ đầu)
+        if (hasApprovedLeave) {
+            if (checkInLocalTime.isBefore(expectedStartTime) || checkInLocalTime.equals(expectedStartTime)) {
+                // Có đơn nghỉ nhưng vẫn đi làm đúng giờ → APPROVED_PRESENT
+                log.info("User {} checked in APPROVED_PRESENT with approved leave: {} (expected: {}) - has leave but still working on time", 
+                        userId, checkInLocalTime, expectedStartTime);
+                return "APPROVED_PRESENT";
+            } else {
+                // Có đơn nghỉ và đi muộn (nhưng < 2 giờ) → APPROVED_LATE
                 log.info("User {} checked in APPROVED_LATE with approved leave: {} minutes late (expected: {}, actual: {})",
                         userId, minutesLate, expectedStartTime, checkInLocalTime);
                 return "APPROVED_LATE";
+            }
+        } else {
+            // Không có đơn nghỉ phép
+            if (checkInLocalTime.isBefore(expectedStartTime) || checkInLocalTime.equals(expectedStartTime)) {
+                log.info("User {} checked in ON_TIME: {} (expected: {})", userId, checkInLocalTime, expectedStartTime);
+                return "ON_TIME";
             } else {
-                long minutesLate = java.time.Duration.between(expectedStartTime, checkInLocalTime).toMinutes();
+                // Đi muộn nhưng < 2 giờ → LATE
                 log.info("User {} checked in LATE: {} minutes late (expected: {}, actual: {})",
                         userId, minutesLate, expectedStartTime, checkInLocalTime);
                 return "LATE";
@@ -97,10 +124,14 @@ public class AttendanceStatusCalculator {
                     holidayRecord.setUserId(userId);
                     holidayRecord.setClinicId(clinicId);
                     holidayRecord.setWorkDate(workDate);
+                    holidayRecord.setShiftType("FULL_DAY"); // Nhân viên: luôn FULL_DAY
                 }
                 if (holidayRecord.getAttendanceStatus() == null
                         || "ABSENT".equals(holidayRecord.getAttendanceStatus())) {
                     holidayRecord.setAttendanceStatus("HOLIDAY");
+                    if (holidayRecord.getShiftType() == null) {
+                        holidayRecord.setShiftType("FULL_DAY");
+                    }
                     attendanceRepository.save(holidayRecord);
                     log.info("Marked user {} as HOLIDAY at clinic {} on {}", userId, clinicId, workDate);
                 }
@@ -114,14 +145,25 @@ public class AttendanceStatusCalculator {
                 absentRecord.setUserId(userId);
                 absentRecord.setClinicId(clinicId);
                 absentRecord.setWorkDate(workDate);
+                absentRecord.setShiftType("FULL_DAY"); // Nhân viên: luôn FULL_DAY
             }
 
-            String status = hasApprovedLeave ? "APPROVED_ABSENCE" : "ABSENT";
-            absentRecord.setAttendanceStatus(status);
-            attendanceRepository.save(absentRecord);
+            // Chỉ set ABSENT nếu chưa có check-in time (tránh ghi đè status khi đã check-in)
+            if (absentRecord.getCheckInTime() == null) {
+                String status = hasApprovedLeave ? "APPROVED_ABSENCE" : "ABSENT";
+                absentRecord.setAttendanceStatus(status);
+                // Đảm bảo shiftType luôn được set (không được null để unique constraint hoạt động)
+                if (absentRecord.getShiftType() == null) {
+                    absentRecord.setShiftType("FULL_DAY");
+                }
+                attendanceRepository.save(absentRecord);
 
-            log.info("Marked user {} as {} at clinic {} on {} (no check-in found. Has approved leave: {})",
-                    userId, status, clinicId, workDate, hasApprovedLeave);
+                log.info("Marked user {} as {} at clinic {} on {} (no check-in found. Has approved leave: {})",
+                        userId, status, clinicId, workDate, hasApprovedLeave);
+            } else {
+                log.debug("Skipping ABSENT status for user {} on {} at clinic {} - already has check-in at {}", 
+                        userId, workDate, clinicId, absentRecord.getCheckInTime());
+            }
         } else {
             log.debug("User {} has check-in at clinic {} on {}, skipping ABSENT check", userId, clinicId, workDate);
         }
@@ -180,15 +222,27 @@ public class AttendanceStatusCalculator {
                             absentRecord.setWorkDate(workDate);
                             absentRecord.setShiftType(shiftType);
                         }
-                        absentRecord.setAttendanceStatus("ABSENT");
-                        try {
-                            attendanceRepository.save(absentRecord);
-                        } catch (org.springframework.dao.DataIntegrityViolationException e) {
-                            if (attendance.isPresent()) {
-                                absentRecord = attendance.get();
-                                absentRecord.setAttendanceStatus("ABSENT");
+                        // Chỉ set ABSENT nếu chưa có check-in time (tránh ghi đè status khi đã check-in)
+                        if (absentRecord.getCheckInTime() == null) {
+                            absentRecord.setAttendanceStatus("ABSENT");
+                            try {
                                 attendanceRepository.save(absentRecord);
+                            } catch (org.springframework.dao.DataIntegrityViolationException e) {
+                                if (attendance.isPresent()) {
+                                    absentRecord = attendance.get();
+                                    // Kiểm tra lại check-in time trước khi set ABSENT
+                                    if (absentRecord.getCheckInTime() == null) {
+                                        absentRecord.setAttendanceStatus("ABSENT");
+                                        attendanceRepository.save(absentRecord);
+                                    } else {
+                                        log.debug("Skipping ABSENT status for doctor {} on {} {} shift - already has check-in at {}", 
+                                                userId, workDate, shiftType, absentRecord.getCheckInTime());
+                                    }
+                                }
                             }
+                        } else {
+                            log.debug("Skipping ABSENT status for doctor {} on {} {} shift - already has check-in at {}", 
+                                    userId, workDate, shiftType, absentRecord.getCheckInTime());
                         }
 
                         if (schedule.getStatus() == null || !"INACTIVE".equals(schedule.getStatus())) {

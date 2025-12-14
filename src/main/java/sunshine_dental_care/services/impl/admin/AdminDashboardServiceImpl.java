@@ -19,7 +19,6 @@ import lombok.extern.slf4j.Slf4j;
 import sunshine_dental_care.dto.adminDTO.DailyRevenueDto;
 import sunshine_dental_care.dto.adminDTO.DashboardStatisticsDto;
 import sunshine_dental_care.dto.adminDTO.TopDoctorPerformanceDto;
-import sunshine_dental_care.entities.Clinic;
 import sunshine_dental_care.repositories.admin.AdminAppointmentStatsRepository;
 import sunshine_dental_care.repositories.admin.AdminInvoiceStatsRepository;
 import sunshine_dental_care.repositories.admin.AdminPatientStatsRepository;
@@ -28,11 +27,15 @@ import sunshine_dental_care.repositories.auth.UserRepo;
 import sunshine_dental_care.repositories.hr.LeaveRequestRepo;
 import sunshine_dental_care.services.interfaces.admin.AdminDashboardService;
 import sunshine_dental_care.services.interfaces.hr.AttendanceService;
+import sunshine_dental_care.utils.WorkHoursConstants;
 
 @Service
 @RequiredArgsConstructor
 @Slf4j
 public class AdminDashboardServiceImpl implements AdminDashboardService {
+
+        // Múi giờ Việt Nam - dùng constant từ WorkHoursConstants để đồng nhất
+        private static final ZoneId VN_TIMEZONE = WorkHoursConstants.VN_TIMEZONE;
 
         private final UserRepo userRepo;
         private final ClinicRepo clinicRepo;
@@ -41,6 +44,7 @@ public class AdminDashboardServiceImpl implements AdminDashboardService {
         private final AdminInvoiceStatsRepository adminInvoiceStatsRepository;
         private final AdminAppointmentStatsRepository adminAppointmentStatsRepository;
         private final AdminPatientStatsRepository adminPatientStatsRepository;
+        private final sunshine_dental_care.repositories.hr.AttendanceRepository attendanceRepo;
 
         @Override
         @Transactional(readOnly = true)
@@ -89,7 +93,8 @@ public class AdminDashboardServiceImpl implements AdminDashboardService {
                                 prevMonthRevenue = adminInvoiceStatsRepository.sumRevenueBetween(prevMonthStart, prevMonthEnd);
                                 
                                 totalExpenses = calculateExpenses(monthStart, today);
-                                expensesSupported = totalExpenses != null && totalExpenses.compareTo(BigDecimal.ZERO) >= 0;
+                                // Module chi phí chưa được implement, expensesSupported = false
+                                expensesSupported = false;
                                 netProfit = monthRevenue.subtract(totalExpenses);
 
                                 // Tính % tăng trưởng doanh thu so với tháng trước
@@ -106,7 +111,11 @@ public class AdminDashboardServiceImpl implements AdminDashboardService {
                                 // Danh sách doanh thu từng ngày trong 7 ngày gần nhất
                                 last7DaysRevenue = buildDailyRevenue(weekStart, today);
                         } catch (Exception e) {
-                                log.error("Lỗi khi tính doanh thu: {}", e.getMessage(), e);
+                                // Log đầy đủ với stack trace và throw lại để không giấu lỗi
+                                log.error("Lỗi nghiêm trọng khi tính doanh thu. Các giá trị doanh thu có thể không chính xác. " +
+                                        "Error: {}", e.getMessage(), e);
+                                // Không throw để tránh làm crash toàn bộ dashboard, nhưng log rõ ràng
+                                // Các giá trị sẽ giữ nguyên = 0 (đã khởi tạo ở trên)
                         }
 
                         // Thống kê lịch hẹn
@@ -132,7 +141,8 @@ public class AdminDashboardServiceImpl implements AdminDashboardService {
                                                                 AdminAppointmentStatsRepository.StatusCountView::getStatus,
                                                                 AdminAppointmentStatsRepository.StatusCountView::getTotal));
                         } catch (Exception e) {
-                                log.error("Lỗi khi đếm số lịch hẹn: {}", e.getMessage(), e);
+                                log.error("Lỗi nghiêm trọng khi đếm số lịch hẹn. Các giá trị appointments có thể không chính xác. " +
+                                        "Error: {}", e.getMessage(), e);
                         }
 
                         // Thống kê khách hàng
@@ -146,7 +156,8 @@ public class AdminDashboardServiceImpl implements AdminDashboardService {
                                 weekNewPatients = adminPatientStatsRepository.countCreatedBetween(weekRangeStart, weekEnd);
                                 monthNewPatients = adminPatientStatsRepository.countCreatedBetween(monthRangeStart, weekEnd);
                         } catch (Exception e) {
-                                log.error("Lỗi khi đếm bệnh nhân: {}", e.getMessage(), e);
+                                log.error("Lỗi nghiêm trọng khi đếm bệnh nhân. Các giá trị patients có thể không chính xác. " +
+                                        "Error: {}", e.getMessage(), e);
                         }
 
                         // Thống kê nhân viên, phòng khám
@@ -155,21 +166,20 @@ public class AdminDashboardServiceImpl implements AdminDashboardService {
                         Long activeClinics = 0L;
                         try {
                                 totalStaff = userRepo.count();
-                                List<Clinic> allClinics = clinicRepo.findAll();
-                                totalClinics = (long) allClinics.size();
-                                activeClinics = allClinics.stream()
-                                                .filter(c -> c.getIsActive() != null && c.getIsActive())
-                                                .count();
+                                totalClinics = clinicRepo.count();
+                                activeClinics = clinicRepo.countByIsActiveTrue();
                         } catch (Exception e) {
-                                log.error("Lỗi khi đếm nhân viên/phòng khám: {}", e.getMessage(), e);
+                                log.error("Lỗi nghiêm trọng khi đếm nhân viên/phòng khám. Các giá trị staff/clinics có thể không chính xác. " +
+                                        "Error: {}", e.getMessage(), e);
                         }
 
                         // Lấy số bản ghi chấm công hôm nay
                         Long todayAttendance = 0L;
                         try {
-                                todayAttendance = (long) attendanceService.getAttendanceForAdmin(today, null, null).size();
+                                todayAttendance = attendanceRepo.countByWorkDate(today);
                         } catch (Exception e) {
-                                log.warn("Lỗi khi lấy số chấm công hôm nay: {}", e.getMessage());
+                                log.error("Lỗi khi lấy số chấm công hôm nay. Giá trị attendance có thể không chính xác. " +
+                                        "Error: {}", e.getMessage(), e);
                         }
 
                         // Số đơn xin nghỉ phép đang chờ xử lý
@@ -177,7 +187,8 @@ public class AdminDashboardServiceImpl implements AdminDashboardService {
                         try {
                                 pendingLeaveRequests = leaveRequestRepo.countByStatus("PENDING");
                         } catch (Exception e) {
-                                log.warn("Lỗi khi lấy số đơn nghỉ phép: {}", e.getMessage());
+                                log.error("Lỗi khi lấy số đơn nghỉ phép. Giá trị pendingLeaveRequests có thể không chính xác. " +
+                                        "Error: {}", e.getMessage(), e);
                         }
 
                         // Tỷ lệ quay lại khám/thống kê nguồn khách của bệnh nhân trong tháng
@@ -186,15 +197,11 @@ public class AdminDashboardServiceImpl implements AdminDashboardService {
                         long patientsThisMonth = 0L;
                         Map<String, Long> sourceBreakdown = new HashMap<>();
                         try {
-                                List<Integer> patientsInRange = adminAppointmentStatsRepository
-                                                .findDistinctPatientIdsInRange(monthRangeStart, monthRangeEnd);
-                                List<Integer> patientsBefore = adminAppointmentStatsRepository
-                                                .findDistinctPatientIdsBefore(monthRangeStart);
-
-                                patientsThisMonth = patientsInRange.size();
-                                returningPatients = patientsInRange.stream()
-                                                .filter(patientsBefore::contains)
-                                                .count();
+                                // Tối ưu: Dùng COUNT queries thay vì load toàn bộ patient IDs vào memory
+                                patientsThisMonth = adminAppointmentStatsRepository
+                                                .countDistinctPatientsInRange(monthRangeStart, monthRangeEnd);
+                                returningPatients = adminAppointmentStatsRepository
+                                                .countReturningPatients(monthRangeStart, monthRangeEnd);
 
                                 retentionRate = patientsThisMonth > 0
                                                 ? (returningPatients * 100.0) / patientsThisMonth
@@ -207,7 +214,8 @@ public class AdminDashboardServiceImpl implements AdminDashboardService {
                                                                 view -> view.getChannel() != null ? view.getChannel() : "UNKNOWN",
                                                                 AdminAppointmentStatsRepository.ChannelCountView::getTotal));
                         } catch (Exception e) {
-                                log.warn("Lỗi khi tính tỷ lệ quay lại khám, phân bổ nguồn khách: {}", e.getMessage());
+                                log.error("Lỗi nghiêm trọng khi tính tỷ lệ quay lại khám, phân bổ nguồn khách. " +
+                                        "Các giá trị retentionRate có thể không chính xác. Error: {}", e.getMessage(), e);
                         }
 
                         // Top 5 bác sĩ có doanh thu cao nhất tháng này
@@ -226,7 +234,8 @@ public class AdminDashboardServiceImpl implements AdminDashboardService {
                                                 .limit(5)
                                                 .collect(Collectors.toList());
                         } catch (Exception e) {
-                                log.warn("Lỗi khi tính top bác sĩ: {}", e.getMessage());
+                                log.error("Lỗi khi tính top bác sĩ. Danh sách topDoctors có thể trống. " +
+                                        "Error: {}", e.getMessage(), e);
                         }
 
                         return DashboardStatisticsDto.builder()
@@ -330,14 +339,18 @@ public class AdminDashboardServiceImpl implements AdminDashboardService {
                 return result;
         }
 
-        // Chuyển LocalDate -> Instant ở mốc đầu ngày
+        // Chuyển LocalDate -> Instant ở mốc đầu ngày (theo múi giờ Việt Nam)
         private Instant toStartOfDay(LocalDate date) {
-                return date.atStartOfDay(ZoneId.systemDefault()).toInstant();
+                return date.atStartOfDay(VN_TIMEZONE).toInstant();
         }
 
-        // Hàm giả lập tổng chi phí (sẽ thay khi có số liệu thực tế)
-        @SuppressWarnings("unused")
+        // Hàm tính tổng chi phí (hiện tại chưa có module chi phí)
+        // TODO: Implement khi có module quản lý chi phí
         private BigDecimal calculateExpenses(LocalDate startDate, LocalDate endDate) {
+                // Log warning rõ ràng thay vì return 0 im lặng
+                log.warn("Module quản lý chi phí chưa được triển khai. Expenses sẽ trả về 0. " +
+                        "Cần implement calculateExpenses() với dữ liệu thực tế từ bảng Expenses. " +
+                        "Date range: {} to {}", startDate, endDate);
                 return BigDecimal.ZERO;
         }
 }

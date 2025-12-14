@@ -1,7 +1,5 @@
 package sunshine_dental_care.api.admin;
 
-import java.util.List;
-
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -27,9 +25,11 @@ public class AdminCustomerController {
 
    
     @GetMapping
-    public ResponseEntity<List<AdminCustomerDto>> getCustomers(
-            @RequestParam(value = "search", required = false) String search) {
-        return ResponseEntity.ok(adminCustomerService.getCustomers(search));
+    public ResponseEntity<org.springframework.data.domain.Page<AdminCustomerDto>> getCustomers(
+            @RequestParam(value = "search", required = false) String search,
+            @RequestParam(value = "page", defaultValue = "0") int page,
+            @RequestParam(value = "size", defaultValue = "10") int size) {
+        return ResponseEntity.ok(adminCustomerService.getCustomers(search, page, size));
     }
 
     @GetMapping("/{id}")

@@ -14,20 +14,35 @@ import org.springframework.transaction.annotation.Transactional;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-
 import sunshine_dental_care.dto.hrDTO.DoctorScheduleDto;
-import sunshine_dental_care.dto.receptionDTO.*;
+import sunshine_dental_care.dto.notificationDTO.NotificationRequest;
+import sunshine_dental_care.dto.receptionDTO.AppointmentRequest;
+import sunshine_dental_care.dto.receptionDTO.AppointmentResponse;
+import sunshine_dental_care.dto.receptionDTO.AppointmentUpdateRequest;
+import sunshine_dental_care.dto.receptionDTO.PatientRequest;
+import sunshine_dental_care.dto.receptionDTO.PatientResponse;
+import sunshine_dental_care.dto.receptionDTO.RescheduleRequest;
+import sunshine_dental_care.dto.receptionDTO.ServiceItemRequest;
 import sunshine_dental_care.dto.receptionDTO.mapper.AppointmentMapper;
-import sunshine_dental_care.entities.*;
+import sunshine_dental_care.dto.receptionDTO.mapper.DoctorScheduleMapper;
+import sunshine_dental_care.entities.Appointment;
+import sunshine_dental_care.entities.AppointmentService;
+import sunshine_dental_care.entities.Clinic;
+import sunshine_dental_care.entities.DoctorSchedule;
+import sunshine_dental_care.entities.Log;
+import sunshine_dental_care.entities.Patient;
+import sunshine_dental_care.entities.Role;
+import sunshine_dental_care.entities.Room;
+import sunshine_dental_care.entities.User;
+import sunshine_dental_care.entities.UserClinicAssignment;
+import sunshine_dental_care.entities.UserRole;
 import sunshine_dental_care.exceptions.reception.AccessDeniedException;
 import sunshine_dental_care.exceptions.reception.AppointmentConflictException;
 import sunshine_dental_care.exceptions.reception.ResourceNotFoundException;
-
-import sunshine_dental_care.dto.receptionDTO.mapper.DoctorScheduleMapper;
 import sunshine_dental_care.repositories.auth.ClinicRepo;
 import sunshine_dental_care.repositories.auth.PatientRepo;
-import sunshine_dental_care.repositories.auth.UserRepo;
 import sunshine_dental_care.repositories.auth.RoleRepo;
+import sunshine_dental_care.repositories.auth.UserRepo;
 import sunshine_dental_care.repositories.auth.UserRoleRepo;
 import sunshine_dental_care.repositories.hr.DoctorScheduleRepo;
 import sunshine_dental_care.repositories.hr.RoomRepo;
@@ -39,6 +54,7 @@ import sunshine_dental_care.repositories.system.LogRepo;
 import sunshine_dental_care.security.CurrentUser;
 import sunshine_dental_care.services.auth_service.MailService;
 import sunshine_dental_care.services.auth_service.PatientCodeService;
+import sunshine_dental_care.services.impl.notification.NotificationService;
 import sunshine_dental_care.services.interfaces.reception.ReceptionService;
 
 @Service
@@ -63,6 +79,7 @@ public class ReceptionServiceImpl implements ReceptionService {
     private final AppointmentMapper appointmentMapper;
     private final PasswordEncoder passwordEncoder;
     private final MailService mailService;
+    private final NotificationService notificationService;
 
 
     private Integer getReceptionistClinicId(CurrentUser currentUser) {
@@ -406,9 +423,12 @@ public class ReceptionServiceImpl implements ReceptionService {
         Appointment appointment = appointmentRepo.findById(appointmentId)
                 .orElseThrow(() -> new ResourceNotFoundException("Appointment not found"));
 
+        String oldStatus = appointment.getStatus();
+        String newStatus = request.getStatus();
+
         // Cập nhật trạng thái nếu có
-        if (request.getStatus() != null && !request.getStatus().isEmpty()) {
-            appointment.setStatus(request.getStatus());
+        if (newStatus != null && !newStatus.isEmpty()) {
+            appointment.setStatus(newStatus);
         }
 
         // Cập nhật ghi chú nếu có
@@ -416,9 +436,76 @@ public class ReceptionServiceImpl implements ReceptionService {
             appointment.setNote(request.getNote());
         }
 
-        // (Optional) Nếu muốn log lại lịch sử sửa
-        // logRepo.save(new Log(..., "UPDATE_INFO", ...));
+        Appointment savedAppointment = appointmentRepo.save(appointment);
 
-        return appointmentMapper.mapToAppointmentResponse(appointmentRepo.save(appointment));
+        // Gửi thông báo cho patient khi reception xác nhận hoặc hủy lịch
+        if (newStatus != null && !newStatus.equals(oldStatus)) {
+            if ("CONFIRMED".equalsIgnoreCase(newStatus) || "CANCELLED".equalsIgnoreCase(newStatus)) {
+                sendAppointmentStatusNotification(savedAppointment, newStatus);
+            }
+        }
+
+        return appointmentMapper.mapToAppointmentResponse(savedAppointment);
+    }
+
+    /**
+     * Gửi thông báo cho patient khi reception xác nhận hoặc hủy lịch hẹn
+     */
+    private void sendAppointmentStatusNotification(Appointment appointment, String status) {
+        try {
+            if (appointment.getPatient() == null || appointment.getPatient().getUser() == null) {
+                log.warn("Cannot send notification: appointment {} has no patient user", appointment.getId());
+                return;
+            }
+
+            Integer patientUserId = appointment.getPatient().getUser().getId();
+            String clinicName = appointment.getClinic() != null ? appointment.getClinic().getClinicName() : "Phòng khám";
+            
+            // Format thời gian
+            java.time.ZoneId zoneId = java.time.ZoneId.of("Asia/Ho_Chi_Minh");
+            java.time.LocalDateTime startDateTime = appointment.getStartDateTime().atZone(zoneId).toLocalDateTime();
+            String timeStr = startDateTime.format(java.time.format.DateTimeFormatter.ofPattern("HH:mm dd/MM/yyyy"));
+
+            String title;
+            String message;
+            String notificationType;
+            String priority = "MEDIUM";
+
+            if ("CONFIRMED".equalsIgnoreCase(status)) {
+                title = "Lịch hẹn đã được xác nhận";
+                message = String.format(
+                    "Lịch hẹn của bạn tại %s vào lúc %s đã được xác nhận. Vui lòng đến đúng giờ.",
+                    clinicName, timeStr);
+                notificationType = "APPOINTMENT_CONFIRMED";
+            } else if ("CANCELLED".equalsIgnoreCase(status)) {
+                title = "Lịch hẹn đã bị hủy";
+                message = String.format(
+                    "Lịch hẹn của bạn tại %s vào lúc %s đã bị hủy. Vui lòng liên hệ phòng khám để được hỗ trợ.",
+                    clinicName, timeStr);
+                notificationType = "APPOINTMENT_CANCELLED";
+                priority = "HIGH";
+            } else {
+                return; // Không gửi notification cho các status khác
+            }
+
+            NotificationRequest notiRequest = NotificationRequest.builder()
+                    .userId(patientUserId)
+                    .type(notificationType)
+                    .priority(priority)
+                    .title(title)
+                    .message(message)
+                    .actionUrl("/appointments")
+                    .relatedEntityType("APPOINTMENT")
+                    .relatedEntityId(appointment.getId())
+                    .build();
+
+            notificationService.sendNotification(notiRequest);
+            log.info("Sent {} notification to patient {} for appointment {}", 
+                    notificationType, patientUserId, appointment.getId());
+        } catch (Exception e) {
+            log.error("Failed to send appointment status notification for appointment {}: {}", 
+                    appointment.getId(), e.getMessage(), e);
+            // Không throw exception để không ảnh hưởng đến việc update appointment
+        }
     }
 }

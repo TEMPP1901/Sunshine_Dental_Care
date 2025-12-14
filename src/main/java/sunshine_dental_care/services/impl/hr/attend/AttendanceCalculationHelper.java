@@ -56,8 +56,8 @@ public class AttendanceCalculationHelper {
         if (checkInTime == null || checkOutTime == null) {
             return BigDecimal.ZERO;
         }
-        LocalTime checkInLocalTime = checkInTime.atZone(ZoneId.systemDefault()).toLocalTime();
-        LocalTime checkOutLocalTime = checkOutTime.atZone(ZoneId.systemDefault()).toLocalTime();
+        LocalTime checkInLocalTime = checkInTime.atZone(WorkHoursConstants.VN_TIMEZONE).toLocalTime();
+        LocalTime checkOutLocalTime = checkOutTime.atZone(WorkHoursConstants.VN_TIMEZONE).toLocalTime();
 
         // Số phút làm việc thực tế (sau khi trừ nghỉ trưa nếu cần)
         Duration totalDuration = Duration.between(checkInTime, checkOutTime);

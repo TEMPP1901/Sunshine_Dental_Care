@@ -51,23 +51,27 @@ public class AttendanceController {
             @AuthenticationPrincipal CurrentUser currentUser) {
 
         // Security: Đảm bảo userId trong request khớp với userId từ token
-        // Chỉ cho phép check-in cho chính mình
+        // CHỈ CHO PHÉP CHECK-IN CHO CHÍNH MÌNH - KHÔNG CHO PHÉP CHECK-IN HỘ
         if (currentUser == null) {
             throw new org.springframework.security.access.AccessDeniedException("User not authenticated");
         }
 
         Integer authenticatedUserId = currentUser.userId();
-        boolean isHR = currentUser.roles() != null && currentUser.roles().contains("HR");
 
-        // chỉ được check-in cho chính mình
-        if (!isHR && !authenticatedUserId.equals(request.getUserId())) {
-            log.warn("Security violation: User {} attempted to check-in for user {}",
+        // BẮT BUỘC: userId trong request PHẢI khớp với userId từ token
+        // Không cho phép bất kỳ ai (kể cả HR) check-in hộ người khác
+        // Đảm bảo chỉ có người A đăng nhập đúng tài khoản A mới được check-in
+        if (!authenticatedUserId.equals(request.getUserId())) {
+            log.error("SECURITY VIOLATION: User {} attempted to check-in for user {}. " +
+                    "This is not allowed - users can only check-in for themselves.",
                     authenticatedUserId, request.getUserId());
             throw new org.springframework.security.access.AccessDeniedException(
-                    "You can only check-in for yourself. User ID mismatch.");
+                    "Bảo mật: Bạn chỉ có thể chấm công cho chính mình. User ID không khớp với tài khoản đăng nhập.");
         }
 
-        log.info("Check-in request from authenticated user {} for user {} (clinicId: {})",
+        // Log để audit: đảm bảo chỉ có người A đăng nhập đúng tài khoản A mới được check-in
+        log.info("SECURITY: Check-in request validated. Authenticated user {} = Request userId {} (match confirmed). " +
+                "Face verification will ensure only correct face can check-in. (clinicId: {})",
                 authenticatedUserId,
                 request.getUserId(),
                 request.getClinicId() != null ? request.getClinicId() : "not provided, will be resolved");

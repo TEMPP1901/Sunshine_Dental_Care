@@ -104,18 +104,53 @@ public class AttendanceReportService {
                     continue;
                 }
                 String status = attendance.getAttendanceStatus();
+                boolean hasCheckIn = attendance.getCheckInTime() != null;
+                boolean hasLateMinutes = attendance.getLateMinutes() != null && attendance.getLateMinutes() > 0;
+                
                 if (status == null) {
-                    offday++;
-                } else if ("ON_TIME".equals(status)) {
-                    present++;
-                } else if ("LATE".equals(status)) {
-                    late++;
-                } else if ("ABSENT".equals(status)) {
-                    absent++;
-                } else if ("APPROVED_ABSENCE".equals(status)) {
-                    leave++;
+                    // Nếu status = null nhưng có check-in, tính là có mặt
+                    if (hasCheckIn) {
+                        present++;
+                        if (hasLateMinutes) {
+                            late++;
+                        }
+                    } else {
+                        offday++;
+                    }
                 } else {
-                    offday++;
+                    switch (status) {
+                        case "ON_TIME", "APPROVED_PRESENT" -> {
+                            present++;
+                            // Nếu có lateMinutes > 0 nhưng status là ON_TIME/APPROVED_PRESENT, vẫn tính là late
+                            if (hasLateMinutes) {
+                                late++;
+                            }
+                        }
+                        case "LATE", "APPROVED_LATE" -> {
+                            late++;
+                            present++;
+                        }
+                        case "ABSENT" -> absent++;
+                        case "APPROVED_ABSENCE" -> leave++;
+                        case "APPROVED_EARLY_LEAVE" -> {
+                            // Nghỉ sớm nhưng vẫn có mặt
+                            present++;
+                            if (hasLateMinutes) {
+                                late++;
+                            }
+                        }
+                        default -> {
+                            // Các trạng thái khác: nếu có check-in thì tính là có mặt
+                            if (hasCheckIn && !"ABSENT".equals(status) && !"APPROVED_ABSENCE".equals(status)) {
+                                present++;
+                                if (hasLateMinutes) {
+                                    late++;
+                                }
+                            } else {
+                                offday++;
+                            }
+                        }
+                    }
                 }
             }
 

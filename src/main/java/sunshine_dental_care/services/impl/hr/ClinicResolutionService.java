@@ -25,19 +25,34 @@ public class ClinicResolutionService {
 
     public Integer resolveClinicId(Integer userId, Integer providedClinicId) {
         if (providedClinicId != null) {
-            return providedClinicId; // đã có clinicId truyền vào
+            // Nếu truyền lên một clinic cụ thể, bắt buộc phải là clinic đang active
+            Clinic provided = clinicRepo.findById(providedClinicId)
+                    .orElseThrow(() -> new AttendanceValidationException("Clinic not found: " + providedClinicId));
+            if (!Boolean.TRUE.equals(provided.getIsActive())) {
+                throw new AttendanceValidationException(
+                        String.format("Clinic %d is inactive. Please choose another clinic.", providedClinicId));
+            }
+            return providedClinicId;
         }
 
         // lấy clinic từ UserClinicAssignment (ưu tiên assignment primary)
         List<UserClinicAssignment> assignments = userClinicAssignmentRepo.findByUserId(userId);
         if (assignments != null && !assignments.isEmpty()) {
             Optional<UserClinicAssignment> primaryAssignment = assignments.stream()
-                    .filter(a -> a != null && Boolean.TRUE.equals(a.getIsPrimary()))
+                    .filter(a -> a != null && Boolean.TRUE.equals(a.getIsPrimary())
+                            && a.getClinic() != null
+                            && Boolean.TRUE.equals(a.getClinic().getIsActive()))
                     .findFirst();
-            UserClinicAssignment selectedAssignment = primaryAssignment.orElse(assignments.get(0));
-            Clinic clinic = selectedAssignment.getClinic();
-            if (clinic != null && clinic.getId() != null) {
-                return clinic.getId();
+            // Nếu không có primary active, lấy assignment đầu tiên nhưng phải active
+            UserClinicAssignment selectedAssignment = primaryAssignment.orElseGet(() -> assignments.stream()
+                    .filter(a -> a != null && a.getClinic() != null && Boolean.TRUE.equals(a.getClinic().getIsActive()))
+                    .findFirst()
+                    .orElse(null));
+            if (selectedAssignment != null) {
+                Clinic clinic = selectedAssignment.getClinic();
+                if (clinic != null && clinic.getId() != null) {
+                    return clinic.getId();
+                }
             }
         }
 
@@ -48,7 +63,7 @@ public class ClinicResolutionService {
                 if (userRole == null) continue;
                 try {
                     Clinic clinic = userRole.getClinic();
-                    if (clinic != null && clinic.getId() != null) {
+                    if (clinic != null && clinic.getId() != null && Boolean.TRUE.equals(clinic.getIsActive())) {
                         return clinic.getId();
                     }
                 } catch (Exception e) {
@@ -71,13 +86,6 @@ public class ClinicResolutionService {
                             userId, activeClinic.get().getId());
                     return activeClinic.get().getId();
                 }
-                
-                // Nếu không có clinic active, lấy clinic đầu tiên
-                if (allClinics.get(0).getId() != null) {
-                    log.warn("User {} has no clinic assignment. Using fallback clinic {} (first available)", 
-                            userId, allClinics.get(0).getId());
-                    return allClinics.get(0).getId();
-                }
             }
         } catch (Exception e) {
             log.error("Failed to get clinics for fallback: {}", e.getMessage());
@@ -85,7 +93,7 @@ public class ClinicResolutionService {
 
         // Nếu vẫn không tìm thấy clinic, throw exception với message rõ ràng hơn
         throw new AttendanceValidationException(String.format(
-                "Cannot resolve clinicId for user %d. No clinic assignment, role with clinic, or clinics in system found. Please assign user to a clinic or ensure at least one clinic exists in the system.",
+                "Cannot resolve clinicId for user %d. No active clinic assignment or active clinics available. Please assign user to an active clinic or activate at least one clinic.",
                 userId));
     }
 }

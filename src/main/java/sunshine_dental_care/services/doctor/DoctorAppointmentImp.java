@@ -1,8 +1,14 @@
 package sunshine_dental_care.services.doctor;
 
+import java.time.Instant;
+import java.util.List;
+import java.util.stream.Collectors;
+
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
+
+import lombok.extern.slf4j.Slf4j;
 import sunshine_dental_care.dto.doctorDTO.ClinicDTO;
 import sunshine_dental_care.dto.doctorDTO.DoctorAppointmentDTO;
 import sunshine_dental_care.dto.doctorDTO.DoctorDTO;
@@ -10,19 +16,18 @@ import sunshine_dental_care.dto.doctorDTO.PatientDTO;
 import sunshine_dental_care.dto.doctorDTO.RoomDTO;
 import sunshine_dental_care.dto.doctorDTO.ServiceDTO;
 import sunshine_dental_care.dto.doctorDTO.ServiceVariantDTO;
+import sunshine_dental_care.dto.notificationDTO.NotificationRequest;
 import sunshine_dental_care.entities.Appointment;
 import sunshine_dental_care.entities.User;
+import sunshine_dental_care.repositories.auth.UserRepo;
 import sunshine_dental_care.repositories.doctor.DoctorAppointmentRepo;
 import sunshine_dental_care.repositories.doctor.DoctorRepo;
-import sunshine_dental_care.repositories.auth.UserRepo;
 import sunshine_dental_care.security.CurrentUser;
+import sunshine_dental_care.services.impl.notification.NotificationService;
 import sunshine_dental_care.services.interfaces.system.AuditLogService;
 
-import java.time.Instant;
-import java.util.List;
-import java.util.stream.Collectors;
-
 @Service
+@Slf4j
 public class DoctorAppointmentImp implements DoctorAppointmentService{
 
 
@@ -30,15 +35,18 @@ public class DoctorAppointmentImp implements DoctorAppointmentService{
     private DoctorAppointmentRepo _doctorAppointmentRepo;
     private UserRepo _userRepo;
     private AuditLogService _auditLogService;
+    private NotificationService _notificationService;
 
     public DoctorAppointmentImp(DoctorRepo doctorRepo,
                                 DoctorAppointmentRepo doctorAppointmentRepo,
                                 UserRepo userRepo,
-                                AuditLogService auditLogService) {
+                                AuditLogService auditLogService,
+                                NotificationService notificationService) {
         _doctorRepo = doctorRepo;
         _doctorAppointmentRepo = doctorAppointmentRepo;
         _userRepo = userRepo;
         _auditLogService = auditLogService;
+        _notificationService = notificationService;
     }
 
     // Hàm chuyển đổi từ entity Appointment sang DTO DoctorAppointmentDTO
@@ -184,13 +192,96 @@ public class DoctorAppointmentImp implements DoctorAppointmentService{
     public void changeStatusAppointment(Integer appointmentId, String status) {
         Appointment appt = _doctorAppointmentRepo.findById(appointmentId)
             .orElseThrow(() -> new IllegalArgumentException("Appointment not found"));
+        String oldStatus = appt.getStatus();
         _doctorAppointmentRepo.updateStatus(appointmentId, status); // Cập nhật trạng thái lịch hẹn
+
+        // Lấy lại appointment sau khi update để có thông tin mới nhất
+        Appointment updatedAppt = _doctorAppointmentRepo.findById(appointmentId)
+            .orElseThrow(() -> new IllegalArgumentException("Appointment not found after update"));
 
         // Audit log: bác sĩ đổi trạng thái lịch hẹn
         User actor = resolveCurrentUser();
         if (actor != null) {
             _auditLogService.logAction(actor, "DOCTOR_UPDATE_STATUS", "APPOINTMENT", appointmentId, null,
                     "Status -> " + status);
+        }
+
+        // Gửi thông báo cho patient khi bác sĩ cập nhật trạng thái
+        if (!status.equals(oldStatus)) {
+            sendAppointmentStatusUpdateNotification(updatedAppt, status, oldStatus);
+        }
+    }
+
+    /**
+     * Gửi thông báo cho patient khi bác sĩ cập nhật trạng thái appointment
+     */
+    private void sendAppointmentStatusUpdateNotification(Appointment appointment, String newStatus, String oldStatus) {
+        try {
+            if (appointment.getPatient() == null || appointment.getPatient().getUser() == null) {
+                log.warn("Cannot send notification: appointment {} has no patient user", appointment.getId());
+                return;
+            }
+
+            Integer patientUserId = appointment.getPatient().getUser().getId();
+            String clinicName = appointment.getClinic() != null ? appointment.getClinic().getClinicName() : "Phòng khám";
+            String doctorName = appointment.getDoctor() != null ? appointment.getDoctor().getFullName() : "Bác sĩ";
+            
+            // Format thời gian
+            java.time.ZoneId zoneId = java.time.ZoneId.of("Asia/Ho_Chi_Minh");
+            java.time.LocalDateTime startDateTime = appointment.getStartDateTime().atZone(zoneId).toLocalDateTime();
+            String timeStr = startDateTime.format(java.time.format.DateTimeFormatter.ofPattern("HH:mm dd/MM/yyyy"));
+
+            String title;
+            String message;
+            String notificationType;
+            String priority = "MEDIUM";
+
+            if ("COMPLETED".equalsIgnoreCase(newStatus)) {
+                title = "Lịch hẹn đã hoàn thành";
+                message = String.format(
+                    "Bác sĩ %s đã hoàn thành lịch khám của bạn tại %s vào lúc %s. Bạn có thể xem bệnh án trong hồ sơ.",
+                    doctorName, clinicName, timeStr);
+                notificationType = "APPOINTMENT_COMPLETED";
+            } else if ("IN_PROGRESS".equalsIgnoreCase(newStatus)) {
+                title = "Đang khám";
+                message = String.format(
+                    "Bác sĩ %s đang thực hiện khám cho bạn tại %s.",
+                    doctorName, clinicName);
+                notificationType = "APPOINTMENT_IN_PROGRESS";
+            } else if ("CANCELLED".equalsIgnoreCase(newStatus)) {
+                title = "Lịch hẹn đã bị hủy";
+                message = String.format(
+                    "Bác sĩ %s đã hủy lịch hẹn của bạn tại %s vào lúc %s. Vui lòng liên hệ phòng khám để được hỗ trợ.",
+                    doctorName, clinicName, timeStr);
+                notificationType = "APPOINTMENT_CANCELLED";
+                priority = "HIGH";
+            } else {
+                // Các status khác
+                title = "Cập nhật lịch hẹn";
+                message = String.format(
+                    "Bác sĩ %s đã cập nhật trạng thái lịch hẹn của bạn tại %s.",
+                    doctorName, clinicName);
+                notificationType = "APPOINTMENT_STATUS_UPDATED";
+            }
+
+            NotificationRequest notiRequest = NotificationRequest.builder()
+                    .userId(patientUserId)
+                    .type(notificationType)
+                    .priority(priority)
+                    .title(title)
+                    .message(message)
+                    .actionUrl("/appointments")
+                    .relatedEntityType("APPOINTMENT")
+                    .relatedEntityId(appointment.getId())
+                    .build();
+
+            _notificationService.sendNotification(notiRequest);
+            log.info("Sent {} notification to patient {} for appointment {} status update from {} to {}", 
+                    notificationType, patientUserId, appointment.getId(), oldStatus, newStatus);
+        } catch (Exception e) {
+            log.error("Failed to send appointment status update notification for appointment {}: {}", 
+                    appointment.getId(), e.getMessage(), e);
+            // Không throw exception để không ảnh hưởng đến việc update appointment
         }
     }
 

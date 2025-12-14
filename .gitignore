@@ -48,6 +48,7 @@ Thumbs.db
 # =====================================
 # Chặn file môi trường chứa mật khẩu
 .env
+Sunshine_Dental_Care/src/main/resources/application.properties
 
 # Chặn file cấu hình Firebase chứa Key
 firebase-service-account.json

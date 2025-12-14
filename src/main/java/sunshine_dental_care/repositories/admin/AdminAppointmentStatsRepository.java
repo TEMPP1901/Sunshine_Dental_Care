@@ -84,6 +84,38 @@ public interface AdminAppointmentStatsRepository extends Repository<Appointment,
             @Param("before") Instant before
     );
 
+    // Tính tỷ lệ quay lại khám: đếm số bệnh nhân có lịch trong khoảng thời gian và cũng có lịch trước đó
+    @Query("""
+            SELECT COUNT(DISTINCT a1.patient.id)
+            FROM Appointment a1
+            WHERE a1.patient.id IS NOT NULL
+              AND a1.startDateTime >= :start AND a1.startDateTime < :end
+              AND (a1.status IS NULL OR a1.status NOT IN ('CANCELLED', 'NO_SHOW'))
+              AND EXISTS (
+                  SELECT 1 FROM Appointment a2
+                  WHERE a2.patient.id = a1.patient.id
+                    AND a2.startDateTime < :start
+                    AND (a2.status IS NULL OR a2.status NOT IN ('CANCELLED', 'NO_SHOW'))
+              )
+            """)
+    long countReturningPatients(
+            @Param("start") Instant start,
+            @Param("end") Instant end
+    );
+    
+    // Đếm số bệnh nhân duy nhất có lịch trong khoảng thời gian
+    @Query("""
+            SELECT COUNT(DISTINCT a.patient.id)
+            FROM Appointment a
+            WHERE a.patient.id IS NOT NULL
+              AND a.startDateTime >= :start AND a.startDateTime < :end
+              AND (a.status IS NULL OR a.status NOT IN ('CANCELLED', 'NO_SHOW'))
+            """)
+    long countDistinctPatientsInRange(
+            @Param("start") Instant start,
+            @Param("end") Instant end
+    );
+
     // Interface trả về cho truy vấn đếm theo trạng thái
     interface StatusCountView {
         String getStatus();

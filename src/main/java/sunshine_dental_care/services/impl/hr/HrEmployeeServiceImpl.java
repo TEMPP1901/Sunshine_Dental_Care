@@ -414,7 +414,17 @@ public class HrEmployeeServiceImpl implements HrEmployeeService {
         user.setIsActive(isActive);
         user = userRepo.save(user);
 
-        List<UserRole> userRoles = userRoleRepo.findActiveByUserId(id);
+        // Khi unlock (isActive = true), cần lấy TẤT CẢ UserRole (kể cả inactive) để set lại active
+        // Vì khi lock, tất cả UserRole đã bị set inactive, nên findActiveByUserId sẽ không trả về chúng
+        List<UserRole> userRoles;
+        if (Boolean.TRUE.equals(isActive)) {
+            // Unlock: Lấy tất cả UserRole để set lại active
+            userRoles = userRoleRepo.findByUserId(id);
+        } else {
+            // Lock: Chỉ cần lấy các UserRole đang active để set inactive
+            userRoles = userRoleRepo.findActiveByUserId(id);
+        }
+        
         for (UserRole userRole : userRoles) {
             userRole.setIsActive(isActive);
         }

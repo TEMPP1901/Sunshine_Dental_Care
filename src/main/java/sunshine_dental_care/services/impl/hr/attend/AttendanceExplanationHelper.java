@@ -4,7 +4,6 @@ import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalTime;
-import java.time.ZoneId;
 import java.util.List;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -21,6 +20,7 @@ import sunshine_dental_care.dto.hrDTO.AttendanceExplanationResponse;
 import sunshine_dental_care.dto.notificationDTO.NotificationRequest;
 import sunshine_dental_care.entities.Attendance;
 import sunshine_dental_care.entities.Clinic;
+import sunshine_dental_care.entities.DoctorSchedule;
 import sunshine_dental_care.entities.User;
 import sunshine_dental_care.exceptions.hr.AttendanceExceptions.AttendanceNotFoundException;
 import sunshine_dental_care.exceptions.hr.AttendanceExceptions.AttendanceValidationException;
@@ -28,7 +28,9 @@ import sunshine_dental_care.repositories.auth.ClinicRepo;
 import sunshine_dental_care.repositories.auth.UserRepo;
 import sunshine_dental_care.repositories.auth.UserRoleRepo;
 import sunshine_dental_care.repositories.hr.AttendanceRepository;
+import sunshine_dental_care.repositories.hr.DoctorScheduleRepo;
 import sunshine_dental_care.services.impl.notification.NotificationService;
+import sunshine_dental_care.services.interfaces.hr.ShiftService;
 import sunshine_dental_care.utils.WorkHoursConstants;
 
 @Component
@@ -41,17 +43,101 @@ public class AttendanceExplanationHelper {
     private final ClinicRepo clinicRepo;
     private final NotificationService notificationService;
     private final UserRoleRepo userRoleRepo;
+    private final ShiftService shiftService;
+    private final AttendanceCalculationHelper calculationHelper;
+    private final DoctorScheduleRepo doctorScheduleRepo;
+    private final sunshine_dental_care.services.impl.hr.attend.AttendanceStatusCalculator attendanceStatusCalculator;
 
-    // Lấy danh sách các attendance cần giải trình cho user (trong 30 ngày)
+    // Lấy danh sách các attendance cần giải trình cho user (chỉ tháng hiện tại)
+    // Bao gồm cả từ attendance records và từ schedules
     public List<AttendanceExplanationResponse> getAttendanceNeedingExplanation(Integer userId) {
         LocalDate endDate = LocalDate.now();
-        LocalDate startDate = endDate.minusDays(30);
+        // Chỉ lấy từ đầu tháng hiện tại
+        LocalDate startDate = endDate.withDayOfMonth(1);
+        
+        // 1. Lấy explanations từ attendance records đã có
         List<Attendance> attendances = attendanceRepo.findByUserIdAndWorkDateBetweenOrderByWorkDateDesc(
                 userId, startDate, endDate);
-
-        return attendances.stream()
+        List<AttendanceExplanationResponse> fromAttendances = attendances.stream()
                 .filter(this::needsExplanation)
                 .map(this::mapToExplanationResponse)
+                .collect(Collectors.toList());
+        
+        // 2. Lấy explanations từ schedules (chỉ cho bác sĩ có schedule nhưng chưa check-in)
+        // Kiểm tra xem user có phải là bác sĩ không
+        boolean isDoctor = false;
+        try {
+            List<sunshine_dental_care.entities.UserRole> userRoles = userRoleRepo.findActiveByUserId(userId);
+            if (userRoles != null && !userRoles.isEmpty()) {
+                isDoctor = userRoles.stream()
+                        .anyMatch(ur -> attendanceStatusCalculator.isDoctorRole(ur));
+            }
+        } catch (Exception e) {
+            log.warn("Error checking if user {} is doctor: {}", userId, e.getMessage());
+        }
+        
+        List<AttendanceExplanationResponse> fromSchedules = new java.util.ArrayList<>();
+        if (isDoctor) {
+            // Chỉ lấy từ schedules nếu là bác sĩ
+            List<DoctorSchedule> schedules = doctorScheduleRepo.findByDoctorIdAndDateRange(userId, startDate, endDate);
+            fromSchedules = schedules.stream()
+                .filter(schedule -> {
+                    // Chỉ lấy schedule ACTIVE
+                    if (schedule.getStatus() == null || !"ACTIVE".equals(schedule.getStatus())) {
+                        return false;
+                    }
+                    // Kiểm tra xem đã có attendance record chưa
+                    String shiftType = WorkHoursConstants.determineShiftType(schedule.getStartTime());
+                    java.util.Optional<Attendance> existing = attendanceRepo.findByUserIdAndClinicIdAndWorkDateAndShiftType(
+                            userId, schedule.getClinic().getId(), schedule.getWorkDate(), shiftType);
+                    // Chỉ lấy nếu chưa có attendance record
+                    return existing.isEmpty();
+                })
+                .filter(schedule -> {
+                    // Kiểm tra xem đã qua giờ bắt đầu ca chưa
+                    LocalDate workDate = schedule.getWorkDate();
+                    LocalDate today = LocalDate.now();
+                    LocalTime currentTime = LocalTime.now(WorkHoursConstants.VN_TIMEZONE);
+                    LocalTime startTime = schedule.getStartTime();
+                    
+                    // Nếu là ngày hôm nay và chưa đến giờ bắt đầu ca → không hiển thị
+                    if (workDate.equals(today) && currentTime.isBefore(startTime)) {
+                        return false;
+                    }
+                    // Nếu là ngày trong quá khứ → hiển thị
+                    if (workDate.isBefore(today)) {
+                        return true;
+                    }
+                    // Nếu là ngày hôm nay và đã qua giờ bắt đầu ca → hiển thị
+                    return workDate.equals(today) && !currentTime.isBefore(startTime);
+                })
+                .map(this::mapScheduleToExplanationResponse)
+                .collect(Collectors.toList());
+        }
+        // Nhân viên không có schedule, chỉ lấy từ attendance records
+        
+        // 3. Merge và loại bỏ trùng lặp (theo workDate + shiftType)
+        java.util.Map<String, AttendanceExplanationResponse> merged = new java.util.HashMap<>();
+        fromAttendances.forEach(exp -> {
+            String key = exp.getWorkDate() + "_" + exp.getShiftType();
+            merged.put(key, exp);
+        });
+        fromSchedules.forEach(exp -> {
+            String key = exp.getWorkDate() + "_" + exp.getShiftType();
+            // Chỉ thêm nếu chưa có trong attendance records
+            if (!merged.containsKey(key)) {
+                merged.put(key, exp);
+            }
+        });
+        
+        // 4. Sắp xếp theo ngày giảm dần
+        return merged.values().stream()
+                .sorted((a, b) -> {
+                    if (a.getWorkDate() == null && b.getWorkDate() == null) return 0;
+                    if (a.getWorkDate() == null) return 1;
+                    if (b.getWorkDate() == null) return -1;
+                    return b.getWorkDate().compareTo(a.getWorkDate());
+                })
                 .collect(Collectors.toList());
     }
 
@@ -84,6 +170,13 @@ public class AttendanceExplanationHelper {
         } else {
             attendance = attendanceRepo.findById(request.getAttendanceId())
                     .orElseThrow(() -> new AttendanceNotFoundException(request.getAttendanceId()));
+        }
+
+        // Validation: Không cho phép gửi giải trình MISSING_CHECK_OUT nếu đã có checkOutTime
+        if ("MISSING_CHECK_OUT".equalsIgnoreCase(request.getExplanationType()) 
+                && attendance.getCheckOutTime() != null) {
+            throw new AttendanceValidationException(
+                    "Cannot submit MISSING_CHECK_OUT explanation: check-out time already exists");
         }
 
         String note = String.format("[EXPLANATION_REQUEST:%s] %s",
@@ -238,9 +331,27 @@ public class AttendanceExplanationHelper {
         if ("MISSING_CHECK_OUT".equalsIgnoreCase(explanationType) && attendance.getCheckInTime() != null) {
             if (attendance.getCheckOutTime() == null) {
                 LocalDate workDate = attendance.getWorkDate();
-                LocalTime checkOutLocalTime = (customTime != null) ? customTime : WorkHoursConstants.EMPLOYEE_END_TIME;
+                LocalTime checkOutLocalTime;
+                if (customTime != null) {
+                    checkOutLocalTime = customTime;
+                } else {
+                    // Lấy expectedEndTime theo ca của bác sĩ (MORNING: 11:00, AFTERNOON: 18:00)
+                    String shiftType = attendance.getShiftType();
+                    boolean isDoctor = shiftType != null &&
+                            (WorkHoursConstants.SHIFT_TYPE_MORNING.equals(shiftType) ||
+                             WorkHoursConstants.SHIFT_TYPE_AFTERNOON.equals(shiftType));
+                    if (isDoctor && shiftType != null) {
+                        java.util.Optional<sunshine_dental_care.entities.DoctorSchedule> matchedSchedule = shiftService.findMatchingSchedule(
+                                attendance.getUserId(), attendance.getClinicId(), attendance.getWorkDate(), shiftType);
+                        sunshine_dental_care.entities.DoctorSchedule schedule = matchedSchedule.orElse(null);
+                        checkOutLocalTime = shiftService.getExpectedEndTime(shiftType, schedule);
+                    } else {
+                        // Nhân viên: dùng giờ kết thúc mặc định
+                        checkOutLocalTime = WorkHoursConstants.EMPLOYEE_END_TIME;
+                    }
+                }
                 Instant checkOutTime = workDate.atTime(checkOutLocalTime)
-                        .atZone(ZoneId.systemDefault())
+                        .atZone(WorkHoursConstants.VN_TIMEZONE)
                         .toInstant();
                 attendance.setCheckOutTime(checkOutTime);
             }
@@ -258,9 +369,16 @@ public class AttendanceExplanationHelper {
                 }
             }
         }
-        // Nếu đủ CI-CO nhưng chưa tính lại công thì thực hiện tính lại công
-        if (!hasRecalculated && attendance.getCheckInTime() != null && attendance.getCheckOutTime() != null) {
+        // Nếu đủ CI/CO nhưng chưa tính lại công thì thực hiện tính lại công
+        // Không tính lại nếu status là APPROVED_ABSENCE hoặc ABSENT
+        String finalStatus = attendance.getAttendanceStatus();
+        if (!hasRecalculated && attendance.getCheckInTime() != null && attendance.getCheckOutTime() != null
+                && !"ABSENT".equals(finalStatus) && !"APPROVED_ABSENCE".equals(finalStatus)) {
             recalculateWorkHours(attendance, attendance.getCheckOutTime());
+        } else if ("ABSENT".equals(finalStatus) || "APPROVED_ABSENCE".equals(finalStatus)) {
+            // Đảm bảo actualWorkHours = 0 cho ABSENT/APPROVED_ABSENCE
+            attendance.setActualWorkHours(java.math.BigDecimal.ZERO);
+            log.info("Setting actualWorkHours to 0 for status {} after explanation approval", finalStatus);
         }
 
         // Gửi notification duyệt giải trình cho nhân viên
@@ -290,11 +408,20 @@ public class AttendanceExplanationHelper {
         if (attendance.getCheckInTime() == null || attendance.getCheckOutTime() == null) {
             return;
         }
+        
+        // Không tính giờ làm nếu status là ABSENT hoặc APPROVED_ABSENCE
+        String currentStatus = attendance.getAttendanceStatus();
+        if ("ABSENT".equals(currentStatus) || "APPROVED_ABSENCE".equals(currentStatus)) {
+            attendance.setActualWorkHours(java.math.BigDecimal.ZERO);
+            log.info("Skipping work hours calculation for status {} - setting actualWorkHours to 0", currentStatus);
+            return;
+        }
+        
         LocalTime checkInLocalTime = attendance.getCheckInTime()
-                .atZone(ZoneId.systemDefault())
+                .atZone(WorkHoursConstants.VN_TIMEZONE)
                 .toLocalTime();
         LocalTime checkOutLocalTime = attendance.getCheckOutTime()
-                .atZone(ZoneId.systemDefault())
+                .atZone(WorkHoursConstants.VN_TIMEZONE)
                 .toLocalTime();
 
         long totalMinutes = java.time.Duration.between(attendance.getCheckInTime(), attendance.getCheckOutTime())
@@ -323,7 +450,9 @@ public class AttendanceExplanationHelper {
                 .divide(BigDecimal.valueOf(60), 2, java.math.RoundingMode.HALF_UP);
         attendance.setActualWorkHours(actualHours);
 
-        attendance.setExpectedWorkHours(BigDecimal.valueOf(WorkHoursConstants.EMPLOYEE_EXPECTED_HOURS));
+        // Tính expectedWorkHours dựa trên shiftType (bác sĩ làm theo ca)
+        BigDecimal expectedWorkHours = calculateExpectedWorkHours(attendance);
+        attendance.setExpectedWorkHours(expectedWorkHours);
     }
 
     // Tính lại giờ công (không cộng bù phút)
@@ -331,11 +460,20 @@ public class AttendanceExplanationHelper {
         if (attendance.getCheckInTime() == null || checkOutTime == null) {
             return;
         }
+        
+        // Không tính giờ làm nếu status là ABSENT hoặc APPROVED_ABSENCE
+        String currentStatus = attendance.getAttendanceStatus();
+        if ("ABSENT".equals(currentStatus) || "APPROVED_ABSENCE".equals(currentStatus)) {
+            attendance.setActualWorkHours(java.math.BigDecimal.ZERO);
+            log.info("Skipping work hours calculation for status {} - setting actualWorkHours to 0", currentStatus);
+            return;
+        }
+        
         LocalTime checkInLocalTime = attendance.getCheckInTime()
-                .atZone(ZoneId.systemDefault())
+                .atZone(WorkHoursConstants.VN_TIMEZONE)
                 .toLocalTime();
         LocalTime checkOutLocalTime = checkOutTime
-                .atZone(ZoneId.systemDefault())
+                .atZone(WorkHoursConstants.VN_TIMEZONE)
                 .toLocalTime();
 
         long totalMinutes = java.time.Duration.between(attendance.getCheckInTime(), checkOutTime).toMinutes();
@@ -348,14 +486,15 @@ public class AttendanceExplanationHelper {
                 checkInLocalTime, checkOutLocalTime, isDoctor);
         attendance.setLunchBreakMinutes(lunchBreakMinutes);
 
-        long minutesLate = 0;
-        String currentStatus = attendance.getAttendanceStatus();
-        if (currentStatus != null && !"APPROVED_LATE".equals(currentStatus)) {
-            Integer lateMinutesValue = attendance.getLateMinutes();
-            minutesLate = (lateMinutesValue != null) ? lateMinutesValue : 0;
+        // Tính earlyMinutes dựa trên expectedEndTime
+        LocalTime expectedEndTime = WorkHoursConstants.EMPLOYEE_END_TIME;
+        if (isDoctor && shiftType != null) {
+            java.util.Optional<sunshine_dental_care.entities.DoctorSchedule> matchedSchedule = shiftService.findMatchingSchedule(
+                    attendance.getUserId(), attendance.getClinicId(), attendance.getWorkDate(), shiftType);
+            sunshine_dental_care.entities.DoctorSchedule schedule = matchedSchedule.orElse(null);
+            expectedEndTime = shiftService.getExpectedEndTime(shiftType, schedule);
         }
-
-        attendance.setEarlyMinutes(0);
+        attendance.setEarlyMinutes(calculationHelper.calculateEarlyMinutes(checkOutLocalTime, expectedEndTime));
 
         long adjustedMinutes = totalMinutes - lunchBreakMinutes;
         if (adjustedMinutes < 0) {
@@ -365,7 +504,31 @@ public class AttendanceExplanationHelper {
                 .divide(BigDecimal.valueOf(60), 2, java.math.RoundingMode.HALF_UP);
         attendance.setActualWorkHours(actualHours);
 
-        attendance.setExpectedWorkHours(BigDecimal.valueOf(WorkHoursConstants.EMPLOYEE_EXPECTED_HOURS));
+        // Tính expectedWorkHours dựa trên shiftType (bác sĩ làm theo ca)
+        BigDecimal expectedWorkHours = calculateExpectedWorkHours(attendance);
+        attendance.setExpectedWorkHours(expectedWorkHours);
+    }
+
+    // Tính expectedWorkHours dựa trên shiftType và schedule của bác sĩ
+    private BigDecimal calculateExpectedWorkHours(Attendance attendance) {
+        String shiftType = attendance.getShiftType();
+        boolean isDoctor = shiftType != null &&
+                (WorkHoursConstants.SHIFT_TYPE_MORNING.equals(shiftType) ||
+                 WorkHoursConstants.SHIFT_TYPE_AFTERNOON.equals(shiftType));
+
+        if (isDoctor && shiftType != null) {
+            // Tìm schedule phù hợp để lấy startTime và endTime chính xác
+            java.util.Optional<sunshine_dental_care.entities.DoctorSchedule> matchedSchedule = shiftService.findMatchingSchedule(
+                    attendance.getUserId(), attendance.getClinicId(), attendance.getWorkDate(), shiftType);
+            sunshine_dental_care.entities.DoctorSchedule schedule = matchedSchedule.orElse(null);
+            
+            LocalTime expectedStartTime = shiftService.getExpectedStartTime(shiftType, schedule);
+            LocalTime expectedEndTime = shiftService.getExpectedEndTime(shiftType, schedule);
+            return calculationHelper.calculateExpectedWorkHours(expectedStartTime, expectedEndTime);
+        } else {
+            // Nhân viên làm cả ngày: 8 giờ
+            return BigDecimal.valueOf(WorkHoursConstants.EMPLOYEE_EXPECTED_HOURS);
+        }
     }
 
     // Xác định trạng thái attendance sau khi HR duyệt giải trình dựa theo loại giải trình
@@ -436,6 +599,32 @@ public class AttendanceExplanationHelper {
 
         LocalDate today = LocalDate.now();
         boolean isToday = att.getWorkDate() != null && att.getWorkDate().equals(today);
+        LocalTime currentTime = LocalTime.now(WorkHoursConstants.VN_TIMEZONE);
+
+        // Nếu là ngày hôm nay và chưa đến giờ bắt đầu ca thì không hiển thị giải trình
+        // (trừ trường hợp LATE vì đã check-in rồi)
+        if (isToday && !"LATE".equals(status)) {
+            String shiftType = att.getShiftType();
+            LocalTime shiftStartTime = null;
+            
+            // Xác định giờ bắt đầu ca
+            if (WorkHoursConstants.SHIFT_TYPE_MORNING.equals(shiftType)) {
+                // Bác sĩ ca sáng: 8:00
+                shiftStartTime = WorkHoursConstants.MORNING_SHIFT_START;
+            } else if (WorkHoursConstants.SHIFT_TYPE_AFTERNOON.equals(shiftType)) {
+                // Bác sĩ ca chiều: 13:00
+                shiftStartTime = WorkHoursConstants.AFTERNOON_SHIFT_START;
+            } else if (WorkHoursConstants.SHIFT_TYPE_FULL_DAY.equals(shiftType) || shiftType == null) {
+                // Nhân viên làm cả ngày: 8:00
+                shiftStartTime = WorkHoursConstants.EMPLOYEE_START_TIME;
+            }
+            
+            // Nếu chưa đến giờ bắt đầu ca → không hiển thị giải trình
+            // (kể cả khi status = ABSENT, vì chưa đến giờ ca nên chưa thể xác định vắng mặt)
+            if (shiftStartTime != null && currentTime.isBefore(shiftStartTime)) {
+                return false;
+            }
+        }
 
         // Không bắt giải trình nếu là ngày hiện tại và đã checkin nhưng chưa checkout
         if (isToday && hasCheckIn && !hasCheckOut) {
@@ -557,5 +746,37 @@ public class AttendanceExplanationHelper {
         } else if (attendance.getCheckInTime() == null && attendance.getCheckOutTime() != null) {
             response.setExplanationType("MISSING_CHECK_IN");
         }
+    }
+
+    // Mapping schedule sang DTO phản hồi (cho trường hợp có schedule nhưng chưa check-in)
+    private AttendanceExplanationResponse mapScheduleToExplanationResponse(DoctorSchedule schedule) {
+        AttendanceExplanationResponse response = new AttendanceExplanationResponse();
+        response.setAttendanceId(0); // Chưa có attendance record
+        response.setUserId(schedule.getDoctor().getId());
+        response.setClinicId(schedule.getClinic().getId());
+        response.setWorkDate(schedule.getWorkDate());
+        response.setCheckInTime(null); // Chưa check-in
+        response.setCheckOutTime(null); // Chưa check-out
+        response.setAttendanceStatus("ABSENT"); // Mặc định là ABSENT vì chưa check-in
+        response.setNote(null);
+        
+        // Xác định shiftType từ startTime
+        String shiftType = WorkHoursConstants.determineShiftType(schedule.getStartTime());
+        response.setShiftType(shiftType);
+        
+        // Set explanation type là ABSENT
+        response.setExplanationType("ABSENT");
+        response.setExplanationStatus("PENDING");
+        response.setEmployeeReason(null);
+        
+        // Set user và clinic name
+        if (schedule.getDoctor() != null) {
+            response.setUserName(schedule.getDoctor().getFullName());
+        }
+        if (schedule.getClinic() != null) {
+            response.setClinicName(schedule.getClinic().getClinicName());
+        }
+        
+        return response;
     }
 }

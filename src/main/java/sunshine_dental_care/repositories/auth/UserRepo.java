@@ -2,6 +2,8 @@ package sunshine_dental_care.repositories.auth;
 
 import java.util.List;
 import java.util.Optional;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
@@ -56,5 +58,24 @@ public interface UserRepo extends JpaRepository<User, Integer> {
             @Param("clinicId") Integer clinicId,
             @Param("specialties") List<String> specialties,
             @Param("count") Long count
+    );
+
+    // Query để lấy danh sách nhân viên cho Admin với pagination và search
+    // Filter: active users với roles (RECEPTION, ACCOUNTANT, DOCTOR, HR)
+    @Query("SELECT DISTINCT u FROM User u " +
+            "JOIN u.userRoles ur " +
+            "JOIN ur.role r " +
+            "WHERE u.isActive = true " +
+            "AND ur.isActive = true " +
+            "AND UPPER(r.roleName) IN ('RECEPTION', 'ACCOUNTANT', 'DOCTOR', 'HR', 'RECEPTIONIST') " +
+            "AND (:search IS NULL OR :search = '' OR " +
+            "     LOWER(u.fullName) LIKE LOWER(CONCAT('%', :search, '%')) OR " +
+            "     LOWER(u.email) LIKE LOWER(CONCAT('%', :search, '%')) OR " +
+            "     u.phone LIKE CONCAT('%', :search, '%') OR " +
+            "     LOWER(u.username) LIKE LOWER(CONCAT('%', :search, '%')) OR " +
+            "     LOWER(u.code) LIKE LOWER(CONCAT('%', :search, '%')))")
+    Page<User> findActiveStaffWithRoles(
+            @Param("search") String search,
+            Pageable pageable
     );
 }

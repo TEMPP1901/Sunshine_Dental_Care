@@ -79,4 +79,18 @@ public interface NotificationRepository extends JpaRepository<Log, Integer> {
            "AND (n.expiresAt IS NULL OR n.expiresAt > CURRENT_TIMESTAMP) " +
            "ORDER BY n.createdAt DESC")
     List<Log> findUnreadNotifications(@Param("userId") Integer userId);
+
+    // Kiểm tra xem đã có notification với type và relatedEntityId cụ thể trong ngày hôm nay chưa
+    @Query(value = "SELECT COUNT(n) FROM Logs n WHERE n.userId = :userId " +
+           "AND n.type = :type " +
+           "AND n.relatedEntityType = :relatedEntityType " +
+           "AND n.relatedEntityId = :relatedEntityId " +
+           "AND CAST(n.createdAt AS DATE) = CAST(GETDATE() AS DATE)",
+           nativeQuery = true)
+    long countByUserIdAndTypeAndEntityToday(
+        @Param("userId") Integer userId,
+        @Param("type") String type,
+        @Param("relatedEntityType") String relatedEntityType,
+        @Param("relatedEntityId") Integer relatedEntityId
+    );
 }

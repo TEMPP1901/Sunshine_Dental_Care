@@ -120,6 +120,7 @@ public class SystemConfigServiceImpl implements SystemConfigService {
                     Clinic clinic = clinicOpt.get();
                     if (Boolean.TRUE.equals(clinic.getIsActive())) {
                         clinic.setIsActive(false);
+                        clinic.setDeactivatedByHoliday(true);
                         clinicRepo.save(clinic);
                         log.info("Set clinic {} ({}) to inactive due to holiday {} from {} to {}", 
                                 clinicId, clinic.getClinicName(), name, date, holidayEndDate);
@@ -134,6 +135,7 @@ public class SystemConfigServiceImpl implements SystemConfigService {
                 for (Clinic clinic : allClinics) {
                     if (Boolean.TRUE.equals(clinic.getIsActive())) {
                         clinic.setIsActive(false);
+                        clinic.setDeactivatedByHoliday(true);
                         clinicRepo.save(clinic);
                         inactiveCount++;
                         log.info("Set clinic {} ({}) to inactive due to global holiday {} from {} to {}", 
@@ -512,8 +514,9 @@ public class SystemConfigServiceImpl implements SystemConfigService {
                 }
             }
             // Nếu không có holiday active cho clinic thì set lại active
-            if (!hasActiveHoliday) {
+            if (!hasActiveHoliday && Boolean.TRUE.equals(clinic.getDeactivatedByHoliday())) {
                 clinic.setIsActive(true);
+                clinic.setDeactivatedByHoliday(false);
                 clinicRepo.save(clinic);
                 log.info("Auto-restored clinic {} ({}) to active - no active holidays found", 
                         clinic.getId(), clinic.getClinicName());

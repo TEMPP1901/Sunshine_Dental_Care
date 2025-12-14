@@ -10,6 +10,9 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import sunshine_dental_care.entities.EmployeeFaceProfile;
 import sunshine_dental_care.entities.FaceProfileUpdateRequest;
+import sunshine_dental_care.entities.User;
+import sunshine_dental_care.repositories.auth.UserRepo;
+import sunshine_dental_care.repositories.auth.UserRoleRepo;
 import sunshine_dental_care.repositories.hr.EmployeeFaceProfileRepo;
 import sunshine_dental_care.repositories.hr.FaceProfileUpdateRequestRepo;
 import sunshine_dental_care.services.interfaces.hr.FaceProfileUpdateService;
@@ -24,6 +27,8 @@ public class FaceProfileUpdateServiceImpl implements FaceProfileUpdateService {
     private final FaceProfileUpdateRequestRepo requestRepo;
     private final EmployeeFaceProfileRepo faceProfileRepo;
     private final NotificationService notificationService;
+    private final UserRepo userRepo;
+    private final UserRoleRepo userRoleRepo;
 
     @Override
     @Transactional
@@ -52,6 +57,45 @@ public class FaceProfileUpdateServiceImpl implements FaceProfileUpdateService {
 
         FaceProfileUpdateRequest saved = requestRepo.save(request);
         log.info("Face profile update request submitted successfully: requestId={}, userId={}", saved.getRequestId(), userId);
+
+        // Gửi thông báo cho HR khi có yêu cầu duyệt mặt mới
+        try {
+            User user = userRepo.findById(userId).orElse(null);
+            String employeeName = user != null && user.getFullName() != null ? user.getFullName() : "Nhân viên";
+
+            List<Integer> hrUserIds = userRoleRepo.findUserIdsByRoleName("HR");
+            log.info("Sending FACE_PROFILE_UPDATE_REQUEST notification to {} HR users for requestId={}, userId={}",
+                    hrUserIds.size(), saved.getRequestId(), userId);
+
+            // Gửi notification đến từng HR user
+            for (Integer hrUserId : hrUserIds) {
+                try {
+                    NotificationRequest notiRequest = NotificationRequest.builder()
+                            .userId(hrUserId)
+                            .type("FACE_PROFILE_UPDATE_REQUEST")
+                            .priority("MEDIUM")
+                            .title("Yêu cầu duyệt cập nhật khuôn mặt mới")
+                            .message(String.format("%s đã gửi yêu cầu cập nhật khuôn mặt chấm công. Vui lòng xem xét và duyệt.",
+                                    employeeName))
+                            .relatedEntityType("FaceProfileUpdateRequest")
+                            .relatedEntityId(saved.getRequestId())
+                            .actionUrl("/hr/employees/face-profile-approval")
+                            .build();
+
+                    notificationService.sendNotification(notiRequest);
+                    log.debug("FACE_PROFILE_UPDATE_REQUEST notification sent to HR userId={} for requestId={}",
+                            hrUserId, saved.getRequestId());
+                } catch (Exception e) {
+                    log.error("Failed to send FACE_PROFILE_UPDATE_REQUEST notification to HR userId={} for requestId={}: {}",
+                            hrUserId, saved.getRequestId(), e.getMessage());
+                }
+            }
+        } catch (Exception e) {
+            log.error("Failed to send FACE_PROFILE_UPDATE_REQUEST notifications for requestId={}, userId={}: {}",
+                    saved.getRequestId(), userId, e.getMessage());
+            // Không ném exception để tránh rollback transaction
+        }
+
         return saved;
     }
 

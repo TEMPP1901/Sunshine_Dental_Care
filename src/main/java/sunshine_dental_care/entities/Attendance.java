@@ -14,8 +14,18 @@ import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.PrePersist;
 import jakarta.persistence.PreUpdate;
+import jakarta.persistence.Table;
+import jakarta.persistence.UniqueConstraint;
 
 @Entity
+@Table(name = "Attendance", uniqueConstraints = {
+    // Unique constraint: đảm bảo không có duplicate attendance records
+    // - Nhân viên: (userId, clinicId, workDate, shiftType) với shiftType = "FULL_DAY" → 1 bản ghi/ngày
+    // - Bác sĩ: (userId, clinicId, workDate, shiftType) với shiftType = "MORNING" hoặc "AFTERNOON" → tối đa 2 bản ghi/ngày
+    // Lưu ý: shiftType không được null để đảm bảo unique constraint hoạt động đúng
+    @UniqueConstraint(name = "UK_ATTENDANCE_USER_CLINIC_DATE_SHIFT", 
+                     columnNames = {"userId", "clinicId", "workDate", "shiftType"})
+})
 public class Attendance {
 
     @Id

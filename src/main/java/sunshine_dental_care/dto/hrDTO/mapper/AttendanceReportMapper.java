@@ -93,7 +93,8 @@ public class AttendanceReportMapper {
         }
 
         // Tính worked hours: ưu tiên actualWorkHours (đã trừ lunch break), nếu không có thì tính và trừ lunch break
-        if (hasCheckIn && hasCheckOut) {
+        // Không tính giờ làm nếu status là ABSENT hoặc APPROVED_ABSENCE (vắng mặt/nghỉ phép được duyệt)
+        if (hasCheckIn && hasCheckOut && !"ABSENT".equals(status) && !"APPROVED_ABSENCE".equals(status)) {
             BigDecimal actualHours = null;
             long adjustedMinutes = 0;
             
@@ -248,9 +249,13 @@ public class AttendanceReportMapper {
             }
 
             // Tính giờ làm việc: ưu tiên actualWorkHours > 0, fallback tính từ checkIn/checkOut và trừ lunch break
+            // Không tính giờ làm nếu status là ABSENT hoặc APPROVED_ABSENCE (vắng mặt/nghỉ phép được duyệt)
             BigDecimal workHours = BigDecimal.ZERO;
-
-            if (attendance.getActualWorkHours() != null &&
+            
+            // Nếu status là ABSENT hoặc APPROVED_ABSENCE, không tính giờ làm dù có check-in/check-out
+            if ("ABSENT".equals(status) || "APPROVED_ABSENCE".equals(status)) {
+                workHours = BigDecimal.ZERO;
+            } else if (attendance.getActualWorkHours() != null &&
                     attendance.getActualWorkHours().compareTo(BigDecimal.ZERO) > 0) {
                 // Có actualWorkHours và > 0 → dùng nó (đã trừ lunch break)
                 workHours = attendance.getActualWorkHours();

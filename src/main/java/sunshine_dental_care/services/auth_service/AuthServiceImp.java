@@ -317,6 +317,14 @@ public class AuthServiceImp implements AuthService {
         u.setFailedLoginAttempts(0);
         u.setIsActive(true); // Mở khóa tài khoản ngay lập tức
         userRepo.save(u);
+        
+        // Khi unlock qua reset password, cần set tất cả UserRole thành active
+        // Vì khi lock, tất cả UserRole đã bị set inactive
+        List<UserRole> userRoles = userRoleRepo.findByUserId(u.getId());
+        for (UserRole userRole : userRoles) {
+            userRole.setIsActive(true);
+        }
+        userRoleRepo.saveAll(userRoles);
     }
 
     @Override

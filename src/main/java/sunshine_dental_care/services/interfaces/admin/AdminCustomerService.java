@@ -1,13 +1,13 @@
 package sunshine_dental_care.services.interfaces.admin;
 
-import java.util.List;
+import org.springframework.data.domain.Page;
 
 import sunshine_dental_care.dto.adminDTO.AdminCustomerDto;
 
 public interface AdminCustomerService {
 
-    // Lấy tất cả khách hàng, cho phép lọc tìm kiếm theo tên, mã, sđt, email
-    List<AdminCustomerDto> getCustomers(String search);
+    // Lấy danh sách khách hàng có phân trang, cho phép lọc tìm kiếm theo tên, mã, sđt, email
+    Page<AdminCustomerDto> getCustomers(String search, int page, int size);
 
     // Lấy chi tiết khách hàng theo id
     AdminCustomerDto getCustomerById(Integer id);
