@@ -79,6 +79,18 @@ public class Appointment {
     @Column(name = "transactionRef", length = 100)
     private String transactionRef; // Mã giao dịch VNPay/PayPal
 
+    @Column(name = "sub_total")
+    private java.math.BigDecimal subTotal;
+
+    // 2. Số tiền được giảm giá
+    @Column(name = "discount_amount")
+    private java.math.BigDecimal discountAmount;
+
+    // 3. Tổng tiền khách thực trả (Sau khi trừ giảm giá + cọc)
+    @Column(name = "total_amount")
+    private java.math.BigDecimal totalAmount;
+
+
     // Mỗi Lịch hẹn (Appointment) có thể chứa nhiều (Many) bản ghi Chi tiết Dịch vụ Lịch hẹn (AppointmentService).
     @OneToMany(mappedBy = "appointment", cascade = CascadeType.ALL, fetch = FetchType.LAZY)
     private List<AppointmentService> appointmentServices;
@@ -221,6 +233,25 @@ public class Appointment {
     }
     public void setTransactionRef(String transactionRef) {
         this.transactionRef = transactionRef;
+    }
+
+    public java.math.BigDecimal getSubTotal() {
+        return subTotal;
+    }
+    public void setSubTotal(java.math.BigDecimal subTotal) {
+        this.subTotal = subTotal;
+    }
+    public java.math.BigDecimal getDiscountAmount() {
+        return discountAmount;
+    }
+    public void setDiscountAmount(java.math.BigDecimal discountAmount) {
+        this.discountAmount = discountAmount;
+    }
+    public java.math.BigDecimal getTotalAmount() {
+        return totalAmount;
+    }
+    public void setTotalAmount(java.math.BigDecimal totalAmount) {
+        this.totalAmount = totalAmount;
     }
 
     @PrePersist

@@ -41,6 +41,7 @@ import sunshine_dental_care.security.CurrentUser;
 import sunshine_dental_care.services.auth_service.MailService;
 import sunshine_dental_care.services.auth_service.PatientCodeService;
 import sunshine_dental_care.services.interfaces.reception.ReceptionService;
+import sunshine_dental_care.services.interfaces.system.SystemConfigService;
 
 @Service
 @RequiredArgsConstructor
@@ -64,6 +65,7 @@ public class ReceptionServiceImpl implements ReceptionService {
     private final AppointmentMapper appointmentMapper;
     private final PasswordEncoder passwordEncoder;
     private final MailService mailService;
+    private final SystemConfigService systemConfigService;
 
 
     private Integer getReceptionistClinicId(CurrentUser currentUser) {
@@ -164,7 +166,7 @@ public class ReceptionServiceImpl implements ReceptionService {
         Instant end = start.plusSeconds(TimeUnit.MINUTES.toSeconds(totalDurationMinutes));
 
         // 4. KIỂM TRA XUNG ĐỘT (QUAN TRỌNG: CHỈ CHECK NẾU CÓ BÁC SĨ)
-        // --- ĐÃ SỬA ĐOẠN NÀY ---
+
         if (doctor != null) {
             // 4a. Check giờ làm việc của bác sĩ đó
             validateDoctorWorkingHours(doctor.getId(), request.getClinicId(), start, end);
@@ -206,12 +208,16 @@ public class ReceptionServiceImpl implements ReceptionService {
         // Set Type & Fee
         appointment.setAppointmentType(type);
         appointment.setPaymentStatus("UNPAID");
+
         if (request.getBookingFee() != null) {
             appointment.setBookingFee(request.getBookingFee());
         } else {
-            // Fallback giá mặc định
-            appointment.setBookingFee("VIP".equalsIgnoreCase(type) ?
-                    new java.math.BigDecimal("1000000") : new java.math.BigDecimal("500000"));
+            // 👇 LOGIC MỚI: Lấy giá từ Admin Setting
+            if ("VIP".equalsIgnoreCase(type)) {
+                appointment.setBookingFee(systemConfigService.getVipFee());
+            } else {
+                appointment.setBookingFee(systemConfigService.getStandardFee());
+            }
         }
 
         appointment = appointmentRepo.save(appointment);
@@ -420,6 +426,7 @@ public class ReceptionServiceImpl implements ReceptionService {
         return appointmentMapper.mapPatientToPatientResponse(newPatient);
     }
 
+    // Hàm cập nhật lịch hẹn
     @Override
     public AppointmentResponse updateAppointment(Integer appointmentId, AppointmentUpdateRequest request) {
         Appointment appointment = appointmentRepo.findById(appointmentId)
@@ -434,10 +441,6 @@ public class ReceptionServiceImpl implements ReceptionService {
         if (request.getNote() != null) {
             appointment.setNote(request.getNote());
         }
-
-        // (Optional) Nếu muốn log lại lịch sử sửa
-        // logRepo.save(new Log(..., "UPDATE_INFO", ...));
-
         return appointmentMapper.mapToAppointmentResponse(appointmentRepo.save(appointment));
     }
 
@@ -477,5 +480,261 @@ public class ReceptionServiceImpl implements ReceptionService {
 
         // 6. Map dữ liệu vừa lưu sang DTO và trả về cho Controller
         return appointmentMapper.mapToAppointmentResponse(savedAppt);
+    }
+
+    // --- HELPER METHODS FOR BILLING ---
+    private java.math.BigDecimal getDiscountRate(String rank) {
+        if (rank == null) return java.math.BigDecimal.ZERO;
+        return switch (rank.toUpperCase()) {
+            case "DIAMOND" -> new java.math.BigDecimal("0.15"); // 15%
+            case "GOLD" -> new java.math.BigDecimal("0.10"); // 10%
+            case "SILVER" -> new java.math.BigDecimal("0.05"); // 5%
+            default -> java.math.BigDecimal.ZERO;
+        };
+    }
+
+    private String calculateNewRank(java.math.BigDecimal totalSpent) {
+        double amount = totalSpent.doubleValue();
+        if (amount >= 100_000_000) return "DIAMOND";
+        if (amount >= 30_000_000)  return "GOLD";
+        if (amount >= 10_000_000)  return "SILVER";
+        return "MEMBER";
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public BillInvoiceDTO getBillDetails(Integer appointmentId) {
+        Appointment appt = appointmentRepo.findById(appointmentId)
+                .orElseThrow(() -> new ResourceNotFoundException("Không tìm thấy lịch hẹn: " + appointmentId));
+
+        // 1. Tính tổng tiền Dịch vụ (SubTotal)
+        List<AppointmentService> usedServices = appointmentServiceRepo.findByAppointmentId(appointmentId);
+        java.math.BigDecimal subTotal = java.math.BigDecimal.ZERO;
+        List<BillInvoiceDTO.BillServiceItem> billItems = new java.util.ArrayList<>();
+
+        for (AppointmentService as : usedServices) {
+            java.math.BigDecimal lineTotal = as.getUnitPrice().multiply(new java.math.BigDecimal(as.getQuantity()));
+            subTotal = subTotal.add(lineTotal);
+
+            billItems.add(BillInvoiceDTO.BillServiceItem.builder()
+                    .serviceName(as.getServiceVariant().getVariantName())
+                    .quantity(as.getQuantity())
+                    .unitPrice(as.getUnitPrice())
+                    .total(lineTotal)
+                    .build());
+        }
+
+        // 2. Tính Giảm Giá theo Rank
+        String currentRank = appt.getPatient().getMembershipRank();
+        java.math.BigDecimal discountPercent = getDiscountRate(currentRank);
+        java.math.BigDecimal discountAmount = subTotal.multiply(discountPercent);
+
+        // 3. Phí Cọc (Booking Fee) - Không giảm
+        java.math.BigDecimal bookingFee = appt.getBookingFee() != null ? appt.getBookingFee() : java.math.BigDecimal.ZERO;
+
+        // 4. Tổng cuối (Total Amount) = (Dịch vụ - Giảm giá) + Cọc
+        java.math.BigDecimal grandTotal = subTotal.subtract(discountAmount).add(bookingFee);
+
+        // 5. Số tiền còn thiếu
+        boolean isDepositPaid = "PAID".equalsIgnoreCase(appt.getPaymentStatus()) || appt.getTransactionRef() != null;
+        java.math.BigDecimal totalPaid = isDepositPaid ? bookingFee : java.math.BigDecimal.ZERO;
+        java.math.BigDecimal remaining = grandTotal.subtract(totalPaid);
+
+        return BillInvoiceDTO.builder()
+                .clinicName(appt.getClinic().getClinicName())
+                .clinicAddress(appt.getClinic().getAddress())
+                .invoiceId("INV-" + String.format("%06d", appt.getId()))
+                .createdDate(java.time.LocalDateTime.now())
+                .patientName(appt.getPatient().getFullName())
+                .patientPhone(appt.getPatient().getPhone())
+                .patientCode(appt.getPatient().getPatientCode())
+                .membershipRank(currentRank != null ? currentRank : "MEMBER")
+                .appointmentType(appt.getAppointmentType())
+                .bookingFee(bookingFee)
+                .isBookingFeePaid(isDepositPaid)
+                .services(billItems)
+                // Các số liệu tài chính quan trọng
+                .subTotal(subTotal)
+                .discountAmount(discountAmount)
+                .totalAmount(grandTotal)
+                .totalPaid(totalPaid)
+                .remainingBalance(remaining)
+                .build();
+    }
+
+    @Override
+    @Transactional
+    public void confirmPayment(Integer appointmentId) {
+        Appointment appt = appointmentRepo.findById(appointmentId)
+                .orElseThrow(() -> new ResourceNotFoundException("Không tìm thấy lịch hẹn"));
+
+        // 1. TÍNH TOÁN LẠI (Re-calculate để đảm bảo chính xác)
+        List<AppointmentService> usedServices = appointmentServiceRepo.findByAppointmentId(appointmentId);
+        java.math.BigDecimal subTotal = java.math.BigDecimal.ZERO;
+        for (AppointmentService as : usedServices) {
+            java.math.BigDecimal lineTotal = as.getUnitPrice().multiply(new java.math.BigDecimal(as.getQuantity()));
+            subTotal = subTotal.add(lineTotal);
+        }
+
+        String currentRank = appt.getPatient().getMembershipRank();
+        java.math.BigDecimal discountPercent = getDiscountRate(currentRank);
+        java.math.BigDecimal discountAmount = subTotal.multiply(discountPercent);
+
+        java.math.BigDecimal bookingFee = appt.getBookingFee() != null ? appt.getBookingFee() : java.math.BigDecimal.ZERO;
+        java.math.BigDecimal finalTotal = subTotal.subtract(discountAmount).add(bookingFee);
+
+        // 2. LƯU THÔNG TIN VÀO APPOINTMENT
+        appt.setSubTotal(subTotal);
+        appt.setDiscountAmount(discountAmount);
+        appt.setTotalAmount(finalTotal);
+
+        appt.setPaymentStatus("PAID");
+        appt.setStatus("COMPLETED");
+
+        appointmentRepo.save(appt);
+
+        // 3. TÍCH ĐIỂM & CẬP NHẬT RANK CHO BỆNH NHÂN
+        Patient patient = appt.getPatient();
+        java.math.BigDecimal currentSpending = patient.getAccumulatedSpending() != null
+                ? patient.getAccumulatedSpending()
+                : java.math.BigDecimal.ZERO;
+
+        java.math.BigDecimal newSpending = currentSpending.add(finalTotal);
+        patient.setAccumulatedSpending(newSpending);
+
+        String newRank = calculateNewRank(newSpending);
+        if (!newRank.equals(patient.getMembershipRank())) {
+            patient.setMembershipRank(newRank);
+            log.info("Khách hàng {} đã thăng hạng lên {}", patient.getFullName(), newRank);
+        }
+        patientRepo.save(patient);
+
+        // --- 4. GHI LOG ---
+        try {
+            Log paymentLog = new Log();
+            paymentLog.setType("PAYMENT");
+            paymentLog.setPriority("MEDIUM");
+            paymentLog.setTitle("Xác nhận thanh toán");
+
+            String msg = "Xác nhận thanh toán lịch hẹn #" + appointmentId
+                    + ". Tổng tiền: " + finalTotal
+                    + ". Rank mới: " + newRank;
+            paymentLog.setMessage(msg);
+
+            // 2. CÁC TRƯỜNG BỔ SUNG
+            paymentLog.setAction("CONFIRM_PAYMENT");
+            paymentLog.setRecordId(appointmentId);
+            paymentLog.setTableName("Appointments");
+            paymentLog.setAfterData("Paid: " + finalTotal + ", Rank: " + newRank);
+
+            // Nếu Entity Log chưa có @PrePersist cho createdAt thì set tay:
+            if (paymentLog.getCreatedAt() == null) {
+                paymentLog.setCreatedAt(java.time.Instant.now());
+            }
+            // Thêm actionTime
+            paymentLog.setActionTime(java.time.Instant.now());
+
+            logRepo.save(paymentLog);
+
+        } catch (Exception e) {
+            // In lỗi ra nhưng không throw exception để tránh rollback giao dịch thanh toán chính
+            System.err.println("Lỗi ghi log (không ảnh hưởng thanh toán): " + e.getMessage());
+            e.printStackTrace();
+        }
+    }
+
+    @Override
+    public Page<AppointmentResponse> getAppointmentList(CurrentUser currentUser, String keyword, String paymentStatus, String status, LocalDate date, int page, int size) {
+        // 1. Lấy Clinic ID của Lễ tân đang đăng nhập
+        Integer clinicId = getReceptionistClinicId(currentUser);
+
+        // 2. Tạo PageRequest (Sắp xếp mới nhất lên đầu)
+        PageRequest pageRequest = PageRequest.of(page, size, Sort.by("startDateTime").descending());
+
+        // 3. Gọi Repo
+        Page<Appointment> appointmentPage = appointmentRepo.searchAppointments(
+                clinicId,
+                keyword,
+                paymentStatus,
+                status,
+                date,
+                pageRequest
+        );
+
+        // 4. Map sang DTO (Dùng Mapper có sẵn)
+        return appointmentPage.map(appointmentMapper::mapToAppointmentResponse);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public PatientResponse getPatientDetail(Integer id) {
+        Patient patient = patientRepo.findById(id)
+                .orElseThrow(() -> new ResourceNotFoundException("Không tìm thấy bệnh nhân ID: " + id));
+        return appointmentMapper.mapPatientToPatientResponse(patient);
+    }
+
+    @Override
+    @Transactional
+    public PatientResponse updatePatient(Integer id, PatientResponse request) {
+        Patient patient = patientRepo.findById(id)
+                .orElseThrow(() -> new ResourceNotFoundException("Không tìm thấy bệnh nhân"));
+
+        // Cập nhật thông tin cơ bản
+        if (request.getFullName() != null) patient.setFullName(request.getFullName());
+        if (request.getPhone() != null) patient.setPhone(request.getPhone());
+        if (request.getAddress() != null) patient.setAddress(request.getAddress());
+        if (request.getGender() != null) patient.setGender(request.getGender());
+        if (request.getDateOfBirth() != null) patient.setDateOfBirth(request.getDateOfBirth());
+
+        patient.setEmail(request.getEmail());
+
+        Patient saved = patientRepo.save(patient);
+        return appointmentMapper.mapPatientToPatientResponse(saved);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<PatientHistoryDTO> getPatientHistory(Integer patientId) {
+        // 1. Tìm tất cả lịch hẹn của bệnh nhân
+        List<Appointment> appointments = appointmentRepo.findByPatientId(patientId);
+
+        // 2. Map sang DTO
+        return appointments.stream()
+                .map(app -> {
+                    // A. Lấy tên Bác sĩ
+                    String doctorName = (app.getDoctor() != null) ? app.getDoctor().getFullName() : "Chưa chỉ định";
+
+                    // B. Lấy danh sách tên dịch vụ chi tiết (Variant Name)
+                    String servicesStr = "";
+                    if (app.getAppointmentServices() != null && !app.getAppointmentServices().isEmpty()) {
+                        servicesStr = app.getAppointmentServices().stream()
+                                .map(as -> {
+                                    // Ưu tiên lấy tên Variant (Chi tiết) trước
+                                    if (as.getServiceVariant() != null) {
+                                        return as.getServiceVariant().getVariantName();
+                                    }
+                                    // Fallback về Service chung
+                                    return as.getService().getServiceName();
+                                })
+                                .collect(Collectors.joining(", "));
+                    }
+
+                    // C. Lấy tổng tiền (Ưu tiên cột totalAmount trong Appointment)
+                    java.math.BigDecimal finalTotal = app.getTotalAmount() != null ? app.getTotalAmount() : java.math.BigDecimal.ZERO;
+
+                    // D. Build DTO
+                    return PatientHistoryDTO.builder()
+                            .appointmentId(app.getId())
+                            .visitDate(app.getStartDateTime())
+                            .doctorName(doctorName)
+                            .diagnosis(app.getNote()) // Tạm dùng Note làm diagnosis
+                            .serviceNames(servicesStr)
+                            .totalAmount(finalTotal)
+                            .status(app.getStatus())
+                            .build();
+                })
+                // 3. Sắp xếp: Mới nhất lên đầu
+                .sorted(java.util.Comparator.comparing(PatientHistoryDTO::getVisitDate).reversed())
+                .collect(Collectors.toList());
     }
 }

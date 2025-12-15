@@ -4,6 +4,8 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.util.List;
 
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
@@ -84,4 +86,23 @@ public interface AppointmentRepo extends JpaRepository<Appointment, Integer> {
     @Query("UPDATE Appointment a SET a.status = :newStatus " +
             "WHERE a.status = :oldStatus AND a.createdAt < :expiryTime")
     int cancelExpiredAppointments(String oldStatus, String newStatus, Instant expiryTime);
+
+    //  HÀM ĐỂ SEARCH DANH SÁCH LỊCH HẸN
+    @Query("SELECT a FROM Appointment a WHERE " +
+            "(:clinicId IS NULL OR a.clinic.id = :clinicId) " +
+            "AND (:keyword IS NULL OR :keyword = '' OR a.patient.fullName LIKE %:keyword% OR a.patient.phone LIKE %:keyword% OR a.patient.patientCode LIKE %:keyword%) " +
+            "AND (:paymentStatus IS NULL OR :paymentStatus = '' OR a.paymentStatus = :paymentStatus) " +
+            "AND (:status IS NULL OR :status = '' OR a.status = :status) " +
+            "AND (:date IS NULL OR CAST(a.startDateTime AS LocalDate) = :date)")
+    Page<Appointment> searchAppointments(
+            @Param("clinicId") Integer clinicId,
+            @Param("keyword") String keyword,
+            @Param("paymentStatus") String paymentStatus, // UNPAID, PAID...
+            @Param("status") String status,               // SCHEDULED, COMPLETED...
+            @Param("date") LocalDate date,                // Có thể null nếu muốn xem tất cả
+            Pageable pageable
+    );
+
+    // Tìm tất cả lịch hẹn của 1 bệnh nhân
+    List<Appointment> findByPatientId(Integer patientId);
 }

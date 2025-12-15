@@ -29,4 +29,14 @@ public class AppointmentResponse {
     private BigDecimal bookingFee; // Phí đặt lịch hẹn
 
     private List<ServiceItemResponse> services;
+
+    // Trường này dành riêng cho list table ở AppointmentList.tsx, phẳng dạng String để dễ filter và hiển thị
+    private String patientName;
+    private String patientCode;
+    private String patientPhone;
+
+    private String doctorName;
+    private String clinicName;
+
+    private String paymentStatus;
 }

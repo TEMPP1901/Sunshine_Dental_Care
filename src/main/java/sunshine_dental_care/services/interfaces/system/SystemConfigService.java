@@ -1,5 +1,6 @@
 package sunshine_dental_care.services.interfaces.system;
 
+import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.Map;
@@ -33,4 +34,7 @@ public interface SystemConfigService {
 
     // Tự động bật lại phòng khám sau khi hết kỳ nghỉ
     void restoreClinicsAfterHolidayEnded();
+
+    BigDecimal getVipFee();       // Lấy phí cọc/khám VIP
+    BigDecimal getStandardFee();  // Lấy phí khám Standard
 }
