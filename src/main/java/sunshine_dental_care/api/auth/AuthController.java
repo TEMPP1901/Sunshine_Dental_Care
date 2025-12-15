@@ -11,6 +11,7 @@ import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
 
 import sunshine_dental_care.dto.authDTO.*;
+import sunshine_dental_care.payload.request.GoogleMobileLoginRequest;
 import sunshine_dental_care.security.CurrentUser;
 import sunshine_dental_care.services.auth_service.AuthService;
 
@@ -22,7 +23,7 @@ public class AuthController {
     private final AuthService authService;
 
     // =================================================================
-    // CÁC TÍNH NĂNG CƠ BẢN (EMAIL & GOOGLE)
+    // CÁC TÍNH NĂNG CƠ BẢN (EMAIL & WEB GOOGLE)
     // =================================================================
 
     // 1. Đăng ký tài khoản
@@ -37,7 +38,7 @@ public class AuthController {
         return ResponseEntity.ok(authService.login(body));
     }
 
-    // 3. Redirect sang Google Login
+    // 3. Redirect sang Google Login (Dành cho WEB)
     @GetMapping("/google")
     public void google(HttpServletResponse response) throws IOException {
         response.sendRedirect("/oauth2/authorization/google");
@@ -77,7 +78,6 @@ public class AuthController {
     // =================================================================
 
     // 8. Đăng nhập SĐT (Bước 1: Gửi OTP)
-    // [QUAN TRỌNG: Hàm này bạn bị thiếu lúc nãy]
     @PostMapping("/login-phone/step1")
     public ResponseEntity<?> loginPhoneStep1(@Valid @RequestBody PhoneLoginStep1Request body) {
         authService.sendLoginOtp(body);
@@ -85,7 +85,6 @@ public class AuthController {
     }
 
     // 9. Đăng nhập SĐT (Bước 2: Verify OTP lấy Token)
-    // [QUAN TRỌNG: Hàm này bạn bị thiếu lúc nãy]
     @PostMapping("/login-phone/step2")
     public ResponseEntity<LoginResponse> loginPhoneStep2(@Valid @RequestBody PhoneLoginStep2Request body) {
         return ResponseEntity.ok(authService.loginByPhone(body));
@@ -97,10 +96,21 @@ public class AuthController {
         return ResponseEntity.ok(authService.loginByPhoneAndPassword(body));
     }
 
-    // 11. [MỚI] Gửi lại email kích hoạt
+    // 11. Gửi lại email kích hoạt
     @PostMapping("/resend-verification")
     public ResponseEntity<?> resendVerification(@Valid @RequestBody ResendVerificationRequest body) {
         authService.resendVerificationEmail(body.email());
         return ResponseEntity.ok(Map.of("message", "Link kích hoạt mới đã được gửi đến email của bạn."));
+    }
+
+    // =================================================================
+    // TÍNH NĂNG MỚI: ĐĂNG NHẬP GOOGLE TỪ MOBILE (NATIVE)
+    // =================================================================
+
+    // 12. Xử lý Token từ Mobile App gửi lên
+    @PostMapping("/google-mobile")
+    public ResponseEntity<LoginResponse> googleMobileLogin(@RequestBody GoogleMobileLoginRequest body) {
+        // Gọi service xử lý logic (kiểm tra user, tạo JWT)
+        return ResponseEntity.ok(authService.loginGoogleMobile(body));
     }
 }

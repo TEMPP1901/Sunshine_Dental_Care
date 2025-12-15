@@ -1,6 +1,7 @@
 package sunshine_dental_care.services.auth_service;
 
 import sunshine_dental_care.dto.authDTO.*;
+import sunshine_dental_care.payload.request.GoogleMobileLoginRequest;
 
 public interface AuthService {
     // 1. Các tính năng cơ bản
@@ -23,4 +24,6 @@ public interface AuthService {
     LoginResponse loginByPhoneAndPassword(PhonePasswordLoginRequest req);
 
     void resendVerificationEmail(String email);
+
+    LoginResponse loginGoogleMobile(GoogleMobileLoginRequest request);
 }

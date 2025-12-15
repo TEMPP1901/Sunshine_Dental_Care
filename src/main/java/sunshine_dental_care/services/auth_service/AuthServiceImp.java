@@ -17,6 +17,7 @@ import sunshine_dental_care.entities.User;
 import sunshine_dental_care.entities.UserRole;
 import sunshine_dental_care.exceptions.auth.DuplicateEmailException;
 import sunshine_dental_care.exceptions.auth.DuplicateUsernameException;
+import sunshine_dental_care.payload.request.GoogleMobileLoginRequest;
 import sunshine_dental_care.repositories.auth.PatientRepo;
 import sunshine_dental_care.repositories.auth.RoleRepo;
 import sunshine_dental_care.repositories.auth.UserRepo;
@@ -342,5 +343,82 @@ public class AuthServiceImp implements AuthService {
         } catch (Exception e) {
             throw new RuntimeException("Lỗi gửi mail: " + e.getMessage());
         }
+    }
+
+    // =========================================================
+    // 3. LOGIN GOOGLE MOBILE (NATIVE APP) - THÊM ĐOẠN NÀY
+    // =========================================================
+    @Override
+    @Transactional
+    public LoginResponse loginGoogleMobile(GoogleMobileLoginRequest req) {
+        String email = req.getEmail();
+
+        // 1. Kiểm tra User tồn tại chưa
+        User user = userRepo.findByEmail(email).orElse(null);
+
+        if (user == null) {
+            // --- TRƯỜNG HỢP 1: CHƯA CÓ -> TỰ ĐỘNG ĐĂNG KÝ MỚI ---
+            user = new User();
+            user.setEmail(email);
+            // Tận dụng hàm helper có sẵn để sinh username không trùng
+            user.setUsername(resolveUsername(null, email));
+            user.setFullName(req.getFullName() != null ? req.getFullName() : "Google User");
+            user.setAvatarUrl(req.getAvatarUrl());
+            // Lưu ý: Nếu bạn dùng Enum AuthProvider thì đổi thành AuthProvider.GOOGLE
+            // Nếu bạn dùng String như hàm signUp cũ thì để là "google"
+            user.setProvider("google");
+
+            // Password ngẫu nhiên để không ai login được bằng pass
+            user.setPasswordHash(encoder.encode("GOOGLE_MOBILE_" + UUID.randomUUID()));
+            user.setIsActive(true); // Google đã verify email rồi -> Active luôn
+            user.setFailedLoginAttempts(0);
+
+            user = userRepo.save(user);
+
+            // Gán quyền USER mặc định (Hàm helper có sẵn)
+            ensureDefaultUserRole(user);
+
+            // Gán quyền PATIENT
+            var patientRole = roleRepo.findByRoleNameIgnoreCase("PATIENT")
+                    .orElseThrow(() -> new RuntimeException("Role PATIENT not found"));
+
+            UserRole userRole = new UserRole();
+            userRole.setUser(user);
+            userRole.setRole(patientRole);
+            userRole.setIsActive(true);
+            // userRole.setAssignedDate(Instant.now()); // Entity đã có @PrePersist lo
+            userRoleRepo.save(userRole);
+
+            // Tạo Patient Profile & Mã bệnh nhân
+            String patientCode = patientCodeService.nextPatientCode();
+            user.setCode(patientCode);
+            userRepo.save(user);
+
+            Patient p = new Patient();
+            p.setUser(user);
+            p.setFullName(user.getFullName());
+            p.setEmail(user.getEmail());
+            p.setPatientCode(patientCode);
+            p.setIsActive(true);
+            patientRepo.save(p);
+
+        } else {
+            // --- TRƯỜNG HỢP 2: ĐÃ CÓ TÀI KHOẢN ---
+            // Kiểm tra xem có bị khóa không
+            if (Boolean.FALSE.equals(user.getIsActive())) {
+                throw new BadCredentialsException("Tài khoản đã bị khóa hoặc chưa kích hoạt.");
+            }
+            // Cập nhật Avatar nếu user hiện tại chưa có
+            if (user.getAvatarUrl() == null && req.getAvatarUrl() != null) {
+                user.setAvatarUrl(req.getAvatarUrl());
+            }
+        }
+
+        // Cập nhật thời gian login cuối
+        user.setLastLoginAt(Instant.now());
+        userRepo.save(user);
+
+        // --- TẠO JWT TOKEN (Dùng lại hàm helper có sẵn) ---
+        return generateLoginResponse(user);
     }
 }
