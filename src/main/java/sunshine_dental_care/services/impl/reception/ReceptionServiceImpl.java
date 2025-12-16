@@ -17,26 +17,11 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import sunshine_dental_care.dto.hrDTO.DoctorScheduleDto;
 import sunshine_dental_care.dto.notificationDTO.NotificationRequest;
-import sunshine_dental_care.dto.receptionDTO.AppointmentRequest;
-import sunshine_dental_care.dto.receptionDTO.AppointmentResponse;
-import sunshine_dental_care.dto.receptionDTO.AppointmentUpdateRequest;
-import sunshine_dental_care.dto.receptionDTO.PatientRequest;
-import sunshine_dental_care.dto.receptionDTO.PatientResponse;
-import sunshine_dental_care.dto.receptionDTO.RescheduleRequest;
-import sunshine_dental_care.dto.receptionDTO.ServiceItemRequest;
+import sunshine_dental_care.dto.receptionDTO.*;
 import sunshine_dental_care.dto.receptionDTO.mapper.AppointmentMapper;
 import sunshine_dental_care.dto.receptionDTO.mapper.DoctorScheduleMapper;
-import sunshine_dental_care.entities.Appointment;
-import sunshine_dental_care.entities.AppointmentService;
-import sunshine_dental_care.entities.Clinic;
-import sunshine_dental_care.entities.DoctorSchedule;
-import sunshine_dental_care.entities.Log;
-import sunshine_dental_care.entities.Patient;
-import sunshine_dental_care.entities.Role;
-import sunshine_dental_care.entities.Room;
-import sunshine_dental_care.entities.User;
-import sunshine_dental_care.entities.UserClinicAssignment;
-import sunshine_dental_care.entities.UserRole;
+import sunshine_dental_care.entities.*;
+import sunshine_dental_care.entities.ServiceVariant;
 import sunshine_dental_care.exceptions.reception.AccessDeniedException;
 import sunshine_dental_care.exceptions.reception.AppointmentConflictException;
 import sunshine_dental_care.exceptions.reception.ResourceNotFoundException;
@@ -655,7 +640,7 @@ public class ReceptionServiceImpl implements ReceptionService {
 
     @Override
     @Transactional
-    public void confirmPayment(Integer appointmentId) {
+    public void confirmPayment(CurrentUser currentUser, Integer appointmentId) {
         Appointment appt = appointmentRepo.findById(appointmentId)
                 .orElseThrow(() -> new ResourceNotFoundException("Không tìm thấy lịch hẹn"));
 
@@ -717,6 +702,15 @@ public class ReceptionServiceImpl implements ReceptionService {
             paymentLog.setRecordId(appointmentId);
             paymentLog.setTableName("Appointments");
             paymentLog.setAfterData("Paid: " + finalTotal + ", Rank: " + newRank);
+
+            // Set user từ CurrentUser (bắt buộc vì userId không được null)
+            User user = userRepo.getReferenceById(currentUser.userId());
+            paymentLog.setUser(user);
+            
+            // Set clinic từ appointment
+            if (appt.getClinic() != null) {
+                paymentLog.setClinic(appt.getClinic());
+            }
 
             // Nếu Entity Log chưa có @PrePersist cho createdAt thì set tay:
             if (paymentLog.getCreatedAt() == null) {

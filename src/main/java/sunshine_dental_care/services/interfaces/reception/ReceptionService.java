@@ -1,12 +1,20 @@
 package sunshine_dental_care.services.interfaces.reception;
 
-import org.springframework.data.domain.Page;
-import sunshine_dental_care.dto.hrDTO.DoctorScheduleDto;
-import sunshine_dental_care.dto.receptionDTO.*;
-import sunshine_dental_care.security.CurrentUser;
-
 import java.time.LocalDate;
 import java.util.List;
+
+import org.springframework.data.domain.Page;
+
+import sunshine_dental_care.dto.hrDTO.DoctorScheduleDto;
+import sunshine_dental_care.dto.receptionDTO.AppointmentRequest;
+import sunshine_dental_care.dto.receptionDTO.AppointmentResponse;
+import sunshine_dental_care.dto.receptionDTO.AppointmentUpdateRequest;
+import sunshine_dental_care.dto.receptionDTO.BillInvoiceDTO;
+import sunshine_dental_care.dto.receptionDTO.PatientHistoryDTO;
+import sunshine_dental_care.dto.receptionDTO.PatientRequest;
+import sunshine_dental_care.dto.receptionDTO.PatientResponse;
+import sunshine_dental_care.dto.receptionDTO.RescheduleRequest;
+import sunshine_dental_care.security.CurrentUser;
 
 public interface ReceptionService {
     List<DoctorScheduleDto> getDoctorSchedulesForView
@@ -41,7 +49,7 @@ public interface ReceptionService {
     BillInvoiceDTO getBillDetails(Integer appointmentId);
 
     // 2. Xác nhận đã thanh toán hoàn tất (Lễ tân bấm nút "Đã thu tiền")
-    void confirmPayment(Integer appointmentId);
+    void confirmPayment(CurrentUser currentUser, Integer appointmentId);
 
     // hàm search danh sách các bảng lịch hẹn
     Page<AppointmentResponse> getAppointmentList(
