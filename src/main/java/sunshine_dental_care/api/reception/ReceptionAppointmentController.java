@@ -2,6 +2,7 @@ package sunshine_dental_care.api.reception;
 
 import java.time.LocalDate;
 import java.util.List;
+import java.util.Map;
 
 import jakarta.validation.Valid;
 import org.springframework.data.domain.Page;
@@ -124,5 +125,78 @@ public class ReceptionAppointmentController {
             @RequestBody AppointmentUpdateRequest request) {
 
         return ResponseEntity.ok(receptionService.updateAppointment(id, request));
+    }
+
+    // API: Gán phòng cho lịch hẹn
+    // URL: PUT /api/reception/appointments/{id}/assign-room?roomId=5
+    @PutMapping("/appointments/{id}/assign-room")
+    @PreAuthorize("hasAnyRole('RECEPTION', 'ADMIN')")
+    public ResponseEntity<AppointmentResponse> assignRoom(
+            @PathVariable Integer id,
+            @RequestParam Integer roomId) {
+
+        AppointmentResponse response = receptionService.assignRoomToAppointment(id, roomId);
+        return ResponseEntity.ok(response);
+    }
+
+    // 1. API Xem chi tiết hóa đơn (Preview trước khi in)
+    // Gọi khi Lễ tân bấm nút "Thanh Toán" trên giao diện
+    @GetMapping("/appointments/{id}/bill")
+    @PreAuthorize("hasAnyRole('RECEPTION', 'ADMIN')")
+    public ResponseEntity<BillInvoiceDTO> getBillDetails(@PathVariable Integer id) {
+        BillInvoiceDTO bill = receptionService.getBillDetails(id);
+        return ResponseEntity.ok(bill);
+    }
+
+    // 2. API Xác nhận thanh toán (Chốt đơn)
+    // Gọi khi Lễ tân đã nhận tiền và bấm "Xác Nhận"
+    @PostMapping("/appointments/{id}/pay")
+    @PreAuthorize("hasAnyRole('RECEPTION', 'ADMIN')")
+    public ResponseEntity<?> confirmPayment(@PathVariable Integer id) {
+        receptionService.confirmPayment(id);
+
+        // Trả về thông báo thành công
+        return ResponseEntity.ok(Map.of("message", "Xác nhận thanh toán thành công!"));
+    }
+
+    // API Lấy danh sách cho bảng AppointmentList.tsx
+    @GetMapping("/appointments/search")
+    @PreAuthorize("hasAnyRole('RECEPTION', 'ADMIN')")
+    public ResponseEntity<Page<AppointmentResponse>> getAppointmentList(
+            @RequestParam(required = false) String keyword,
+            @RequestParam(required = false) String paymentStatus, // Lọc trạng thái tiền
+            @RequestParam(required = false) String status,        // Lọc trạng thái khám
+            @RequestParam(required = false) LocalDate date,       // Lọc ngày (null = xem hết)
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "10") int size,
+            @AuthenticationPrincipal CurrentUser currentUser // lấy clinicId tự động
+    ) {
+        return ResponseEntity.ok(
+                receptionService.getAppointmentList(currentUser, keyword, paymentStatus, status, date, page, size)
+        );
+    }
+
+    // 1. API Lấy chi tiết hồ sơ bệnh nhân
+    @GetMapping("/patients/{id}")
+    @PreAuthorize("hasAnyRole('RECEPTION', 'ADMIN')")
+    public ResponseEntity<PatientResponse> getPatientDetail(@PathVariable Integer id) {
+        return ResponseEntity.ok(receptionService.getPatientDetail(id));
+    }
+
+    // 2. API Cập nhật thông tin bệnh nhân
+    @PutMapping("/patients/{id}")
+    @PreAuthorize("hasAnyRole('RECEPTION', 'ADMIN')")
+    public ResponseEntity<PatientResponse> updatePatient(
+            @PathVariable Integer id,
+            @RequestBody PatientResponse request // Dùng lại PatientResponse làm request body
+    ) {
+        return ResponseEntity.ok(receptionService.updatePatient(id, request));
+    }
+
+    // 3. API Lấy lịch sử khám bệnh (History)
+    @GetMapping("/patients/{id}/history")
+    @PreAuthorize("hasAnyRole('RECEPTION', 'ADMIN')")
+    public ResponseEntity<List<PatientHistoryDTO>> getPatientHistory(@PathVariable Integer id) {
+        return ResponseEntity.ok(receptionService.getPatientHistory(id));
     }
 }

@@ -1,5 +1,6 @@
 package sunshine_dental_care.services.impl.system;
 
+import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -524,6 +525,7 @@ public class SystemConfigServiceImpl implements SystemConfigService {
         }
     }
 
+
     // Lấy danh sách tất cả user IDs của nhân viên (loại trừ role USER - khách hàng và ADMIN)
     private List<Integer> getAllEmployeeUserIds() {
         try {
@@ -655,5 +657,30 @@ public class SystemConfigServiceImpl implements SystemConfigService {
             log.error("Failed to get employee user IDs for clinic {}: {}", clinicId, e.getMessage(), e);
             return List.of();
         }
+    }
+
+    // --- PHẦN BỔ SUNG: LẤY GIÁ TỰ ĐỘNG ---
+    @Override
+    public BigDecimal getVipFee() {
+        return getConfigAsBigDecimal("VIP_DEPOSIT_FEE", "1000000");
+    }
+
+    @Override
+    public BigDecimal getStandardFee() {
+        return getConfigAsBigDecimal("STANDARD_BOOKING_FEE", "500000");
+    }
+
+    // HÀM CHUYỂN ĐỔI STRING THÀNH BIGDECIMAL
+    private BigDecimal getConfigAsBigDecimal(String key, String defaultValue) {
+        return systemConfigRepo.findByConfigKey(key)
+                .map(cfg -> {
+                    try {
+                        return new BigDecimal(cfg.getConfigValue());
+                    } catch (NumberFormatException e) {
+                        log.warn("Invalid number format for config key {}: {}. Using default value.", key, cfg.getConfigValue());
+                        return new BigDecimal(defaultValue);
+                    }
+                })
+                .orElse(new BigDecimal(defaultValue));
     }
 }

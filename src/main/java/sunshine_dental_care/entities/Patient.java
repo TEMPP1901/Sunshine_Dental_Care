@@ -62,6 +62,12 @@ public class Patient {
     @Column(name = "updatedAt", nullable = false)
     private Instant updatedAt;
 
+    @Column(name = "accumulated_spending")
+    private java.math.BigDecimal accumulatedSpending;
+
+    @Column(name = "membership_rank")
+    private String membershipRank;
+
     public Integer getId() {
         return id;
     }
@@ -164,6 +170,19 @@ public class Patient {
 
     public void setUpdatedAt(Instant updatedAt) {
         this.updatedAt = updatedAt;
+    }
+
+    public java.math.BigDecimal getAccumulatedSpending() {
+        return accumulatedSpending;
+    }
+    public void setAccumulatedSpending(java.math.BigDecimal accumulatedSpending) {
+        this.accumulatedSpending = accumulatedSpending;
+    }
+    public String getMembershipRank() {
+        return membershipRank;
+    }
+    public void setMembershipRank(String membershipRank) {
+        this.membershipRank = membershipRank;
     }
     @PrePersist
     void prePersist() {

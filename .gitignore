@@ -36,6 +36,8 @@ bin/
 /nbdist/
 /.nb-gradle/
 build/
+!**/src/main/**/build/
+!**/src/test/**/build/
 
 # =====================================
 # 3. OS FILES (File rác hệ điều hành)
@@ -48,6 +50,7 @@ Thumbs.db
 # =====================================
 # Chặn file môi trường chứa mật khẩu
 .env
+!.env
 Sunshine_Dental_Care/src/main/resources/application.properties
 
 # Chặn file cấu hình Firebase chứa Key
@@ -66,3 +69,10 @@ src/main/resources/sunshine_dental_care/utils/arcface.onnx
 # 6. MISC
 # =====================================
 HELP.md
+
+### Application Properties ###
+application.properties
+application-*.properties
+application.yml
+application-*.yml
+/.env

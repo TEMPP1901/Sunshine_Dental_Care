@@ -4,9 +4,22 @@ import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;
 
-import jakarta.persistence.*;
 import org.hibernate.annotations.ColumnDefault;
 import org.hibernate.annotations.Nationalized;
+
+import jakarta.persistence.CascadeType;
+import jakarta.persistence.Column;
+import jakarta.persistence.Entity;
+import jakarta.persistence.FetchType;
+import jakarta.persistence.GeneratedValue;
+import jakarta.persistence.GenerationType;
+import jakarta.persistence.Id;
+import jakarta.persistence.JoinColumn;
+import jakarta.persistence.ManyToOne;
+import jakarta.persistence.OneToMany;
+import jakarta.persistence.PrePersist;
+import jakarta.persistence.PreUpdate;
+import jakarta.persistence.Table;
 
 @Entity
 @Table(name = "Appointments")
@@ -81,6 +94,23 @@ public class Appointment {
     @Column(name = "is_urgent_reminder_sent")
     private Boolean isUrgentReminderSent = false;
 
+    @Column(name = "paymentStatus", length = 50)
+    private String paymentStatus; // UNPAID, PAID
+
+    @Column(name = "transactionRef", length = 100)
+    private String transactionRef; // Mã giao dịch VNPay/PayPal
+
+    @Column(name = "sub_total")
+    private java.math.BigDecimal subTotal;
+
+    // 2. Số tiền được giảm giá
+    @Column(name = "discount_amount")
+    private java.math.BigDecimal discountAmount;
+
+    // 3. Tổng tiền khách thực trả (Sau khi trừ giảm giá + cọc)
+    @Column(name = "total_amount")
+    private java.math.BigDecimal totalAmount;
+
     // Mỗi Lịch hẹn (Appointment) có thể chứa nhiều (Many) bản ghi Chi tiết Dịch vụ Lịch hẹn (AppointmentService).
     @OneToMany(mappedBy = "appointment", cascade = CascadeType.ALL, fetch = FetchType.LAZY)
     private List<AppointmentService> appointmentServices;
@@ -143,6 +173,38 @@ public class Appointment {
 
     public Boolean getIsUrgentReminderSent() { return isUrgentReminderSent; }
     public void setIsUrgentReminderSent(Boolean urgentReminderSent) { isUrgentReminderSent = urgentReminderSent; }
+
+    public String getPaymentStatus() {
+        return paymentStatus;
+    }
+    public void setPaymentStatus(String paymentStatus) {
+        this.paymentStatus = paymentStatus;
+    }
+    public String getTransactionRef() {
+        return transactionRef;
+    }
+    public void setTransactionRef(String transactionRef) {
+        this.transactionRef = transactionRef;
+    }
+
+    public java.math.BigDecimal getSubTotal() {
+        return subTotal;
+    }
+    public void setSubTotal(java.math.BigDecimal subTotal) {
+        this.subTotal = subTotal;
+    }
+    public java.math.BigDecimal getDiscountAmount() {
+        return discountAmount;
+    }
+    public void setDiscountAmount(java.math.BigDecimal discountAmount) {
+        this.discountAmount = discountAmount;
+    }
+    public java.math.BigDecimal getTotalAmount() {
+        return totalAmount;
+    }
+    public void setTotalAmount(java.math.BigDecimal totalAmount) {
+        this.totalAmount = totalAmount;
+    }
 
     @PrePersist
     public void prePersist() {

@@ -34,4 +34,30 @@ public interface ReceptionService {
     PatientResponse createPatient(PatientRequest request);
 
     AppointmentResponse updateAppointment(Integer appointmentId, AppointmentUpdateRequest request);
+
+    AppointmentResponse assignRoomToAppointment(Integer appointmentId, Integer roomId);
+
+    // 1. Lấy chi tiết hóa đơn (để in hoặc xem trước)
+    BillInvoiceDTO getBillDetails(Integer appointmentId);
+
+    // 2. Xác nhận đã thanh toán hoàn tất (Lễ tân bấm nút "Đã thu tiền")
+    void confirmPayment(Integer appointmentId);
+
+    // hàm search danh sách các bảng lịch hẹn
+    Page<AppointmentResponse> getAppointmentList(
+            CurrentUser currentUser,
+            String keyword,
+            String paymentStatus,
+            String status,
+            LocalDate date,
+            int page,
+            int size
+    );
+
+    // --- MỚI: QUẢN LÝ BỆNH NHÂN ---
+    PatientResponse getPatientDetail(Integer id);
+
+    PatientResponse updatePatient(Integer id, PatientResponse request);
+
+    List<PatientHistoryDTO> getPatientHistory(Integer patientId);
 }

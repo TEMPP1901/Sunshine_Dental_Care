@@ -15,6 +15,6 @@ public class RoomDTO {
     private Integer id;
     private String roomName;
     private Boolean isPrivate;
-    private Integer numberOfChairs;
+    private Boolean isActive;
 }
 

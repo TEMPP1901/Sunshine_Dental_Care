@@ -2,6 +2,7 @@ package sunshine_dental_care.dto.receptionDTO.mapper;
 
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
+import sunshine_dental_care.dto.doctorDTO.RoomDTO;
 import sunshine_dental_care.dto.receptionDTO.AppointmentResponse;
 import sunshine_dental_care.dto.receptionDTO.PatientResponse;
 import sunshine_dental_care.dto.receptionDTO.ServiceItemResponse;
@@ -28,18 +29,34 @@ public class AppointmentMapper {
 
         response.setId(appointment.getId());
 
-        // Map Patient
-        response.setPatient(mapPatientToPatientResponse(appointment.getPatient()));
+        // 1. Map Patient (Object cũ & Trường phẳng mới)
+        if (appointment.getPatient() != null) {
+            // Map object đầy đủ (như cũ)
+            response.setPatient(mapPatientToPatientResponse(appointment.getPatient()));
+
+            // MAP SANG TRƯỜNG PHẲNG (Để hiện lên Table)
+            response.setPatientName(appointment.getPatient().getFullName());
+            response.setPatientCode(appointment.getPatient().getPatientCode());
+            response.setPatientPhone(appointment.getPatient().getPhone());
+        }
 
         // Map Doctor (Tái sử dụng DoctorScheduleMapper)
-        response.setDoctor(doctorScheduleMapper.mapUserToHrDocDto(appointment.getDoctor()));
+        if (appointment.getDoctor() != null) {
+            response.setDoctor(doctorScheduleMapper.mapUserToHrDocDto(appointment.getDoctor()));
+
+            // MAP SANG TRƯỜNG PHẲNG
+            response.setDoctorName(appointment.getDoctor().getFullName());
+        }
 
         // Map Clinic (Tái sử dụng logic mapping Clinic)
-        response.setClinic(doctorScheduleMapper.mapClinicToClinicResponse(appointment.getClinic()));
-
+        if (appointment.getClinic() != null) {
+            response.setClinic(doctorScheduleMapper.mapClinicToClinicResponse(appointment.getClinic()));
+            response.setClinicName(appointment.getClinic().getClinicName());
+        }
         response.setStartDateTime(appointment.getStartDateTime());
         response.setEndDateTime(appointment.getEndDateTime());
         response.setStatus(appointment.getStatus());
+        response.setPaymentStatus(appointment.getPaymentStatus());
         response.setChannel(appointment.getChannel());
         response.setNote(appointment.getNote());
 
@@ -58,6 +75,16 @@ public class AppointmentMapper {
                     .map(this::mapAppointmentServiceToServiceItemResponse)
                     .collect(Collectors.toList());
             response.setServices(services);
+        }
+
+        // Map Room
+        if (appointment.getRoom() != null) {
+            RoomDTO roomDto = new RoomDTO();
+            roomDto.setId(appointment.getRoom().getId());
+            roomDto.setRoomName(appointment.getRoom().getRoomName());
+            roomDto.setIsPrivate(appointment.getRoom().getIsPrivate());
+
+            response.setRoom(roomDto);
         }
 
         return response;
