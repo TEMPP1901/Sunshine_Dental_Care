@@ -1,43 +1,38 @@
 package sunshine_dental_care.services.doctor;
 
-import lombok.RequiredArgsConstructor;
-import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
-import org.springframework.web.multipart.MultipartFile;
-import sunshine_dental_care.dto.doctorDTO.ClinicDTO;
-import sunshine_dental_care.dto.doctorDTO.DoctorDTO;
-import sunshine_dental_care.dto.doctorDTO.PatientDTO;
-import sunshine_dental_care.dto.doctorDTO.MedicalRecordDTO;
-import sunshine_dental_care.dto.doctorDTO.MedicalRecordRequest;
-import sunshine_dental_care.dto.doctorDTO.MedicalRecordImageDTO;
-import sunshine_dental_care.dto.doctorDTO.ServiceDTO;
-import sunshine_dental_care.dto.doctorDTO.ServiceVariantDTO;
-import sunshine_dental_care.entities.Appointment;
-import sunshine_dental_care.entities.AppointmentService;
-import sunshine_dental_care.entities.Clinic;
-import sunshine_dental_care.entities.MedicalRecord;
-import sunshine_dental_care.entities.MedicalRecordImage;
-import sunshine_dental_care.entities.Patient;
-import sunshine_dental_care.entities.ServiceVariant;
-import sunshine_dental_care.entities.User;
-import sunshine_dental_care.repositories.auth.ClinicRepo;
-import sunshine_dental_care.repositories.auth.PatientRepo;
-import sunshine_dental_care.repositories.doctor.DoctorRepo;
-import sunshine_dental_care.repositories.doctor.AppointmentRepository;
-import sunshine_dental_care.repositories.doctor.AppointmentServiceRepository;
-import sunshine_dental_care.repositories.doctor.DentalServiceRepository;
-import sunshine_dental_care.repositories.doctor.MedicalRecordRepository;
-import sunshine_dental_care.repositories.reception.ServiceVariantRepo;
-import sunshine_dental_care.services.upload_file.ImageStorageService;
-
+import java.io.IOException;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Optional;
-import java.util.stream.Collectors;
 import java.util.Set;
+import java.util.stream.Collectors;
+
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.multipart.MultipartFile;
+
+import com.lowagie.text.DocumentException;
+
+import lombok.RequiredArgsConstructor;
+import sunshine_dental_care.dto.doctorDTO.ClinicDTO;
+import sunshine_dental_care.dto.doctorDTO.DoctorDTO;
+import sunshine_dental_care.dto.doctorDTO.MedicalRecordDTO;
+import sunshine_dental_care.dto.doctorDTO.MedicalRecordImageDTO;
+import sunshine_dental_care.dto.doctorDTO.MedicalRecordRequest;
+import sunshine_dental_care.dto.doctorDTO.PatientDTO;
+import sunshine_dental_care.dto.doctorDTO.ServiceDTO;
+import sunshine_dental_care.dto.doctorDTO.ServiceVariantDTO;
+import sunshine_dental_care.entities.*;
+import sunshine_dental_care.repositories.auth.ClinicRepo;
+import sunshine_dental_care.repositories.auth.PatientRepo;
+import sunshine_dental_care.repositories.doctor.AppointmentRepository;
+import sunshine_dental_care.repositories.doctor.DentalServiceRepository;
+import sunshine_dental_care.repositories.doctor.DoctorRepo;
+import sunshine_dental_care.repositories.doctor.MedicalRecordRepository;
+import sunshine_dental_care.services.upload_file.ImageStorageService;
 
 @Service
 @RequiredArgsConstructor
@@ -56,10 +51,8 @@ public class PatientMedicalRecordServiceImpl implements PatientMedicalRecordServ
     private final ClinicRepo clinicRepo;
     private final DoctorRepo doctorRepo;
     private final AppointmentRepository appointmentRepository;
-    private final AppointmentServiceRepository appointmentServiceRepository;
     private final DentalServiceRepository dentalServiceRepository;
-    private final ServiceVariantRepo serviceVariantRepo;
-    private final ImageStorageService imageStorageService;
+    private final  ImageStorageService imageStorageService;
 
     // Lấy danh sách hồ sơ bệnh án của một bệnh nhân
     @Override
@@ -73,6 +66,44 @@ public class PatientMedicalRecordServiceImpl implements PatientMedicalRecordServ
                 .toList();
     }
 
+    // Build a simple list of service detail strings for the medical record
+    private List<String> toServiceDetails(MedicalRecord record) {
+        List<String> details = new ArrayList<>();
+
+        // If medical record is linked to an appointment, prefer appointment services
+        if (record.getAppointment() != null && record.getAppointment().getAppointmentServices() != null
+                && !record.getAppointment().getAppointmentServices().isEmpty()) {
+            for (AppointmentService apptService : record.getAppointment().getAppointmentServices()) {
+                StringBuilder sb = new StringBuilder();
+                if (apptService.getService() != null) {
+                    sb.append(apptService.getService().getServiceName());
+                } else {
+                    sb.append("Unknown Service");
+                }
+                if (apptService.getServiceVariant() != null) {
+                    sb.append(" (").append(apptService.getServiceVariant().getVariantName()).append(")");
+                }
+                sb.append(" x").append(apptService.getQuantity());
+                if (apptService.getUnitPrice() != null) {
+                    sb.append(" - ").append(apptService.getUnitPrice().toPlainString());
+                }
+                if (apptService.getNote() != null && !apptService.getNote().isBlank()) {
+                    sb.append(" (Note: ").append(apptService.getNote()).append(")");
+                }
+                details.add(sb.toString());
+            }
+            return details;
+        }
+
+        // Fallback: if MedicalRecord has a direct service reference
+        if (record.getService() != null) {
+            details.add(record.getService().getServiceName());
+            return details;
+        }
+
+        return List.of();
+    }
+
     // Tạo mới một hồ sơ bệnh án cho bệnh nhân
     @Override
     @Transactional
@@ -82,30 +113,7 @@ public class PatientMedicalRecordServiceImpl implements PatientMedicalRecordServ
         Clinic clinic = getClinic(request.clinicId());
         User doctor = getDoctor(request.doctorId());
         Appointment appointment = getAppointment(request.appointmentId());
-        
-        // Ưu tiên sử dụng appointmentServiceId để lấy cả service và variant
-        AppointmentService appointmentService = null;
-        sunshine_dental_care.entities.Service service = null;
-        ServiceVariant serviceVariant = null;
-        
-        if (request.appointmentServiceId() != null) {
-            // Nếu có appointmentServiceId, lấy từ đó
-            appointmentService = getAppointmentService(request.appointmentServiceId());
-            service = appointmentService.getService();
-            serviceVariant = appointmentService.getServiceVariant();
-        } else if (appointment != null && appointment.getAppointmentServices() != null 
-                   && !appointment.getAppointmentServices().isEmpty()) {
-            // Nếu có appointment nhưng không có appointmentServiceId, lấy appointmentService đầu tiên từ appointment
-            appointmentService = appointment.getAppointmentServices().get(0);
-            service = appointmentService.getService();
-            serviceVariant = appointmentService.getServiceVariant();
-        } else if (request.serviceId() != null) {
-            // Fallback: lấy trực tiếp từ serviceId và variantId nếu có
-            service = getService(request.serviceId());
-            if (request.variantId() != null) {
-                serviceVariant = getServiceVariant(request.variantId());
-            }
-        }
+        sunshine_dental_care.entities.Service service = getService(request.serviceId());
 
         // Tạo mới entity MedicalRecord và set giá trị
         MedicalRecord record = new MedicalRecord();
@@ -114,8 +122,6 @@ public class PatientMedicalRecordServiceImpl implements PatientMedicalRecordServ
         record.setDoctor(doctor);
         record.setAppointment(appointment);
         record.setService(service);
-        record.setServiceVariant(serviceVariant);
-        record.setAppointmentService(appointmentService);
         applyRequest(record, request); // set các trường thông tin khác
 
         // Thiết lập thời gian tạo và cập nhật
@@ -144,36 +150,9 @@ public class PatientMedicalRecordServiceImpl implements PatientMedicalRecordServ
             record.setDoctor(getDoctor(request.doctorId()));
         }
 
-        // Cập nhật lịch hẹn
-        Appointment appointment = getAppointment(request.appointmentId());
-        record.setAppointment(appointment);
-        
-        // Ưu tiên sử dụng appointmentServiceId để lấy cả service và variant
-        if (request.appointmentServiceId() != null) {
-            // Nếu có appointmentServiceId, lấy từ đó
-            AppointmentService appointmentService = getAppointmentService(request.appointmentServiceId());
-            record.setAppointmentService(appointmentService);
-            record.setService(appointmentService.getService());
-            record.setServiceVariant(appointmentService.getServiceVariant());
-        } else if (appointment != null && appointment.getAppointmentServices() != null 
-                   && !appointment.getAppointmentServices().isEmpty()) {
-            // Nếu có appointment nhưng không có appointmentServiceId, lấy appointmentService đầu tiên từ appointment
-            AppointmentService appointmentService = appointment.getAppointmentServices().get(0);
-            record.setAppointmentService(appointmentService);
-            record.setService(appointmentService.getService());
-            record.setServiceVariant(appointmentService.getServiceVariant());
-        } else {
-            // Fallback: cập nhật dịch vụ và variant nếu có
-            if (request.serviceId() != null) {
-                record.setService(getService(request.serviceId()));
-            }
-            if (request.variantId() != null) {
-                record.setServiceVariant(getServiceVariant(request.variantId()));
-            } else {
-                record.setServiceVariant(null);
-            }
-            record.setAppointmentService(null);
-        }
+        // Cập nhật lịch hẹn, dịch vụ nếu có
+        record.setAppointment(getAppointment(request.appointmentId()));
+        record.setService(getService(request.serviceId()));
 
         // Gán thông tin từ request và cập nhật thời gian sửa đổi
         applyRequest(record, request);
@@ -302,15 +281,13 @@ public class PatientMedicalRecordServiceImpl implements PatientMedicalRecordServ
                 .orElseThrow(() -> new IllegalArgumentException("Doctor not found"));
     }
 
-    // Lấy lịch hẹn theo id (có thể null) - load cả appointmentServices để lấy service và variant
+    // Lấy lịch hẹn theo id (có thể null)
     private Appointment getAppointment(Integer appointmentId) {
         if (appointmentId == null) {
             return null;
         }
-        // Ưu tiên sử dụng query có JOIN FETCH appointmentServices
-        return appointmentRepository.findByIdWithAppointmentServices(appointmentId)
-                .orElseGet(() -> appointmentRepository.findById(appointmentId)
-                        .orElseThrow(() -> new IllegalArgumentException("Appointment not found")));
+        return appointmentRepository.findById(appointmentId)
+                .orElseThrow(() -> new IllegalArgumentException("Appointment not found"));
     }
 
     // Lấy dịch vụ theo id (có thể null)
@@ -322,24 +299,6 @@ public class PatientMedicalRecordServiceImpl implements PatientMedicalRecordServ
                 .orElseThrow(() -> new IllegalArgumentException("Service not found"));
     }
 
-    // Lấy AppointmentService theo id (có thể null)
-    private AppointmentService getAppointmentService(Integer appointmentServiceId) {
-        if (appointmentServiceId == null) {
-            return null;
-        }
-        return appointmentServiceRepository.findById(appointmentServiceId)
-                .orElseThrow(() -> new IllegalArgumentException("AppointmentService not found"));
-    }
-
-    // Lấy ServiceVariant theo id (có thể null)
-    private ServiceVariant getServiceVariant(Integer variantId) {
-        if (variantId == null) {
-            return null;
-        }
-        return serviceVariantRepo.findById(variantId)
-                .orElseThrow(() -> new IllegalArgumentException("ServiceVariant not found"));
-    }
-
     // --- Các hàm chuyển đổi entity sang DTO để trả dữ liệu ra ngoài ---
 
     // Chuyển entity MedicalRecord sang MedicalRecordDTO
@@ -347,12 +306,12 @@ public class PatientMedicalRecordServiceImpl implements PatientMedicalRecordServ
         // Nếu có appointmentService, ưu tiên lấy service và variant từ đó
         sunshine_dental_care.entities.Service service = record.getService();
         ServiceVariant serviceVariant = record.getServiceVariant();
-        
+
         if (record.getAppointmentService() != null) {
             service = record.getAppointmentService().getService();
             serviceVariant = record.getAppointmentService().getServiceVariant();
         }
-        
+
         return MedicalRecordDTO.builder()
                 .recordId(record.getId())
                 .clinic(toClinicDTO(record.getClinic()))
@@ -475,12 +434,70 @@ public class PatientMedicalRecordServiceImpl implements PatientMedicalRecordServ
                 .build();
     }
 
-    // Chuyển entity ServiceVariant sang ServiceVariantDTO
+    // Export hồ sơ bệnh án ra file PDF
+    @Override
+    @Transactional
+    public byte[] exportRecordToPDF(Integer patientId, Integer recordId) {
+        // Lấy hồ sơ bệnh án từ database
+        MedicalRecord record = getRecord(patientId, recordId);
+        
+        // Đảm bảo các lazy-loaded relationships được fetch
+        // Fetch clinic
+        if (record.getClinic() != null) {
+            record.getClinic().getClinicName();
+        }
+        
+        // Fetch patient
+        if (record.getPatient() != null) {
+            record.getPatient().getFullName();
+            record.getPatient().getPatientCode();
+        }
+        
+        // Fetch doctor
+        if (record.getDoctor() != null) {
+            record.getDoctor().getFullName();
+        }
+        
+        // Fetch appointment và appointment services nếu có
+        if (record.getAppointment() != null) {
+            Appointment appointment = record.getAppointment();
+            if (appointment.getAppointmentServices() != null) {
+                for (AppointmentService apptService : appointment.getAppointmentServices()) {
+                    if (apptService.getService() != null) {
+                        apptService.getService().getServiceName();
+                    }
+                    if (apptService.getServiceVariant() != null) {
+                        apptService.getServiceVariant().getVariantName();
+                    }
+                }
+            }
+        }
+        
+        // Fetch service nếu có
+        if (record.getService() != null) {
+            record.getService().getServiceName();
+        }
+        
+        // Fetch images nếu có
+        if (record.getMedicalRecordImages() != null) {
+            record.getMedicalRecordImages().size();
+        }
+
+        // Tạo PDF exporter và export
+        try {
+            MedicalRecordPdfService medicalRecordPdfService = new MedicalRecordPdfService();
+            return medicalRecordPdfService.generatePdf(record);
+        } catch (IOException e) {
+            throw new RuntimeException("Failed to export medical record to PDF", e);
+        }
+
+    }
+
     private ServiceVariantDTO toServiceVariantDTO(ServiceVariant serviceVariant) {
         if (serviceVariant == null) {
             return null;
         }
-        
+
         return ServiceVariantDTO.builder()
                 .variantId(serviceVariant.getId())
                 .variantName(serviceVariant.getVariantName())
@@ -497,5 +514,6 @@ public class PatientMedicalRecordServiceImpl implements PatientMedicalRecordServ
         return medicalRecordRepository.findByIdAndPatientId(recordId, patientId)
                 .orElseThrow(() -> new IllegalArgumentException("Medical record not found"));
     }
+
 }
 

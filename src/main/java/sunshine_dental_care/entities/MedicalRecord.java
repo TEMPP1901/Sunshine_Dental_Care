@@ -50,22 +50,18 @@ public class MedicalRecord {
     private AppointmentService appointmentService;
 
     @Nationalized
-    @Lob
     @Column(name = "diagnosis")
     private String diagnosis;
 
     @Nationalized
-    @Lob
     @Column(name = "treatmentPlan")
     private String treatmentPlan;
 
     @Nationalized
-    @Lob
     @Column(name = "prescriptionNote")
     private String prescriptionNote;
 
     @Nationalized
-    @Lob
     @Column(name = "note")
     private String note;
 

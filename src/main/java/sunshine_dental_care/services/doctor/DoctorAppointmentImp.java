@@ -1,6 +1,13 @@
 package sunshine_dental_care.services.doctor;
 
+import java.time.Instant;
+import java.util.List;
+import java.util.stream.Collectors;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
+
 import sunshine_dental_care.dto.doctorDTO.ClinicDTO;
 import sunshine_dental_care.dto.doctorDTO.DoctorAppointmentDTO;
 import sunshine_dental_care.dto.doctorDTO.DoctorDTO;
@@ -13,20 +20,21 @@ import sunshine_dental_care.entities.AppointmentService;
 import sunshine_dental_care.repositories.doctor.DoctorAppointmentRepo;
 import sunshine_dental_care.repositories.doctor.DoctorRepo;
 
-import java.time.Instant;
-import java.util.List;
-import java.util.stream.Collectors;
-
 @Service
 public class DoctorAppointmentImp implements DoctorAppointmentService{
 
 
     private DoctorRepo _doctorRepo;
     private DoctorAppointmentRepo _doctorAppointmentRepo;
+    private sunshine_dental_care.repositories.doctor.MedicalRecordRepository _medicalRecordRepository;
 
-    public DoctorAppointmentImp(DoctorRepo doctorRepo, DoctorAppointmentRepo doctorAppointmentRepo) {
+    private static final Logger logger = LoggerFactory.getLogger(DoctorAppointmentImp.class); 
+
+    public DoctorAppointmentImp(DoctorRepo doctorRepo, DoctorAppointmentRepo doctorAppointmentRepo,
+                                sunshine_dental_care.repositories.doctor.MedicalRecordRepository medicalRecordRepository) {
         _doctorRepo = doctorRepo;
         _doctorAppointmentRepo = doctorAppointmentRepo;
+        _medicalRecordRepository = medicalRecordRepository;
     }
 
     // Hàm chuyển đổi từ entity Appointment sang DTO DoctorAppointmentDTO
@@ -200,12 +208,97 @@ public class DoctorAppointmentImp implements DoctorAppointmentService{
     }
 
     @Override
-    // Thay đổi trạng thái của lịch hẹn (VD: đã hoàn thành, đã hủy,...)
     public void changeStatusAppointment(Integer appointmentId, String status) {
-        _doctorAppointmentRepo.findById(appointmentId)
-            .orElseThrow(() -> new IllegalArgumentException("Appointment not found"));
-        _doctorAppointmentRepo.updateStatus(appointmentId, status); // Cập nhật trạng thái lịch hẹn
+        var appointment = _doctorAppointmentRepo.findById(appointmentId)
+                .orElseThrow(() -> new IllegalArgumentException("Appointment not found"));
+
+        String originalStatus = appointment.getStatus();
+        String normalized = status == null ? "" : status.trim().toUpperCase();
+
+        // Normalize status values
+        if ("IN-PROGRESS".equals(normalized) || "IN_PROGRESS".equals(normalized)) {
+            normalized = "PROCESSING";
+        }
+        if ("CANCELLED".equals(normalized)) {
+            normalized = "CANCELED";
+        }
+
+        switch (normalized) {
+            case "COMPLETED":
+                validateCanComplete(appointment);
+                break;
+            case "PROCESSING":
+                validateCanProcess(appointment);
+                break;
+            case "CANCELED":
+                validateCanCancel(appointment);
+                break;
+            default:
+                // For other statuses, allow direct update
+                break;
+        }
+
+        // Update status and note
+        appointment.setStatus(normalized);
+
+
+        _doctorAppointmentRepo.save(appointment);
     }
+
+    // Kiểm tra điều kiện chuyển sang PROCESSING
+    private void validateCanProcess(Appointment appointment) {
+        java.time.Instant now = java.time.Instant.now();
+        java.time.Instant startMinus5 = appointment.getStartDateTime().minus(java.time.Duration.ofMinutes(5));
+
+        if (now.isBefore(startMinus5)) {
+            throw new IllegalArgumentException("Cannot set to PROCESSING: appointment can only start within 5 minutes of scheduled time");
+        }
+
+        if (!"SCHEDULED".equalsIgnoreCase(appointment.getStatus())) {
+            throw new IllegalArgumentException("Cannot set to PROCESSING: only SCHEDULED appointments can be started");
+        }
+    }
+
+    // Kiểm tra điều kiện chuyển sang COMPLETED - FIXED
+    private void validateCanComplete(Appointment appointment) {
+        if (!"PROCESSING".equalsIgnoreCase(appointment.getStatus())) {
+            throw new IllegalArgumentException("Cannot set to COMPLETED: appointment must be PROCESSING");
+        }
+
+        // Kiểm tra chắc chắn đã có medical record cho appointment này
+        Integer appointmentId = appointment.getId();
+
+        // Cách 1: Kiểm tra trực tiếp qua appointment
+        boolean hasMedicalRecord = _medicalRecordRepository.existsByAppointmentId(appointmentId);
+
+        // Cách 2: Hoặc kiểm tra qua appointmentService nếu cần
+        if (!hasMedicalRecord) {
+            hasMedicalRecord = _medicalRecordRepository.existsByAppointmentService_Appointment_Id(appointmentId);
+        }
+
+        logger.info("[DoctorAppointment] Checking medical record for appointmentId={}, result={}",
+                appointmentId, hasMedicalRecord);
+
+        if (!hasMedicalRecord) {
+            throw new IllegalArgumentException("Cannot set to COMPLETED: medical record is required for this appointment");
+        }
+    }
+
+    // Kiểm tra điều kiện chuyển sang CANCELED
+    private void validateCanCancel(Appointment appointment) {
+        if (!"SCHEDULED".equalsIgnoreCase(appointment.getStatus()) &&
+                !"CONFIRMED".equalsIgnoreCase(appointment.getStatus())) {
+            throw new IllegalArgumentException("Cannot set to CANCELED: only SCHEDULED or CONFIRMED appointments allowed");
+        }
+
+        java.time.Instant now = java.time.Instant.now();
+        java.time.Instant startPlus20 = appointment.getStartDateTime().plus(java.time.Duration.ofMinutes(20));
+
+        if (now.isBefore(startPlus20)) {
+            throw new IllegalArgumentException("Cannot set to CANCELED before 20 minutes after scheduled start time");
+        }
+    }
+
 
     @Override
     // Lấy các lịch hẹn của bác sĩ trong một khoảng thời gian cụ thể

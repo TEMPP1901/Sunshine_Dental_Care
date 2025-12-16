@@ -30,7 +30,7 @@ public class GeminiApiClient {
     private final RestTemplate restTemplate = new RestTemplate();
     private final ObjectMapper objectMapper = new ObjectMapper();
 
-    @Value("${app.gemini.api-key:}")
+    @Value("${gemini.api.key}")
     private String geminiApiKey;
 
     public String generateContent(String prompt) {

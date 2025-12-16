@@ -5,6 +5,7 @@ import sunshine_dental_care.dto.doctorDTO.MedicalRecordDTO;
 import sunshine_dental_care.dto.doctorDTO.MedicalRecordImageDTO;
 import sunshine_dental_care.dto.doctorDTO.MedicalRecordRequest;
 
+import java.io.IOException;
 import java.util.List;
 
 public interface PatientMedicalRecordService {
@@ -17,5 +18,7 @@ public interface PatientMedicalRecordService {
     MedicalRecordImageDTO uploadImage(Integer patientId, Integer recordId, MultipartFile file, String description, String aiTag);
 
     void deleteImage(Integer patientId, Integer recordId, Integer imageId);
+
+    byte[] exportRecordToPDF(Integer patientId, Integer recordId) throws IOException;
 }
 
