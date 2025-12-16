@@ -1,13 +1,14 @@
 package sunshine_dental_care.security;
 
-import lombok.Getter;
+import java.util.Collection;
+import java.util.List;
+import java.util.stream.Collectors;
+
 import org.springframework.security.core.GrantedAuthority;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.userdetails.User;
 
-import java.util.Collection;
-import java.util.List;
-import java.util.stream.Collectors;
+import lombok.Getter;
 
 @Getter
 public class CurrentUser extends User {
@@ -26,7 +27,8 @@ public class CurrentUser extends User {
 
     // --- CONSTRUCTOR 2: Hỗ trợ WebSocketAuthInterceptor (4 tham số) ---
     public CurrentUser(Integer userId, String email, String fullName, List<String> roles) {
-        super(email, "", roles.stream().map(SimpleGrantedAuthority::new).collect(Collectors.toList()));
+        // Dùng userId làm username để convertAndSendToUser(userId, ...) định tuyến đúng
+        super(String.valueOf(userId), "", roles.stream().map(SimpleGrantedAuthority::new).collect(Collectors.toList()));
         this.userId = userId;
         this.email = email;
         this.fullName = fullName;

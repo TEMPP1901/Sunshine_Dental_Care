@@ -18,12 +18,14 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import ai.onnxruntime.OrtException;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import sunshine_dental_care.services.interfaces.hr.FaceRecognitionService;
 import sunshine_dental_care.utils.ArcFaceOnnx;
 
 @Service
 @Slf4j
+@RequiredArgsConstructor
 public class FaceRecognitionServiceImpl implements FaceRecognitionService {
 
     @Value("${app.face-recognition.model-path:models/arcface.onnx}")
@@ -99,6 +101,7 @@ public class FaceRecognitionServiceImpl implements FaceRecognitionService {
         Path tempFile = Files.createTempFile("face_", ".jpg");
         try {
             Files.copy(imageFile.getInputStream(), tempFile, StandardCopyOption.REPLACE_EXISTING);
+            
             String embedding = extractEmbeddingFromPath(tempFile.toString());
             // Chỉ cần validate format JSON ở đây (extractEmbeddingFromPath đã validate
             // trước đó)

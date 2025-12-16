@@ -57,8 +57,8 @@ public interface NotificationRepository extends JpaRepository<Log, Integer> {
     long countExpiredByUserId(@Param("userId") Integer userId);
 
     // Đếm số thông báo trong ngày cho user
-    @Query(value = "SELECT COUNT(n) FROM Logs n WHERE n.userId = :userId " +
-           "AND CAST(n.createdAt AS DATE) = CAST(GETDATE() AS DATE)", 
+    @Query(value = "SELECT COUNT(*) FROM Logs WHERE userId = :userId " +
+           "AND CAST(createdAt AS DATE) = CAST(GETDATE() AS DATE)", 
            nativeQuery = true)
     long countTodayByUserId(@Param("userId") Integer userId);
 
@@ -81,11 +81,11 @@ public interface NotificationRepository extends JpaRepository<Log, Integer> {
     List<Log> findUnreadNotifications(@Param("userId") Integer userId);
 
     // Kiểm tra xem đã có notification với type và relatedEntityId cụ thể trong ngày hôm nay chưa
-    @Query(value = "SELECT COUNT(n) FROM Logs n WHERE n.userId = :userId " +
-           "AND n.type = :type " +
-           "AND n.relatedEntityType = :relatedEntityType " +
-           "AND n.relatedEntityId = :relatedEntityId " +
-           "AND CAST(n.createdAt AS DATE) = CAST(GETDATE() AS DATE)",
+    @Query(value = "SELECT COUNT(*) FROM Logs WHERE userId = :userId " +
+           "AND type = :type " +
+           "AND relatedEntityType = :relatedEntityType " +
+           "AND relatedEntityId = :relatedEntityId " +
+           "AND CAST(createdAt AS DATE) = CAST(GETDATE() AS DATE)",
            nativeQuery = true)
     long countByUserIdAndTypeAndEntityToday(
         @Param("userId") Integer userId,

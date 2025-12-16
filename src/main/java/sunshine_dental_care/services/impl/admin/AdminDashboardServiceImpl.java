@@ -19,7 +19,6 @@ import lombok.extern.slf4j.Slf4j;
 import sunshine_dental_care.dto.adminDTO.DailyRevenueDto;
 import sunshine_dental_care.dto.adminDTO.DashboardStatisticsDto;
 import sunshine_dental_care.dto.adminDTO.TopDoctorPerformanceDto;
-import sunshine_dental_care.repositories.admin.AdminAppointmentStatsRepository;
 import sunshine_dental_care.repositories.admin.AdminInvoiceStatsRepository;
 import sunshine_dental_care.repositories.admin.AdminPatientStatsRepository;
 import sunshine_dental_care.repositories.auth.ClinicRepo;
@@ -42,7 +41,6 @@ public class AdminDashboardServiceImpl implements AdminDashboardService {
         private final LeaveRequestRepo leaveRequestRepo;
         private final AttendanceService attendanceService;
         private final AdminInvoiceStatsRepository adminInvoiceStatsRepository;
-        private final AdminAppointmentStatsRepository adminAppointmentStatsRepository;
         private final AdminPatientStatsRepository adminPatientStatsRepository;
         private final sunshine_dental_care.repositories.hr.AttendanceRepository attendanceRepo;
 
@@ -118,32 +116,12 @@ public class AdminDashboardServiceImpl implements AdminDashboardService {
                                 // Các giá trị sẽ giữ nguyên = 0 (đã khởi tạo ở trên)
                         }
 
-                        // Thống kê lịch hẹn
+                        // Thống kê lịch hẹn - Đã xóa khỏi admin
                         Long todayAppointments = 0L;
                         Long weekAppointments = 0L;
                         Long monthAppointments = 0L;
                         Long todayCancelledAppointments = 0L;
                         Map<String, Long> appointmentsByStatus = new HashMap<>();
-                        try {
-                                List<String> validStatuses = List.of("CONFIRMED", "COMPLETED", "SCHEDULED");
-                                todayAppointments = adminAppointmentStatsRepository.countByStartBetweenAndStatusIn(
-                                                dayStart, dayEnd, validStatuses);
-                                weekAppointments = adminAppointmentStatsRepository.countByStartBetweenAndStatusIn(
-                                                weekRangeStart, weekEnd, validStatuses);
-                                monthAppointments = adminAppointmentStatsRepository.countByStartBetweenAndStatusIn(
-                                                monthRangeStart, weekEnd, validStatuses);
-                                todayCancelledAppointments = adminAppointmentStatsRepository.countCancelledBetween(dayStart, dayEnd);
-
-                                // Nhóm số lượng lịch theo trạng thái trong tháng
-                                appointmentsByStatus = adminAppointmentStatsRepository.countByStatusBetween(
-                                                monthRangeStart, weekEnd).stream()
-                                                .collect(Collectors.toMap(
-                                                                AdminAppointmentStatsRepository.StatusCountView::getStatus,
-                                                                AdminAppointmentStatsRepository.StatusCountView::getTotal));
-                        } catch (Exception e) {
-                                log.error("Lỗi nghiêm trọng khi đếm số lịch hẹn. Các giá trị appointments có thể không chính xác. " +
-                                        "Error: {}", e.getMessage(), e);
-                        }
 
                         // Thống kê khách hàng
                         Long totalPatients = 0L;
@@ -191,32 +169,11 @@ public class AdminDashboardServiceImpl implements AdminDashboardService {
                                         "Error: {}", e.getMessage(), e);
                         }
 
-                        // Tỷ lệ quay lại khám/thống kê nguồn khách của bệnh nhân trong tháng
+                        // Tỷ lệ quay lại khám/thống kê nguồn khách của bệnh nhân trong tháng - Đã xóa khỏi admin
                         double retentionRate = 0.0;
                         long returningPatients = 0L;
                         long patientsThisMonth = 0L;
                         Map<String, Long> sourceBreakdown = new HashMap<>();
-                        try {
-                                // Tối ưu: Dùng COUNT queries thay vì load toàn bộ patient IDs vào memory
-                                patientsThisMonth = adminAppointmentStatsRepository
-                                                .countDistinctPatientsInRange(monthRangeStart, monthRangeEnd);
-                                returningPatients = adminAppointmentStatsRepository
-                                                .countReturningPatients(monthRangeStart, monthRangeEnd);
-
-                                retentionRate = patientsThisMonth > 0
-                                                ? (returningPatients * 100.0) / patientsThisMonth
-                                                : 0.0;
-
-                                // Phân bổ theo kênh/phương thức tiếp cận khách hàng trong tháng
-                                sourceBreakdown = adminAppointmentStatsRepository.countByChannelBetween(
-                                                monthRangeStart, monthRangeEnd).stream()
-                                                .collect(Collectors.toMap(
-                                                                view -> view.getChannel() != null ? view.getChannel() : "UNKNOWN",
-                                                                AdminAppointmentStatsRepository.ChannelCountView::getTotal));
-                        } catch (Exception e) {
-                                log.error("Lỗi nghiêm trọng khi tính tỷ lệ quay lại khám, phân bổ nguồn khách. " +
-                                        "Các giá trị retentionRate có thể không chính xác. Error: {}", e.getMessage(), e);
-                        }
 
                         // Top 5 bác sĩ có doanh thu cao nhất tháng này
                         List<TopDoctorPerformanceDto> topDoctors = new ArrayList<>();

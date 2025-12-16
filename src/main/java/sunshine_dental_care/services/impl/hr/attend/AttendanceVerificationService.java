@@ -1,5 +1,6 @@
 package sunshine_dental_care.services.impl.hr.attend;
 
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -27,6 +28,10 @@ public class AttendanceVerificationService {
     private final WiFiValidationService wifiValidationService;
     private final sunshine_dental_care.config.WiFiConfig wifiConfig;
     private final ObjectMapper objectMapper = new ObjectMapper();
+
+    // Ngưỡng xác thực khuôn mặt (đọc từ cấu hình, giữ đồng bộ với FaceRecognitionServiceImpl)
+    @Value("${app.face-recognition.similarity-threshold:0.85}")
+    private double faceSimilarityThreshold;
 
     // Xác thực khuôn mặt và WiFi khi chấm công
     public VerificationResult verify(Integer userId,
@@ -102,8 +107,8 @@ public class AttendanceVerificationService {
 
             double similarityScore = faceResult.getSimilarityScore();
             
-            // Với ArcFace model, threshold 0.85-0.9 là an toàn để đảm bảo chỉ mặt đúng
-            double requiredThreshold = 0.85; // cần thỏa mãn >=85% và isVerified=true
+            // Dùng ngưỡng cấu hình (đồng bộ với service trích xuất embedding)
+            double requiredThreshold = faceSimilarityThreshold; // cần thỏa mãn >= threshold và isVerified=true
 
             
             // Tăng threshold lên 0.002 để chặn cả trường hợp modify nhẹ embedding
