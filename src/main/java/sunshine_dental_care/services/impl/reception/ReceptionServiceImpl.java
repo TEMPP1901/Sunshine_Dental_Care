@@ -481,6 +481,10 @@ public class ReceptionServiceImpl implements ReceptionService {
      * Gửi thông báo cho patient khi reception xác nhận hoặc hủy lịch hẹn
      */
     private void sendAppointmentStatusNotification(Appointment appointment, String status) {
+        if (appointment.getStartDateTime().isBefore(java.time.Instant.now())) {
+            log.info("Skip sending notification for past appointment #{}", appointment.getId());
+            return;
+        }
         try {
             if (appointment.getPatient() == null || appointment.getPatient().getUser() == null) {
                 log.warn("Cannot send notification: appointment {} has no patient user", appointment.getId());
