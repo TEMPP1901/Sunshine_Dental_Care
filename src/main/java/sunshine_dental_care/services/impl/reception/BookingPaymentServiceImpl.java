@@ -119,7 +119,7 @@ public class BookingPaymentServiceImpl {
             Appointment appt = appointmentRepo.findById(appointmentId).orElseThrow();
             appt.setPaymentStatus("PAID");
             appt.setTransactionRef(vnpParams.get("vnp_TransactionNo"));
-            if ("AWAITING_PAYMENT".equals(appt.getStatus())) appt.setStatus("CONFIRMED");
+            if ("AWAITING_PAYMENT".equals(appt.getStatus())) appt.setStatus("SCHEDULED");
             appointmentRepo.save(appt);
         } else {
             throw new RuntimeException("Payment Failed");
@@ -203,7 +203,7 @@ public class BookingPaymentServiceImpl {
             appt.setTransactionRef(result.getCaptureId());
 
             if ("AWAITING_PAYMENT".equals(appt.getStatus())) {
-                appt.setStatus("CONFIRMED");
+                appt.setStatus("SCHEDULED");
             }
             appointmentRepo.save(appt);
         } else {

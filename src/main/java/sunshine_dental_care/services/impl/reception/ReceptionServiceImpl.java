@@ -6,6 +6,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
 import jakarta.validation.ValidationException;
+import org.hibernate.Hibernate;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
@@ -322,6 +323,10 @@ public class ReceptionServiceImpl implements ReceptionService {
         if (request.getReason() != null) {
             Log actionLog = new Log();
 
+            actionLog.setType("APPOINTMENT");
+            actionLog.setTitle("Dời lịch hẹn");
+            actionLog.setMessage("Dời lịch hẹn #" + appointment.getId() + ". Lý do: " + request.getReason());
+            actionLog.setPriority("MEDIUM");
             actionLog.setUser(userRepo.getReferenceById(currentUser.userId()));
             actionLog.setClinic(appointment.getClinic());
             actionLog.setTableName("Appointments");
@@ -329,6 +334,8 @@ public class ReceptionServiceImpl implements ReceptionService {
             actionLog.setAction("RESCHEDULE");
             actionLog.setAfterData("Reschedule Reason: " + request.getReason());
 
+            if (actionLog.getCreatedAt() == null) actionLog.setCreatedAt(Instant.now());
+            actionLog.setActionTime(Instant.now());
             logRepo.save(actionLog);
         }
 
@@ -430,6 +437,7 @@ public class ReceptionServiceImpl implements ReceptionService {
 
     // Hàm cập nhật lịch hẹn
     @Override
+    @Transactional
     public AppointmentResponse updateAppointment(Integer appointmentId, AppointmentUpdateRequest request) {
         Appointment appointment = appointmentRepo.findById(appointmentId)
                 .orElseThrow(() -> new ResourceNotFoundException("Appointment not found"));
@@ -454,6 +462,16 @@ public class ReceptionServiceImpl implements ReceptionService {
             if ("CONFIRMED".equalsIgnoreCase(newStatus) || "CANCELLED".equalsIgnoreCase(newStatus)) {
                 sendAppointmentStatusNotification(savedAppointment, newStatus);
             }
+        }
+
+        if (savedAppointment.getDoctor() != null) {
+            Hibernate.initialize(savedAppointment.getDoctor());
+        }
+        if (savedAppointment.getPatient() != null) {
+            Hibernate.initialize(savedAppointment.getPatient());
+        }
+        if (savedAppointment.getRoom() != null) {
+            Hibernate.initialize(savedAppointment.getRoom());
         }
 
         return appointmentMapper.mapToAppointmentResponse(savedAppointment);
