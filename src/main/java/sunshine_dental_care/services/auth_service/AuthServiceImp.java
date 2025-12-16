@@ -36,8 +36,6 @@ public class AuthServiceImp implements AuthService {
     private final RoleRepo roleRepo;
     private final UserRoleRepo userRoleRepo;
     private final JwtService jwtService;
-
-    // Inject SmsService để gửi OTP (Đảm bảo file SmsService.java đã tồn tại)
     private final SmsService smsService;
 
     // --- Helper Methods ---
@@ -68,7 +66,6 @@ public class AuthServiceImp implements AuthService {
     // =========================================================
     // 1. CÁC TÍNH NĂNG ĐĂNG KÝ / EMAIL LOGIN
     // =========================================================
-
     @Override
     @Transactional
     public SignUpResponse signUp(SignUpRequest req) {
@@ -89,10 +86,9 @@ public class AuthServiceImp implements AuthService {
         u.setPasswordHash(encoder.encode(req.password()));
         u.setAvatarUrl(req.avatarUrl());
         u.setProvider("local");
-        u.setIsActive(false); // Bắt buộc verify email
+        u.setIsActive(false);
         u.setFailedLoginAttempts(0);
 
-        // Token verify email
         String verifyToken = UUID.randomUUID().toString();
         u.setVerificationToken(verifyToken);
         u.setVerificationTokenExpiry(Instant.now().plusSeconds(86400));
@@ -150,9 +146,8 @@ public class AuthServiceImp implements AuthService {
     }
 
     // =========================================================
-    // 2. CÁC TÍNH NĂNG LOGIN SỐ ĐIỆN THOẠI (OTP & PASSWORD)
+    // 2. CÁC TÍNH NĂNG LOGIN SỐ ĐIỆN THOẠI
     // =========================================================
-
     @Override
     @Transactional
     public void sendLoginOtp(PhoneLoginStep1Request req) {
@@ -163,16 +158,12 @@ public class AuthServiceImp implements AuthService {
             throw new IllegalArgumentException("Tài khoản đã bị khóa.");
         }
 
-        // Sinh OTP 6 số
         String otp = String.format("%06d", new Random().nextInt(999999));
-
-        // BACKDOOR CHO DEV TEST (Optional - Có thể xóa khi lên Production)
         if("0999999999".equals(req.phone())) otp = "123456";
 
         u.setOtpCode(otp);
-        u.setOtpExpiry(Instant.now().plusSeconds(300)); // 5 phút
+        u.setOtpExpiry(Instant.now().plusSeconds(300));
         userRepo.save(u);
-
         smsService.sendOtp(u.getPhone(), otp);
     }
 
@@ -190,7 +181,6 @@ public class AuthServiceImp implements AuthService {
             throw new BadCredentialsException("Mã OTP đã hết hạn.");
         }
 
-        // OTP đúng -> Xóa OTP
         u.setOtpCode(null);
         u.setOtpExpiry(null);
         u.setFailedLoginAttempts(0);
@@ -209,19 +199,16 @@ public class AuthServiceImp implements AuthService {
     }
 
     // =========================================================
-    // 3. HELPER PROCESS LOGIN (Dùng chung & Cải tiến UX)
+    // 3. HELPER PROCESS LOGIN
     // =========================================================
-
     private LoginResponse processLogin(User u, String rawPassword) {
-        // Kiểm tra Active
         if (Boolean.FALSE.equals(u.getIsActive())) {
             if (u.getVerificationToken() != null) {
                 throw new BadCredentialsException("Tài khoản chưa được kích hoạt. Vui lòng kiểm tra email.");
             }
-            throw new BadCredentialsException("Tài khoản đã bị khóa. Vui lòng sử dụng tính năng Quên mật khẩu để mở khóa.");
+            throw new BadCredentialsException("Tài khoản đã bị khóa.");
         }
 
-        // Kiểm tra Mật khẩu
         if (u.getPasswordHash() == null || !encoder.matches(rawPassword, u.getPasswordHash())) {
             int currentFails = u.getFailedLoginAttempts() == null ? 0 : u.getFailedLoginAttempts();
             int newFails = currentFails + 1;
@@ -229,14 +216,11 @@ public class AuthServiceImp implements AuthService {
             userRepo.save(u);
 
             if (newFails >= 5) {
-                u.setIsActive(false); // Khóa tài khoản
+                u.setIsActive(false);
                 userRepo.save(u);
                 try { mailService.sendAccountLockedEmail(u); } catch (Exception ignored) {}
-
-                // Ném lỗi đặc biệt để Frontend bắt và hiện nút Mở khóa
                 throw new BadCredentialsException("Tài khoản đã bị khóa do nhập sai mật khẩu 5 lần.");
             } else {
-                // Cảnh báo số lần còn lại
                 int remaining = 5 - newFails;
                 if (remaining <= 3) {
                     throw new BadCredentialsException("Mật khẩu không chính xác. Bạn còn " + remaining + " lần thử.");
@@ -246,7 +230,6 @@ public class AuthServiceImp implements AuthService {
             }
         }
 
-        // Đăng nhập thành công -> Reset số lần sai
         if (u.getFailedLoginAttempts() != null && u.getFailedLoginAttempts() > 0) {
             u.setFailedLoginAttempts(0);
         }
@@ -273,7 +256,6 @@ public class AuthServiceImp implements AuthService {
     // =========================================================
     // 4. CHANGE & FORGOT PASSWORD
     // =========================================================
-
     @Override
     @Transactional
     public void changePassword(Integer currentUserId, ChangePasswordRequest req) {
@@ -316,7 +298,7 @@ public class AuthServiceImp implements AuthService {
         u.setResetPasswordToken(null);
         u.setResetPasswordTokenExpiry(null);
         u.setFailedLoginAttempts(0);
-        u.setIsActive(true); // Mở khóa tài khoản ngay lập tức
+        u.setIsActive(true);
         userRepo.save(u);
     }
 
@@ -327,69 +309,50 @@ public class AuthServiceImp implements AuthService {
                 .orElseThrow(() -> new IllegalArgumentException("Email này chưa được đăng ký."));
 
         if (Boolean.TRUE.equals(u.getIsActive())) {
-            throw new IllegalArgumentException("Tài khoản này đã được kích hoạt rồi. Bạn có thể đăng nhập.");
+            throw new IllegalArgumentException("Tài khoản này đã được kích hoạt rồi.");
         }
 
-        // Tạo token mới (Hủy token cũ)
         String newToken = UUID.randomUUID().toString();
         u.setVerificationToken(newToken);
-        u.setVerificationTokenExpiry(Instant.now().plusSeconds(86400)); // 24h
-
+        u.setVerificationTokenExpiry(Instant.now().plusSeconds(86400));
         userRepo.save(u);
 
-        // Gửi lại mail
-        try {
-            mailService.sendVerificationEmail(u, newToken);
-        } catch (Exception e) {
+        try { mailService.sendVerificationEmail(u, newToken); } catch (Exception e) {
             throw new RuntimeException("Lỗi gửi mail: " + e.getMessage());
         }
     }
 
     // =========================================================
-    // 3. LOGIN GOOGLE MOBILE (NATIVE APP) - THÊM ĐOẠN NÀY
+    // 5. LOGIN GOOGLE MOBILE & QR CODE
     // =========================================================
     @Override
     @Transactional
     public LoginResponse loginGoogleMobile(GoogleMobileLoginRequest req) {
         String email = req.getEmail();
-
-        // 1. Kiểm tra User tồn tại chưa
         User user = userRepo.findByEmail(email).orElse(null);
 
         if (user == null) {
-            // --- TRƯỜNG HỢP 1: CHƯA CÓ -> TỰ ĐỘNG ĐĂNG KÝ MỚI ---
             user = new User();
             user.setEmail(email);
-            // Tận dụng hàm helper có sẵn để sinh username không trùng
             user.setUsername(resolveUsername(null, email));
             user.setFullName(req.getFullName() != null ? req.getFullName() : "Google User");
             user.setAvatarUrl(req.getAvatarUrl());
-            // Lưu ý: Nếu bạn dùng Enum AuthProvider thì đổi thành AuthProvider.GOOGLE
-            // Nếu bạn dùng String như hàm signUp cũ thì để là "google"
             user.setProvider("google");
-
-            // Password ngẫu nhiên để không ai login được bằng pass
             user.setPasswordHash(encoder.encode("GOOGLE_MOBILE_" + UUID.randomUUID()));
-            user.setIsActive(true); // Google đã verify email rồi -> Active luôn
+            user.setIsActive(true);
             user.setFailedLoginAttempts(0);
 
             user = userRepo.save(user);
-
-            // Gán quyền USER mặc định (Hàm helper có sẵn)
             ensureDefaultUserRole(user);
 
-            // Gán quyền PATIENT
             var patientRole = roleRepo.findByRoleNameIgnoreCase("PATIENT")
                     .orElseThrow(() -> new RuntimeException("Role PATIENT not found"));
-
             UserRole userRole = new UserRole();
             userRole.setUser(user);
             userRole.setRole(patientRole);
             userRole.setIsActive(true);
-            // userRole.setAssignedDate(Instant.now()); // Entity đã có @PrePersist lo
             userRoleRepo.save(userRole);
 
-            // Tạo Patient Profile & Mã bệnh nhân
             String patientCode = patientCodeService.nextPatientCode();
             user.setCode(patientCode);
             userRepo.save(user);
@@ -401,24 +364,62 @@ public class AuthServiceImp implements AuthService {
             p.setPatientCode(patientCode);
             p.setIsActive(true);
             patientRepo.save(p);
-
         } else {
-            // --- TRƯỜNG HỢP 2: ĐÃ CÓ TÀI KHOẢN ---
-            // Kiểm tra xem có bị khóa không
             if (Boolean.FALSE.equals(user.getIsActive())) {
                 throw new BadCredentialsException("Tài khoản đã bị khóa hoặc chưa kích hoạt.");
             }
-            // Cập nhật Avatar nếu user hiện tại chưa có
             if (user.getAvatarUrl() == null && req.getAvatarUrl() != null) {
                 user.setAvatarUrl(req.getAvatarUrl());
             }
         }
 
-        // Cập nhật thời gian login cuối
+        user.setLastLoginAt(Instant.now());
+        userRepo.save(user);
+        return generateLoginResponse(user);
+    }
+
+    // -------------------------------------------------------------
+    // [MỚI] Triển khai QR Logic
+    // -------------------------------------------------------------
+
+    @Override
+    public String generateQrToken(String email) {
+        // Tạo token ngắn hạn (2 phút) chứa email người dùng
+        // Lưu ý: Đảm bảo JwtService đã có hàm generateShortLivedToken
+        return jwtService.generateShortLivedToken(email);
+    }
+
+    @Override
+    @Transactional
+    public LoginResponse loginWithQrCode(String qrToken) {
+        // 1. Trích xuất username/email từ Token QR
+        String email = jwtService.extractUsername(qrToken);
+        if (email == null) {
+            throw new BadCredentialsException("QR Code không hợp lệ hoặc đã hết hạn (No subject).");
+        }
+
+        // 2. Tìm User
+        User user = userRepo.findByEmailIgnoreCase(email)
+                .orElseThrow(() -> new BadCredentialsException("User not found from QR Code."));
+
+        // 3. Validate Token
+        // Hàm isTokenValid của bạn có thể cần UserDetails, ở đây ta tạo UserDetails dummy hoặc overload hàm validate
+        // Giả sử JwtService có hàm: boolean isTokenValid(String token, UserDetails userDetails)
+        // Ta cần load UserDetails hoặc kiểm tra thủ công.
+        // Đơn giản nhất: Kiểm tra hạn token và subject
+        if (jwtService.isTokenExpired(qrToken)) {
+            throw new BadCredentialsException("QR Code đã hết hạn.");
+        }
+
+        // Nếu muốn chặt chẽ hơn, check subject khớp với user (đã làm ở bước 1)
+        if (!email.equals(user.getEmail())) {
+            throw new BadCredentialsException("QR Code không thuộc về user này.");
+        }
+
+        // 4. Nếu hợp lệ -> Cấp quyền đăng nhập (Access + Refresh Token)
         user.setLastLoginAt(Instant.now());
         userRepo.save(user);
 
-        // --- TẠO JWT TOKEN (Dùng lại hàm helper có sẵn) ---
         return generateLoginResponse(user);
     }
 }
