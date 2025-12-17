@@ -112,9 +112,21 @@ public class ProductInvoiceServiceImpl implements ProductInvoiceService {
                 throw new IllegalArgumentException("Invalid status: " + newStatus);
         }
 
+        if (request.getNote() != null && !request.getNote().isBlank()) {
+            // Lấy note cũ ra
+            String oldNote = invoice.getNotes() != null ? invoice.getNotes() : "";
+
+            // Tạo note mới (Kèm thời gian cho chuyên nghiệp)
+            String time = java.time.LocalDateTime.now().format(java.time.format.DateTimeFormatter.ofPattern("HH:mm dd/MM"));
+            String appendString = String.format("\n[%s - %s]: %s", time, newStatus, request.getNote());
+
+            // Cập nhật: Cũ + Mới
+            invoice.setNotes(oldNote + appendString);
+        }
+
         // Cập nhật Database
         invoice.setInvoiceStatus(newStatus);
-        invoice.setNotes(request.getNote() != null ? request.getNote() : invoice.getNotes());
+
         invoice.setUpdatedAt(LocalDateTime.now());
         ProductInvoice savedInvoice = invoiceRepository.save(invoice);
 
@@ -186,6 +198,7 @@ public class ProductInvoiceServiceImpl implements ProductInvoiceService {
                 .currency(inv.getCurrency())
                 .createdAt(inv.getCreatedAt())
                 .items(itemDtos)
+                .notes(inv.getNotes())
                 .build();
     }
 

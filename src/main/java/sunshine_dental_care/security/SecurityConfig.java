@@ -84,6 +84,7 @@ public class SecurityConfig {
                         .requestMatchers("/api/products/accountant/**").hasRole("ACCOUNTANT")
                         .requestMatchers("/api/inventory/**").hasRole("ACCOUNTANT")
                         .requestMatchers("/api/invoices/**").hasRole("ACCOUNTANT")
+                        .requestMatchers("/api/payroll/**").hasRole("ACCOUNTANT")
                         .requestMatchers("/api/products/**").permitAll()
                         .requestMatchers("/api/cart/**").permitAll()
                         .requestMatchers("/api/checkout/**").permitAll()
