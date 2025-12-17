@@ -13,16 +13,28 @@ import java.util.List;
 
 @Repository
 public interface DoctorAppointmentRepo extends JpaRepository<Appointment, Integer> {
-    // get appointment by id doctor - JOIN FETCH service để load service entity cùng lúc
-    @Query("SELECT a FROM Appointment a LEFT JOIN FETCH a.service WHERE a.doctor.id = :doctorId")
+    // get appointment by id doctor - JOIN FETCH appointmentServices để load service và variant từ AppointmentService
+    @Query("SELECT DISTINCT a FROM Appointment a " +
+           "LEFT JOIN FETCH a.appointmentServices aps " +
+           "LEFT JOIN FETCH aps.service " +
+           "LEFT JOIN FETCH aps.serviceVariant " +
+           "WHERE a.doctor.id = :doctorId")
     List<Appointment> findByDoctorId(@Param("doctorId") Integer doctorId);
 
-    // get appointment by id doctor and status - JOIN FETCH service
-    @Query("SELECT a FROM Appointment a LEFT JOIN FETCH a.service WHERE a.doctor.id = :doctorId AND a.status = :status")
+    // get appointment by id doctor and status - JOIN FETCH appointmentServices
+    @Query("SELECT DISTINCT a FROM Appointment a " +
+           "LEFT JOIN FETCH a.appointmentServices aps " +
+           "LEFT JOIN FETCH aps.service " +
+           "LEFT JOIN FETCH aps.serviceVariant " +
+           "WHERE a.doctor.id = :doctorId AND a.status = :status")
     List<Appointment> findByDoctorIdAndStatus(@Param("doctorId") Integer doctorId, @Param("status") String status);
 
-    //get detail appointment by id - JOIN FETCH service
-    @Query("SELECT a FROM Appointment a LEFT JOIN FETCH a.service WHERE a.id = :appointmentId AND a.doctor.id = :doctorId")
+    //get detail appointment by id - JOIN FETCH appointmentServices
+    @Query("SELECT DISTINCT a FROM Appointment a " +
+           "LEFT JOIN FETCH a.appointmentServices aps " +
+           "LEFT JOIN FETCH aps.service " +
+           "LEFT JOIN FETCH aps.serviceVariant " +
+           "WHERE a.id = :appointmentId AND a.doctor.id = :doctorId")
     Appointment findByIdAndDoctorId(@Param("appointmentId") Integer appointmentId, @Param("doctorId") Integer doctorId);
 
     //change status appointment
@@ -32,8 +44,12 @@ public interface DoctorAppointmentRepo extends JpaRepository<Appointment, Intege
     void updateStatus(@Param("appointmentId") Integer appointmentId,
                       @Param("status") String status);
 
-    // get all appointment by id doctor and date range - JOIN FETCH service
-    @Query("SELECT a FROM Appointment a LEFT JOIN FETCH a.service WHERE a.doctor.id = :doctorId AND a.startDateTime BETWEEN :startDate AND :endDate")
+    // get all appointment by id doctor and date range - JOIN FETCH appointmentServices
+    @Query("SELECT DISTINCT a FROM Appointment a " +
+           "LEFT JOIN FETCH a.appointmentServices aps " +
+           "LEFT JOIN FETCH aps.service " +
+           "LEFT JOIN FETCH aps.serviceVariant " +
+           "WHERE a.doctor.id = :doctorId AND a.startDateTime BETWEEN :startDate AND :endDate")
     List<Appointment> findByDoctorIdAndStartDateTimeBetween(@Param("doctorId") Integer doctorId, 
                                                              @Param("startDate") Instant startDate, 
                                                              @Param("endDate") Instant endDate);

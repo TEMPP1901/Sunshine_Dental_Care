@@ -17,6 +17,8 @@ public record MedicalRecordRequest(
 
         Integer appointmentId,
         Integer serviceId,
+        Integer variantId,
+        Integer appointmentServiceId,
 
         @NotBlank(message = "Diagnosis is required")
         String diagnosis,

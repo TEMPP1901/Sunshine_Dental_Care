@@ -4,10 +4,12 @@ import java.time.Instant;
 import java.util.List;
 import java.util.stream.Collectors;
 
-import org.springframework.transaction.annotation.Transactional;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import lombok.extern.slf4j.Slf4j;
 import sunshine_dental_care.dto.doctorDTO.ClinicDTO;
@@ -19,6 +21,7 @@ import sunshine_dental_care.dto.doctorDTO.ServiceDTO;
 import sunshine_dental_care.dto.doctorDTO.ServiceVariantDTO;
 import sunshine_dental_care.dto.notificationDTO.NotificationRequest;
 import sunshine_dental_care.entities.Appointment;
+import sunshine_dental_care.entities.AppointmentService;
 import sunshine_dental_care.entities.User;
 import sunshine_dental_care.repositories.auth.UserRepo;
 import sunshine_dental_care.repositories.doctor.DoctorAppointmentRepo;
@@ -34,17 +37,22 @@ public class DoctorAppointmentImp implements DoctorAppointmentService{
 
     private DoctorRepo _doctorRepo;
     private DoctorAppointmentRepo _doctorAppointmentRepo;
+    private sunshine_dental_care.repositories.doctor.MedicalRecordRepository _medicalRecordRepository;
     private UserRepo _userRepo;
     private AuditLogService _auditLogService;
     private NotificationService _notificationService;
 
+    private static final Logger logger = LoggerFactory.getLogger(DoctorAppointmentImp.class);
+
     public DoctorAppointmentImp(DoctorRepo doctorRepo,
                                 DoctorAppointmentRepo doctorAppointmentRepo,
+                                sunshine_dental_care.repositories.doctor.MedicalRecordRepository medicalRecordRepository,
                                 UserRepo userRepo,
                                 AuditLogService auditLogService,
                                 NotificationService notificationService) {
         _doctorRepo = doctorRepo;
         _doctorAppointmentRepo = doctorAppointmentRepo;
+        _medicalRecordRepository = medicalRecordRepository;
         _userRepo = userRepo;
         _auditLogService = auditLogService;
         _notificationService = notificationService;
@@ -52,6 +60,20 @@ public class DoctorAppointmentImp implements DoctorAppointmentService{
 
     // Hàm chuyển đổi từ entity Appointment sang DTO DoctorAppointmentDTO
     private DoctorAppointmentDTO mapToDTO(Appointment appointment) {
+        // Lấy service và variant từ AppointmentService (ưu tiên từ appointmentServices đầu tiên)
+        sunshine_dental_care.entities.Service service = null;
+        sunshine_dental_care.entities.ServiceVariant serviceVariant = null;
+
+        if (appointment.getAppointmentServices() != null && !appointment.getAppointmentServices().isEmpty()) {
+            // Lấy service và variant từ AppointmentService đầu tiên
+            AppointmentService firstAppointmentService = appointment.getAppointmentServices().get(0);
+            service = firstAppointmentService.getService();
+            serviceVariant = firstAppointmentService.getServiceVariant();
+        } else if (appointment.getService() != null) {
+            // Fallback: nếu không có appointmentServices, lấy từ service trực tiếp (backward compatibility)
+            service = appointment.getService();
+        }
+
         List<String> detailNames = null;
         if (appointment.getAppointmentServices() != null) {
             detailNames = appointment.getAppointmentServices().stream()
@@ -79,6 +101,8 @@ public class DoctorAppointmentImp implements DoctorAppointmentService{
                 .patient(toPatientSummary(appointment.getPatient())) // Thông tin bệnh nhân
                 .doctor(toDoctorSummary(appointment.getDoctor())) // Thông tin bác sĩ
                 .room(toRoomSummary(appointment.getRoom())) // Thông tin phòng khám chữa trị
+                .service(toServiceDTO(service)) // Service object - lấy từ AppointmentService
+                .serviceVariant(toServiceVariantDTO(serviceVariant)) // Variant từ AppointmentService
                 .service(toServiceDTO(appointment.getService())) // Service object - load trực tiếp từ appointment.service
                 .serviceDetails(detailNames)
                 .startDateTime(appointment.getStartDateTime()) // Thời gian bắt đầu
@@ -129,6 +153,23 @@ public class DoctorAppointmentImp implements DoctorAppointmentService{
                 .createdAt(service.getCreatedAt())
                 .updatedAt(service.getUpdatedAt())
                 .variants(variantDTOs)
+                .build();
+    }
+
+    // Chuyển entity ServiceVariant sang ServiceVariantDTO
+    private ServiceVariantDTO toServiceVariantDTO(sunshine_dental_care.entities.ServiceVariant serviceVariant) {
+        if (serviceVariant == null) {
+            return null;
+        }
+
+        return ServiceVariantDTO.builder()
+                .variantId(serviceVariant.getId())
+                .variantName(serviceVariant.getVariantName())
+                .duration(serviceVariant.getDuration())
+                .price(serviceVariant.getPrice())
+                .description(serviceVariant.getDescription())
+                .currency(serviceVariant.getCurrency())
+                .isActive(serviceVariant.getIsActive())
                 .build();
     }
 
@@ -211,27 +252,50 @@ public class DoctorAppointmentImp implements DoctorAppointmentService{
     }
 
     @Override
-    // Thay đổi trạng thái của lịch hẹn (VD: đã hoàn thành, đã hủy,...)
     public void changeStatusAppointment(Integer appointmentId, String status) {
-        Appointment appt = _doctorAppointmentRepo.findById(appointmentId)
-            .orElseThrow(() -> new IllegalArgumentException("Appointment not found"));
-        String oldStatus = appt.getStatus();
-        _doctorAppointmentRepo.updateStatus(appointmentId, status); // Cập nhật trạng thái lịch hẹn
+        Appointment appointment = _doctorAppointmentRepo.findById(appointmentId)
+                .orElseThrow(() -> new IllegalArgumentException("Appointment not found"));
 
-        // Lấy lại appointment sau khi update để có thông tin mới nhất
-        Appointment updatedAppt = _doctorAppointmentRepo.findById(appointmentId)
-            .orElseThrow(() -> new IllegalArgumentException("Appointment not found after update"));
+        String oldStatus = appointment.getStatus();
+        String normalized = status == null ? "" : status.trim().toUpperCase();
+
+        // Normalize status values
+        if ("IN-PROGRESS".equals(normalized) || "IN_PROGRESS".equals(normalized)) {
+            normalized = "PROCESSING";
+        }
+        if ("CANCELLED".equals(normalized)) {
+            normalized = "CANCELED";
+        }
+
+        switch (normalized) {
+            case "COMPLETED":
+                validateCanComplete(appointment);
+                break;
+            case "PROCESSING":
+                validateCanProcess(appointment);
+                break;
+            case "CANCELED":
+                validateCanCancel(appointment);
+                break;
+            default:
+                // For other statuses, allow direct update
+                break;
+        }
+
+        // Update status
+        appointment.setStatus(normalized);
+        _doctorAppointmentRepo.save(appointment);
 
         // Audit log: bác sĩ đổi trạng thái lịch hẹn
         User actor = resolveCurrentUser();
         if (actor != null) {
             _auditLogService.logAction(actor, "DOCTOR_UPDATE_STATUS", "APPOINTMENT", appointmentId, null,
-                    "Status -> " + status);
+                    "Status -> " + normalized);
         }
 
         // Gửi thông báo cho patient khi bác sĩ cập nhật trạng thái
-        if (!status.equals(oldStatus)) {
-            sendAppointmentStatusUpdateNotification(updatedAppt, status, oldStatus);
+        if (!normalized.equals(oldStatus)) {
+            sendAppointmentStatusUpdateNotification(appointment, normalized, oldStatus);
         }
     }
 
@@ -248,7 +312,7 @@ public class DoctorAppointmentImp implements DoctorAppointmentService{
             Integer patientUserId = appointment.getPatient().getUser().getId();
             String clinicName = appointment.getClinic() != null ? appointment.getClinic().getClinicName() : "Phòng khám";
             String doctorName = appointment.getDoctor() != null ? appointment.getDoctor().getFullName() : "Bác sĩ";
-            
+
             // Format thời gian
             java.time.ZoneId zoneId = java.time.ZoneId.of("Asia/Ho_Chi_Minh");
             java.time.LocalDateTime startDateTime = appointment.getStartDateTime().atZone(zoneId).toLocalDateTime();
@@ -299,14 +363,69 @@ public class DoctorAppointmentImp implements DoctorAppointmentService{
                     .build();
 
             _notificationService.sendNotification(notiRequest);
-            log.info("Sent {} notification to patient {} for appointment {} status update from {} to {}", 
+            log.info("Sent {} notification to patient {} for appointment {} status update from {} to {}",
                     notificationType, patientUserId, appointment.getId(), oldStatus, newStatus);
         } catch (Exception e) {
-            log.error("Failed to send appointment status update notification for appointment {}: {}", 
+            log.error("Failed to send appointment status update notification for appointment {}: {}",
                     appointment.getId(), e.getMessage(), e);
             // Không throw exception để không ảnh hưởng đến việc update appointment
         }
     }
+
+    // Kiểm tra điều kiện chuyển sang PROCESSING
+    private void validateCanProcess(Appointment appointment) {
+        java.time.Instant now = java.time.Instant.now();
+        java.time.Instant startMinus5 = appointment.getStartDateTime().minus(java.time.Duration.ofMinutes(5));
+
+        if (now.isBefore(startMinus5)) {
+            throw new IllegalArgumentException("Cannot set to PROCESSING: appointment can only start within 5 minutes of scheduled time");
+        }
+
+        if (!"SCHEDULED".equalsIgnoreCase(appointment.getStatus())) {
+            throw new IllegalArgumentException("Cannot set to PROCESSING: only SCHEDULED appointments can be started");
+        }
+    }
+
+    // Kiểm tra điều kiện chuyển sang COMPLETED - FIXED
+    private void validateCanComplete(Appointment appointment) {
+        if (!"PROCESSING".equalsIgnoreCase(appointment.getStatus())) {
+            throw new IllegalArgumentException("Cannot set to COMPLETED: appointment must be PROCESSING");
+        }
+
+        // Kiểm tra chắc chắn đã có medical record cho appointment này
+        Integer appointmentId = appointment.getId();
+
+        // Cách 1: Kiểm tra trực tiếp qua appointment
+        boolean hasMedicalRecord = _medicalRecordRepository.existsByAppointmentId(appointmentId);
+
+        // Cách 2: Hoặc kiểm tra qua appointmentService nếu cần
+        if (!hasMedicalRecord) {
+            hasMedicalRecord = _medicalRecordRepository.existsByAppointmentService_Appointment_Id(appointmentId);
+        }
+
+        logger.info("[DoctorAppointment] Checking medical record for appointmentId={}, result={}",
+                appointmentId, hasMedicalRecord);
+
+        if (!hasMedicalRecord) {
+            throw new IllegalArgumentException("Cannot set to COMPLETED: medical record is required for this appointment");
+        }
+    }
+
+    // Kiểm tra điều kiện chuyển sang CANCELED
+    private void validateCanCancel(Appointment appointment) {
+        if (!"SCHEDULED".equalsIgnoreCase(appointment.getStatus()) &&
+                !"CONFIRMED".equalsIgnoreCase(appointment.getStatus())) {
+            throw new IllegalArgumentException("Cannot set to CANCELED: only SCHEDULED or CONFIRMED appointments allowed");
+        }
+
+        java.time.Instant now = java.time.Instant.now();
+        java.time.Instant startPlus20 = appointment.getStartDateTime().plus(java.time.Duration.ofMinutes(20));
+
+        if (now.isBefore(startPlus20)) {
+            throw new IllegalArgumentException("Cannot set to CANCELED before 20 minutes after scheduled start time");
+        }
+    }
+
 
     @Override
     // Lấy các lịch hẹn của bác sĩ trong một khoảng thời gian cụ thể

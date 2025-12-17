@@ -38,7 +38,8 @@ public class DoctorAppointmentDTO {
 
     private ServiceDTO service;
     private List<String> serviceDetails; // list để hứng nhiều dịch vụ
-    
+    private ServiceVariantDTO serviceVariant; // Variant từ AppointmentService
+
     private String appointmentType; // "VIP" hoặc "STANDARD"
     private BigDecimal bookingFee; // Phí đặt lịch hẹn
 }
