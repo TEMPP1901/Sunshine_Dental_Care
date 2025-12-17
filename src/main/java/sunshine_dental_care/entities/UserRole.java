@@ -15,13 +15,14 @@ import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
+import jakarta.persistence.PrePersist; // Import quan trọng
 import jakarta.persistence.Table;
 
 @Entity
 @Table(name = "UserRoles")
 @JsonIgnoreProperties({"hibernateLazyInitializer", "handler"})
 public class UserRole {
-    
+
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     @Column(name = "id", nullable = false)
@@ -47,7 +48,8 @@ public class UserRole {
     @JoinColumn(name = "assignedBy")
     private User assignedBy;
 
-    @Column(name = "assignedDate")
+    // Đánh dấu nullable = false để đồng bộ với DB
+    @Column(name = "assignedDate", nullable = false)
     private Instant assignedDate;
 
     @ColumnDefault("1")
@@ -57,6 +59,19 @@ public class UserRole {
     @Nationalized
     @Column(name = "description", length = 500)
     private String description;
+
+    // --- KHẮC PHỤC LỖI SQL 515 ---
+    @PrePersist
+    protected void onCreate() {
+        // Tự động gán thời gian hiện tại nếu chưa có
+        if (assignedDate == null) {
+            assignedDate = Instant.now();
+        }
+        // Đảm bảo isActive không null
+        if (isActive == null) {
+            isActive = true;
+        }
+    }
 
     // Getters and Setters
     public Integer getId() {
@@ -131,4 +146,3 @@ public class UserRole {
         this.description = description;
     }
 }
-

@@ -34,10 +34,10 @@ public class SecurityConfig {
                 .cors(Customizer.withDefaults())
                 .csrf(AbstractHttpConfigurer::disable)
 
-                // 2. Stateless Session (Vì dùng JWT)
+                // 2. Stateless Session
                 .sessionManagement(sm -> sm.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
 
-                // 3. Xử lý lỗi 401 & 403 trả về JSON
+                // 3. Exception Handling
                 .exceptionHandling(e -> e
                         .authenticationEntryPoint((req, res, ex) -> {
                             String uri = req.getRequestURI();
@@ -61,7 +61,7 @@ public class SecurityConfig {
                         })
                 )
 
-                // 4. PHÂN QUYỀN URL (MERGED TUAN & LONG)
+                // 4. PHÂN QUYỀN URL
                 .authorizeHttpRequests(auth -> auth
                         // --- PREFLIGHT REQUESTS ---
                         .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
@@ -69,27 +69,33 @@ public class SecurityConfig {
                         // --- PUBLIC STATIC RESOURCES ---
                         .requestMatchers("/locale").permitAll()
                         .requestMatchers("/uploads_avatar/**").permitAll()
-                        .requestMatchers("/uploads/**").permitAll() // Product images
-                        .requestMatchers("/ws/**").permitAll() // WebSocket
+                        .requestMatchers("/uploads/**").permitAll()
+                        .requestMatchers("/ws/**").permitAll()
 
-                        // --- PUBLIC API (AUTH, PRODUCTS, ETC.) ---
+                        // --- PUBLIC API (AUTH) ---
                         .requestMatchers(
                                 "/api/auth/sign-up",
                                 "/api/auth/login",
                                 "/api/auth/google",
+                                "/api/auth/google-mobile", // Native Mobile Login
                                 "/oauth2/**",
                                 "/login/oauth2/**",
                                 "/api/auth/forgot-password",
                                 "/api/auth/reset-password",
-                                "/api/auth/verify-account", // Của Tuấn
-                                "/api/auth/resend-verification", // Của Tuấn
+                                "/api/auth/verify-account",
+                                "/api/auth/resend-verification",
 
-                                // [MỚI CỦA TUẤN] API OTP & PHONE LOGIN
+                                // API OTP & PHONE LOGIN
                                 "/api/auth/login-phone/step1",
                                 "/api/auth/login-phone/step2",
                                 "/api/auth/login-phone/password",
 
-                                // Public Shop API
+                                // [MỚI] PUBLIC API CHO QR LOGIN
+                                "/api/auth/qr-login" // Mobile gọi API này khi chưa có token chính thức
+                        ).permitAll()
+
+                        // Public Shop API
+                        .requestMatchers(
                                 "/api/products/**",
                                 "/api/cart/**",
                                 "/api/checkout/**",
@@ -97,17 +103,14 @@ public class SecurityConfig {
                         ).permitAll()
 
                         // --- AUTHENTICATED USER (LOGGED IN) ---
+                        // Endpoint "/api/auth/qr-generate" sẽ rơi vào đây (authenticated)
                         .requestMatchers(HttpMethod.POST, "/api/auth/change-password").authenticated()
-                        .requestMatchers("/api/booking/**").authenticated() // Mọi user đều được đặt lịch
-                        .requestMatchers("/api/hr/employees/doctors").authenticated() // Xem danh sách bác sĩ
+                        .requestMatchers("/api/booking/**").authenticated()
+                        .requestMatchers("/api/hr/employees/doctors").authenticated()
 
-                        // --- DOCTOR ROLE ---
+                        // --- ROLES SPECIFIC ---
                         .requestMatchers("/api/doctor/**", "/api/patients/{patientId}/records/**").hasRole("DOCTOR")
-
-                        // --- ACCOUNTANT ROLE (Admin cũng được vào) ---
                         .requestMatchers("/api/products/accountant/**").hasAnyRole("ACCOUNTANT", "ADMIN")
-
-                        // --- HR ROLE (Admin cũng được vào một số mục cấu hình) ---
                         .requestMatchers("/api/hr/management/departments", "/api/hr/management/clinics",
                                 "/api/hr/management/roles", "/api/hr/management/rooms").hasAnyRole("HR", "ADMIN")
                         .requestMatchers("/api/hr/management/**").hasRole("HR")
@@ -123,8 +126,6 @@ public class SecurityConfig {
                         // --- RECEPTION ROLE (Admin cũng được vào) ---
                         // === only Reception and Admin can access role reception API  ===
                         .requestMatchers("/api/reception/**").hasAnyRole("RECEPTION", "ADMIN")
-
-                        // --- ADMIN ROLE ---
                         .requestMatchers("/api/admin/**").hasRole("ADMIN")
 
                         // --- MẶC ĐỊNH CÒN LẠI ---
