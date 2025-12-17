@@ -5,6 +5,8 @@ import java.util.List;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
+import jakarta.validation.ValidationException;
+import org.hibernate.Hibernate;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
@@ -251,10 +253,10 @@ public class ReceptionServiceImpl implements ReceptionService {
 
             appointmentServiceRepo.save(as);
         }
-        
+
         // Gửi notification APPOINTMENT_CREATED cho patient
         sendAppointmentCreatedNotification(appointment);
-        
+
         return appointmentMapper.mapToAppointmentResponse(appointment);
     }
 
@@ -344,6 +346,10 @@ public class ReceptionServiceImpl implements ReceptionService {
         if (request.getReason() != null) {
             Log actionLog = new Log();
 
+            actionLog.setType("APPOINTMENT");
+            actionLog.setTitle("Dời lịch hẹn");
+            actionLog.setMessage("Dời lịch hẹn #" + appointment.getId() + ". Lý do: " + request.getReason());
+            actionLog.setPriority("MEDIUM");
             actionLog.setUser(userRepo.getReferenceById(currentUser.userId()));
             actionLog.setClinic(appointment.getClinic());
             actionLog.setTableName("Appointments");
@@ -351,6 +357,8 @@ public class ReceptionServiceImpl implements ReceptionService {
             actionLog.setAction("RESCHEDULE");
             actionLog.setAfterData("Reschedule Reason: " + request.getReason());
 
+            if (actionLog.getCreatedAt() == null) actionLog.setCreatedAt(Instant.now());
+            actionLog.setActionTime(Instant.now());
             logRepo.save(actionLog);
         }
 
@@ -452,6 +460,7 @@ public class ReceptionServiceImpl implements ReceptionService {
 
     // Hàm cập nhật lịch hẹn
     @Override
+    @Transactional
     public AppointmentResponse updateAppointment(Integer appointmentId, AppointmentUpdateRequest request) {
         Appointment appointment = appointmentRepo.findById(appointmentId)
                 .orElseThrow(() -> new ResourceNotFoundException("Appointment not found"));
@@ -478,6 +487,16 @@ public class ReceptionServiceImpl implements ReceptionService {
             }
         }
 
+        if (savedAppointment.getDoctor() != null) {
+            Hibernate.initialize(savedAppointment.getDoctor());
+        }
+        if (savedAppointment.getPatient() != null) {
+            Hibernate.initialize(savedAppointment.getPatient());
+        }
+        if (savedAppointment.getRoom() != null) {
+            Hibernate.initialize(savedAppointment.getRoom());
+        }
+
         return appointmentMapper.mapToAppointmentResponse(savedAppointment);
     }
 
@@ -494,7 +513,7 @@ public class ReceptionServiceImpl implements ReceptionService {
             Integer patientUserId = appointment.getPatient().getUser().getId();
             String clinicName = appointment.getClinic() != null ? appointment.getClinic().getClinicName() : "Phòng khám";
             String doctorName = appointment.getDoctor() != null ? appointment.getDoctor().getFullName() : "Bác sĩ";
-            
+
             // Format thời gian
             java.time.ZoneId zoneId = java.time.ZoneId.of("Asia/Ho_Chi_Minh");
             java.time.LocalDateTime startDateTime = appointment.getStartDateTime().atZone(zoneId).toLocalDateTime();
@@ -516,10 +535,10 @@ public class ReceptionServiceImpl implements ReceptionService {
                     .build();
 
             notificationService.sendNotification(notiRequest);
-            log.info("Sent APPOINTMENT_CREATED notification to patient {} for appointment {}", 
+            log.info("Sent APPOINTMENT_CREATED notification to patient {} for appointment {}",
                     patientUserId, appointment.getId());
         } catch (Exception e) {
-            log.error("Failed to send APPOINTMENT_CREATED notification for appointment {}: {}", 
+            log.error("Failed to send APPOINTMENT_CREATED notification for appointment {}: {}",
                     appointment.getId(), e.getMessage(), e);
             // Không throw exception để không ảnh hưởng đến việc tạo appointment
         }
@@ -529,6 +548,10 @@ public class ReceptionServiceImpl implements ReceptionService {
      * Gửi thông báo cho patient khi reception xác nhận hoặc hủy lịch hẹn
      */
     private void sendAppointmentStatusNotification(Appointment appointment, String status) {
+        if (appointment.getStartDateTime().isBefore(java.time.Instant.now())) {
+            log.info("Skip sending notification for past appointment #{}", appointment.getId());
+            return;
+        }
         try {
             if (appointment.getPatient() == null || appointment.getPatient().getUser() == null) {
                 log.warn("Cannot send notification: appointment {} has no patient user", appointment.getId());
