@@ -68,4 +68,20 @@ public interface ReceptionService {
     PatientResponse updatePatient(Integer id, PatientResponse request);
 
     List<PatientHistoryDTO> getPatientHistory(Integer patientId);
+
+    // Quản lí bill / hóa đơn
+    /**
+     * Lấy danh sách hóa đơn (những lịch hẹn đã có Invoice Code)
+     * @param fromDate Ngày bắt đầu lọc (inclusive)
+     * @param toDate Ngày kết thúc lọc (inclusive)
+     */
+    Page<AppointmentResponse> getInvoiceList(
+            CurrentUser currentUser,
+            String keyword,
+            LocalDate fromDate,
+            LocalDate toDate,
+            String paymentStatus,
+            int page,
+            int size
+    );
 }

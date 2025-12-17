@@ -44,5 +44,6 @@ public class BillInvoiceDTO {
         private Integer quantity;
         private BigDecimal unitPrice;
         private BigDecimal total;
+        private String invoiceId;
     }
 }

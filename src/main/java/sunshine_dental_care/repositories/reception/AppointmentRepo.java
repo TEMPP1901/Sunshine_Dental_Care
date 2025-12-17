@@ -3,6 +3,7 @@ package sunshine_dental_care.repositories.reception;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.List;
+import java.util.Optional;
 
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
@@ -144,4 +145,32 @@ public interface AppointmentRepo extends JpaRepository<Appointment, Integer> {
             @Param("start") Instant start,
             @Param("end") Instant end
     );
+
+    /**
+     * Tìm kiếm hóa đơn (Lịch hẹn đã có invoiceCode)
+     * Hỗ trợ tìm theo: Mã HĐ, Tên BN, SĐT BN, Mã BN
+     */
+    @Query("SELECT a FROM Appointment a " +
+            "WHERE a.clinic.id = :clinicId " +
+            "AND a.invoiceCode IS NOT NULL " +
+            "AND (:keyword IS NULL OR :keyword = '' OR " +
+            "    LOWER(a.invoiceCode) LIKE LOWER(CONCAT('%', :keyword, '%')) OR " +
+            "    LOWER(a.patient.fullName) LIKE LOWER(CONCAT('%', :keyword, '%')) OR " +
+            "    a.patient.phone LIKE CONCAT('%', :keyword, '%') OR " +
+            "    a.patient.patientCode LIKE CONCAT('%', :keyword, '%') " +
+            ") " +
+            "AND (:fromDate IS NULL OR a.startDateTime >= :fromDate) " +
+            "AND (:toDate IS NULL OR a.startDateTime <= :toDate) " +
+            "AND (:paymentStatus IS NULL OR :paymentStatus = '' OR a.paymentStatus = :paymentStatus)")
+    Page<Appointment> searchInvoices(
+            @Param("clinicId") Integer clinicId,
+            @Param("keyword") String keyword,
+            @Param("fromDate") Instant fromDate,
+            @Param("toDate") Instant toDate,
+            @Param("paymentStatus") String paymentStatus,
+            Pageable pageable
+    );
+
+    // Hàm tiện ích: Tìm nhanh theo mã hóa đơn chính xác (để check trùng hoặc scan QR)
+    Optional<Appointment> findByInvoiceCode(String invoiceCode);
 }
