@@ -134,7 +134,8 @@ public class ProductInvoice {
 
     @Size(max = 50)
     @Nationalized
-    @Transient // Column not present in DB; avoid SQL errors
+    @ColumnDefault("N'NEW'")
+    @Column(name = "invoiceStatus", nullable = false, length = 50)
     private String invoiceStatus;
 
     @Column(name = "exchangeRate", precision = 18, scale = 6) // Scale lớn để chính xác

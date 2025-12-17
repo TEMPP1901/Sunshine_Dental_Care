@@ -8,7 +8,7 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.Repository;
 import org.springframework.data.repository.query.Param;
 
-import sunshine_dental_care.entities.huybro_product_invoice.ProductInvoice;
+import sunshine_dental_care.entities.huybro_product_invoices.ProductInvoice;
 
 @org.springframework.stereotype.Repository
 public interface AdminInvoiceStatsRepository extends Repository<ProductInvoice, Integer> {
