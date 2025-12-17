@@ -16,8 +16,8 @@ import sunshine_dental_care.repositories.auth.PatientRepo;
 import sunshine_dental_care.repositories.auth.UserRepo;
 import sunshine_dental_care.repositories.reception.AppointmentRepo;
 import sunshine_dental_care.repositories.reception.AppointmentServiceRepo;
-import sunshine_dental_care.repositories.reception.InvoiceRepo; // [QUAN TRỌNG] Dùng để tính tiền
-import sunshine_dental_care.repositories.doctor.MedicalRecordRepository; // [QUAN TRỌNG] Dùng để lấy bệnh án
+import sunshine_dental_care.repositories.reception.InvoiceRepo;
+import sunshine_dental_care.repositories.doctor.MedicalRecordRepository;
 import sunshine_dental_care.repositories.reception.ServiceVariantRepo;
 import sunshine_dental_care.services.auth_service.MailService;
 import sunshine_dental_care.services.interfaces.patient.PatientService;
@@ -45,12 +45,9 @@ public class PatientServiceImpl implements PatientService {
     private final ServiceVariantRepo serviceVariantRepo;
     private final AppointmentServiceRepo appointmentServiceRepo;
     private final AIRecommendationRepository aiRecommendationRepository;
-
-    // Inject 2 Repo quan trọng mới thêm
     private final InvoiceRepo invoiceRepo;
     private final MedicalRecordRepository medicalRecordRepository;
 
-    // --- HELPER METHOD: Tìm User ---
     private User findUser(String userIdOrEmail) {
         if (userIdOrEmail == null) throw new RuntimeException("Token invalid");
         if (userIdOrEmail.matches("\\d+")) {
@@ -61,170 +58,6 @@ public class PatientServiceImpl implements PatientService {
                     .orElseThrow(() -> new RuntimeException("User not found Email: " + userIdOrEmail));
         }
     }
-
-    // =================================================================
-    // 1. DASHBOARD STATS (LOGIC TỔNG HỢP)
-    // =================================================================
-    @Override
-    public PatientDashboardDTO getPatientDashboardStats(String userIdOrEmail) {
-        User user = findUser(userIdOrEmail);
-        Patient patient = patientRepo.findByUserId(user.getId())
-                .orElseThrow(() -> new RuntimeException("Patient profile not found"));
-
-        // -----------------------------------------------------------------
-        // A. MEMBERSHIP (TÍNH TOÁN HẠNG DỰA TRÊN HÓA ĐƠN ĐÃ THANH TOÁN - PAID)
-        // -----------------------------------------------------------------
-        BigDecimal currentTotal = invoiceRepo.calculateTotalPaidByPatient(patient.getId());
-
-        // Nếu chưa có hóa đơn nào PAID thì là 0
-        if (currentTotal == null) currentTotal = BigDecimal.ZERO;
-
-        String rank = "MEMBER";
-        BigDecimal nextGoal = BigDecimal.valueOf(5000000); // Mốc lên Silver (5tr)
-
-        double totalDouble = currentTotal.doubleValue();
-        if (totalDouble >= 50000000) { // > 50tr -> Kim Cương
-            rank = "DIAMOND";
-            nextGoal = null; // Đã max cấp
-        } else if (totalDouble >= 15000000) { // > 15tr -> Vàng
-            rank = "GOLD";
-            nextGoal = BigDecimal.valueOf(50000000);
-        } else if (totalDouble >= 5000000) { // > 5tr -> Bạc
-            rank = "SILVER";
-            nextGoal = BigDecimal.valueOf(15000000);
-        }
-
-        // Cập nhật lại vào DB để lưu trữ (chỉ update nếu có thay đổi để tối ưu)
-        if (!rank.equals(patient.getMembershipRank()) || currentTotal.compareTo(patient.getAccumulatedSpending()) != 0) {
-            patient.setMembershipRank(rank);
-            patient.setAccumulatedSpending(currentTotal);
-            patientRepo.save(patient);
-        }
-
-        // -----------------------------------------------------------------
-        // B. UPCOMING APPOINTMENT (LỊCH SẮP TỚI)
-        // -----------------------------------------------------------------
-        List<Appointment> upcoming = appointmentRepo.findUpcomingAppointmentsByPatient(patient.getId());
-        PatientDashboardDTO.UpcomingAppointmentDTO nextApptDTO = null;
-        if (!upcoming.isEmpty()) {
-            Appointment next = upcoming.get(0);
-            String serviceName = "Khám nha khoa";
-            if (next.getAppointmentServices() != null && !next.getAppointmentServices().isEmpty()) {
-                if (next.getAppointmentServices().get(0).getService() != null) {
-                    serviceName = next.getAppointmentServices().get(0).getService().getServiceName();
-                }
-            }
-            nextApptDTO = PatientDashboardDTO.UpcomingAppointmentDTO.builder()
-                    .appointmentId(next.getId())
-                    .startDateTime(LocalDateTime.ofInstant(next.getStartDateTime(), ZoneId.systemDefault()))
-                    .doctorName(next.getDoctor() != null ? next.getDoctor().getFullName() : "Đang sắp xếp")
-                    .serviceName(serviceName)
-                    .status(next.getStatus())
-                    .roomName(next.getRoom() != null ? next.getRoom().getRoomName() : "01")
-                    .build();
-        }
-
-        // -----------------------------------------------------------------
-        // C. WELLNESS TRACKER (DỰA TRÊN LẦN KHÁM CUỐI CÙNG)
-        // -----------------------------------------------------------------
-        List<Appointment> history = appointmentRepo.findByPatientIdOrderByStartDateTimeDesc(patient.getId());
-
-        // Tìm lần khám COMPLETED gần nhất
-        Appointment lastCompleted = history.stream()
-                .filter(a -> "COMPLETED".equalsIgnoreCase(a.getStatus()))
-                .findFirst().orElse(null);
-
-        String healthStatus = "New";
-        String healthMessage = "Chào mừng bạn! Hãy đặt lịch khám đầu tiên.";
-        long daysSince = -1;
-
-        if (lastCompleted != null) {
-            LocalDate lastDate = LocalDate.ofInstant(lastCompleted.getStartDateTime(), ZoneId.systemDefault());
-            daysSince = ChronoUnit.DAYS.between(lastDate, LocalDate.now());
-
-            if (daysSince < 180) {
-                healthStatus = "Excellent";
-                healthMessage = "Răng miệng tốt. Hãy duy trì thói quen!";
-            } else if (daysSince < 365) {
-                healthStatus = "Warning";
-                healthMessage = "Đã đến hạn kiểm tra định kỳ (6 tháng).";
-            } else {
-                healthStatus = "Overdue";
-                healthMessage = "Đã quá lâu chưa khám. Cần kiểm tra ngay!";
-            }
-        }
-
-        // -----------------------------------------------------------------
-        // D. MEDICAL HISTORY (LẤY TOÀN BỘ DANH SÁCH BỆNH ÁN)
-        // -----------------------------------------------------------------
-        // Sử dụng MedicalRecordRepository để lấy list
-        List<MedicalRecord> records = medicalRecordRepository.findByPatientIdOrderByCreatedAtDesc(patient.getId());
-
-        List<PatientDashboardDTO.MedicalRecordDTO> historyList = records.stream().map(rec -> {
-            String img = null;
-            // Lấy ảnh đầu tiên nếu có (tránh lỗi NullPointer)
-            if (rec.getMedicalRecordImages() != null && !rec.getMedicalRecordImages().isEmpty()) {
-                try {
-                    img = rec.getMedicalRecordImages().iterator().next().getImageUrl();
-                } catch (Exception e) { img = null; }
-            }
-
-            return PatientDashboardDTO.MedicalRecordDTO.builder()
-                    .recordId(rec.getId())
-                    .visitDate(rec.getCreatedAt().atZone(ZoneId.systemDefault()).format(DateTimeFormatter.ofPattern("dd/MM/yyyy")))
-                    .diagnosis(rec.getDiagnosis())
-                    .treatment(rec.getTreatmentPlan())
-                    .doctorName(rec.getDoctor() != null ? rec.getDoctor().getFullName() : "Nha sĩ")
-                    .note(rec.getNote())
-                    .prescriptionNote(rec.getPrescriptionNote())
-                    .imageUrl(img)
-                    .build();
-        }).collect(Collectors.toList());
-
-        // -----------------------------------------------------------------
-        // E. AI & RECENT ACTIVITY (LẤY 3 HOẠT ĐỘNG GẦN NHẤT)
-        // -----------------------------------------------------------------
-        AIRecommendation aiRec = aiRecommendationRepository.findLatestByPatientId(patient.getId());
-        String aiTip = (aiRec != null) ? aiRec.getReason() : "Chải răng 2 lần/ngày để ngừa sâu răng.";
-
-        List<PatientDashboardDTO.ActivityDTO> activities = new ArrayList<>();
-        int limit = Math.min(history.size(), 3);
-        for(int i = 0; i < limit; i++) {
-            Appointment a = history.get(i);
-            String action = "Đặt lịch";
-            if("COMPLETED".equals(a.getStatus())) action = "Khám xong";
-            else if("CANCELLED".equals(a.getStatus())) action = "Đã hủy";
-
-            LocalDateTime ldt = LocalDateTime.ofInstant(a.getStartDateTime(), ZoneId.systemDefault());
-            activities.add(PatientDashboardDTO.ActivityDTO.builder()
-                    .title(action + " (" + (a.getDoctor() != null ? a.getDoctor().getFullName() : "BS") + ")")
-                    .date(ldt.format(DateTimeFormatter.ofPattern("dd/MM/yyyy")))
-                    .type(a.getStatus()).build());
-        }
-
-        // --- BUILD FINAL DTO ---
-        return PatientDashboardDTO.builder()
-                .fullName(patient.getFullName())
-                .patientCode(patient.getPatientCode())
-                .avatarUrl(user.getAvatarUrl())
-                // Membership Data
-                .memberTier(rank)
-                .totalSpent(currentTotal)
-                .nextTierGoal(nextGoal)
-                // Dashboard Data
-                .healthStatus(healthStatus)
-                .healthMessage(healthMessage)
-                .daysSinceLastVisit(daysSince)
-                .nextAppointment(nextApptDTO)
-                .medicalHistory(historyList) // Trả về List đầy đủ
-                .latestAiTip(aiTip)
-                .recentActivities(activities)
-                .build();
-    }
-
-    // =================================================================
-    // CÁC HÀM KHÁC (GET APPOINTMENTS, CANCEL, BOOKING...) - GIỮ NGUYÊN
-    // =================================================================
 
     @Override
     public List<PatientAppointmentResponse> getMyAppointments(String userIdOrEmail) {
@@ -245,7 +78,13 @@ public class PatientServiceImpl implements PatientService {
                 .orElseThrow(() -> new RuntimeException("Không tìm thấy lịch hẹn."));
 
         if (!appt.getPatient().getId().equals(patient.getId())) throw new RuntimeException("Bạn không có quyền hủy lịch hẹn này.");
-        if ("COMPLETED".equalsIgnoreCase(appt.getStatus()) || "CANCELLED".equalsIgnoreCase(appt.getStatus())) throw new RuntimeException("Lịch hẹn này đã hoàn thành hoặc đã bị hủy.");
+
+        // [UPDATE] Đồng bộ logic chặn hủy với Reception: Không hủy được nếu đang IN_PROGRESS/PROCESSING
+        String status = appt.getStatus().toUpperCase();
+        if ("COMPLETED".equals(status) || status.contains("CANCEL") || "IN_PROGRESS".equals(status) || "PROCESSING".equals(status)) {
+            throw new RuntimeException("Không thể hủy lịch hẹn khi đang thực hiện hoặc đã kết thúc.");
+        }
+
         if (appt.getStartDateTime().isBefore(Instant.now())) throw new RuntimeException("Không thể hủy lịch hẹn quá hạn.");
 
         appt.setStatus("CANCELLED");
@@ -259,7 +98,8 @@ public class PatientServiceImpl implements PatientService {
                 serviceName = appt.getAppointmentServices().get(0).getService().getServiceName();
             }
             LocalDateTime ldt = LocalDateTime.ofInstant(appt.getStartDateTime(), ZoneId.systemDefault());
-            mailService.sendCancellationEmail(patient, String.valueOf(appt.getId()), serviceName, ldt.format(DateTimeFormatter.ofPattern("HH:mm dd/MM/yyyy")));
+            String timeStr = ldt.format(DateTimeFormatter.ofPattern("HH:mm dd/MM/yyyy"));
+            mailService.sendCancellationEmail(patient, String.valueOf(appt.getId()), serviceName, timeStr);
         } catch (Exception e) { e.printStackTrace(); }
     }
 
@@ -312,6 +152,97 @@ public class PatientServiceImpl implements PatientService {
         return appt;
     }
 
+    // --- DASHBOARD (Giữ nguyên logic của bạn) ---
+    @Override
+    public PatientDashboardDTO getPatientDashboardStats(String userIdOrEmail) {
+        User user = findUser(userIdOrEmail);
+        Patient patient = patientRepo.findByUserId(user.getId()).orElseThrow(() -> new RuntimeException("Patient not found"));
+
+        BigDecimal currentTotal = invoiceRepo.calculateTotalPaidByPatient(patient.getId());
+        if (currentTotal == null) currentTotal = BigDecimal.ZERO;
+
+        String rank = "MEMBER";
+        BigDecimal nextGoal = BigDecimal.valueOf(5000000);
+        double totalDouble = currentTotal.doubleValue();
+        if (totalDouble >= 50000000) { rank = "DIAMOND"; nextGoal = null; }
+        else if (totalDouble >= 15000000) { rank = "GOLD"; nextGoal = BigDecimal.valueOf(50000000); }
+        else if (totalDouble >= 5000000) { rank = "SILVER"; nextGoal = BigDecimal.valueOf(15000000); }
+
+        if (!rank.equals(patient.getMembershipRank()) || currentTotal.compareTo(patient.getAccumulatedSpending()) != 0) {
+            patient.setMembershipRank(rank);
+            patient.setAccumulatedSpending(currentTotal);
+            patientRepo.save(patient);
+        }
+
+        List<Appointment> upcoming = appointmentRepo.findUpcomingAppointmentsByPatient(patient.getId());
+        PatientDashboardDTO.UpcomingAppointmentDTO nextApptDTO = null;
+        if (!upcoming.isEmpty()) {
+            Appointment next = upcoming.get(0);
+            String serviceName = "Khám nha khoa";
+            if (next.getAppointmentServices() != null && !next.getAppointmentServices().isEmpty()) {
+                if (next.getAppointmentServices().get(0).getService() != null) serviceName = next.getAppointmentServices().get(0).getService().getServiceName();
+            }
+            nextApptDTO = PatientDashboardDTO.UpcomingAppointmentDTO.builder()
+                    .appointmentId(next.getId())
+                    .startDateTime(LocalDateTime.ofInstant(next.getStartDateTime(), ZoneId.systemDefault()))
+                    .doctorName(next.getDoctor() != null ? next.getDoctor().getFullName() : "Đang sắp xếp")
+                    .serviceName(serviceName)
+                    .status(next.getStatus())
+                    .roomName(next.getRoom() != null ? next.getRoom().getRoomName() : "01")
+                    .build();
+        }
+
+        List<Appointment> history = appointmentRepo.findByPatientIdOrderByStartDateTimeDesc(patient.getId());
+        Appointment lastCompleted = history.stream().filter(a -> "COMPLETED".equalsIgnoreCase(a.getStatus())).findFirst().orElse(null);
+        String healthStatus = "New";
+        String healthMessage = "Chào mừng bạn!";
+        long daysSince = -1;
+        if (lastCompleted != null) {
+            LocalDate lastDate = LocalDate.ofInstant(lastCompleted.getStartDateTime(), ZoneId.systemDefault());
+            daysSince = ChronoUnit.DAYS.between(lastDate, LocalDate.now());
+            if (daysSince < 180) { healthStatus = "Excellent"; healthMessage = "Răng miệng tốt."; }
+            else if (daysSince < 365) { healthStatus = "Warning"; healthMessage = "Đến hạn kiểm tra."; }
+            else { healthStatus = "Overdue"; healthMessage = "Cần kiểm tra ngay!"; }
+        }
+
+        List<MedicalRecord> records = medicalRecordRepository.findByPatientIdOrderByCreatedAtDesc(patient.getId());
+        List<PatientDashboardDTO.MedicalRecordDTO> historyList = records.stream().map(rec -> {
+            String img = null;
+            if (rec.getMedicalRecordImages() != null && !rec.getMedicalRecordImages().isEmpty()) {
+                try { img = rec.getMedicalRecordImages().iterator().next().getImageUrl(); } catch (Exception e) {}
+            }
+            return PatientDashboardDTO.MedicalRecordDTO.builder()
+                    .recordId(rec.getId())
+                    .visitDate(rec.getCreatedAt().atZone(ZoneId.systemDefault()).format(DateTimeFormatter.ofPattern("dd/MM/yyyy")))
+                    .diagnosis(rec.getDiagnosis())
+                    .treatment(rec.getTreatmentPlan())
+                    .doctorName(rec.getDoctor() != null ? rec.getDoctor().getFullName() : "Nha sĩ")
+                    .note(rec.getNote())
+                    .prescriptionNote(rec.getPrescriptionNote())
+                    .imageUrl(img).build();
+        }).collect(Collectors.toList());
+
+        AIRecommendation aiRec = aiRecommendationRepository.findLatestByPatientId(patient.getId());
+        String aiTip = (aiRec != null) ? aiRec.getReason() : "Chải răng 2 lần/ngày.";
+        List<PatientDashboardDTO.ActivityDTO> activities = new ArrayList<>();
+        int limit = Math.min(history.size(), 3);
+        for(int i = 0; i < limit; i++) {
+            Appointment a = history.get(i);
+            LocalDateTime ldt = LocalDateTime.ofInstant(a.getStartDateTime(), ZoneId.systemDefault());
+            activities.add(PatientDashboardDTO.ActivityDTO.builder()
+                    .title("Lịch hẹn (" + (a.getDoctor() != null ? a.getDoctor().getFullName() : "BS") + ")")
+                    .date(ldt.format(DateTimeFormatter.ofPattern("dd/MM/yyyy")))
+                    .type(a.getStatus()).build());
+        }
+
+        return PatientDashboardDTO.builder()
+                .fullName(patient.getFullName()).patientCode(patient.getPatientCode()).avatarUrl(user.getAvatarUrl())
+                .memberTier(rank).totalSpent(currentTotal).nextTierGoal(nextGoal)
+                .healthStatus(healthStatus).healthMessage(healthMessage).daysSinceLastVisit(daysSince)
+                .nextAppointment(nextApptDTO).medicalHistory(historyList).latestAiTip(aiTip).recentActivities(activities)
+                .build();
+    }
+
     @Override
     public PatientProfileDTO getPatientProfile(String userIdOrEmail) {
         User user = findUser(userIdOrEmail);
@@ -332,15 +263,31 @@ public class PatientServiceImpl implements PatientService {
         patientRepo.save(patient);
     }
 
+    // --- MAPPER ĐÃ ĐỒNG BỘ LOGIC STATUS VỚI RECEPTION ---
     private PatientAppointmentResponse mapToDTO(Appointment appt) {
         boolean canCancel = false;
         String displayStatus = appt.getStatus();
         Instant now = Instant.now();
-        if (appt.getStartDateTime().isBefore(now) && ("PENDING".equalsIgnoreCase(displayStatus) || "CONFIRMED".equalsIgnoreCase(displayStatus))) {
-            displayStatus = "NOSHOW"; canCancel = false;
-        } else if (("PENDING".equalsIgnoreCase(displayStatus) || "CONFIRMED".equalsIgnoreCase(displayStatus)) && appt.getStartDateTime().isAfter(now)) {
+
+        // Danh sách trạng thái được phép hủy: PENDING, SCHEDULED (CONFIRMED)
+        // Không được hủy nếu: IN_PROGRESS, PROCESSING, COMPLETED, CANCELLED
+        boolean isProcessOrDone = "IN_PROGRESS".equalsIgnoreCase(displayStatus)
+                || "PROCESSING".equalsIgnoreCase(displayStatus)
+                || "COMPLETED".equalsIgnoreCase(displayStatus)
+                || displayStatus.toUpperCase().contains("CANCEL");
+
+        // 1. Logic NOSHOW (Quá hạn)
+        // Chỉ đánh dấu NOSHOW nếu trạng thái vẫn đang "treo" (PENDING/SCHEDULED) mà đã qua giờ
+        if (appt.getStartDateTime().isBefore(now) && !isProcessOrDone) {
+            displayStatus = "NOSHOW";
+            canCancel = false;
+        }
+        // 2. Logic cho phép Hủy
+        // Chỉ được hủy khi chưa quá hạn và trạng thái không phải là đang làm/đã xong
+        else if (!isProcessOrDone && appt.getStartDateTime().isAfter(now)) {
             canCancel = true;
         }
+
         LocalDateTime startLocal = LocalDateTime.ofInstant(appt.getStartDateTime(), ZoneId.systemDefault());
         LocalDateTime endLocal = (appt.getEndDateTime() != null) ? LocalDateTime.ofInstant(appt.getEndDateTime(), ZoneId.systemDefault()) : null;
         String serviceName = "Dịch vụ nha khoa";
@@ -350,6 +297,17 @@ public class PatientServiceImpl implements PatientService {
             if (as.getService() != null) serviceName = as.getService().getServiceName();
             if (as.getNote() != null) variantName = as.getNote();
         }
-        return PatientAppointmentResponse.builder().appointmentId(appt.getId()).startDateTime(startLocal).endDateTime(endLocal).status(displayStatus).note(appt.getNote()).clinicName(appt.getClinic() != null ? appt.getClinic().getClinicName() : "").clinicAddress(appt.getClinic() != null ? appt.getClinic().getAddress() : "").doctorName(appt.getDoctor() != null ? appt.getDoctor().getFullName() : "Đang sắp xếp").doctorAvatar(appt.getDoctor() != null ? appt.getDoctor().getAvatarUrl() : null).serviceName(serviceName).variantName(variantName).canCancel(canCancel).build();
+        return PatientAppointmentResponse.builder()
+                .appointmentId(appt.getId())
+                .startDateTime(startLocal).endDateTime(endLocal)
+                .status(displayStatus)
+                .note(appt.getNote())
+                .clinicName(appt.getClinic() != null ? appt.getClinic().getClinicName() : "")
+                .clinicAddress(appt.getClinic() != null ? appt.getClinic().getAddress() : "")
+                .doctorName(appt.getDoctor() != null ? appt.getDoctor().getFullName() : "Đang sắp xếp")
+                .doctorAvatar(appt.getDoctor() != null ? appt.getDoctor().getAvatarUrl() : null)
+                .serviceName(serviceName).variantName(variantName)
+                .canCancel(canCancel)
+                .build();
     }
 }
