@@ -1,15 +1,32 @@
 package sunshine_dental_care.services.impl.reception;
 
-import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
+import java.math.BigDecimal;
+import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.time.LocalTime;
+import java.time.ZoneId;
+import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
+import java.util.List;
+
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import sunshine_dental_care.dto.notificationDTO.NotificationRequest;
 import sunshine_dental_care.dto.receptionDTO.AppointmentRequest;
 import sunshine_dental_care.dto.receptionDTO.ServiceItemRequest;
 import sunshine_dental_care.dto.receptionDTO.bookingDto.BookingSlotRequest;
 import sunshine_dental_care.dto.receptionDTO.bookingDto.SessionAvailabilityResponse;
 import sunshine_dental_care.dto.receptionDTO.bookingDto.TimeSlotResponse;
-import sunshine_dental_care.entities.*;
+import sunshine_dental_care.entities.Appointment;
+import sunshine_dental_care.entities.AppointmentService;
+import sunshine_dental_care.entities.Clinic;
+import sunshine_dental_care.entities.DoctorSchedule;
+import sunshine_dental_care.entities.Patient;
+import sunshine_dental_care.entities.ServiceVariant;
+import sunshine_dental_care.entities.User;
 import sunshine_dental_care.exceptions.reception.ResourceNotFoundException;
 import sunshine_dental_care.repositories.auth.ClinicRepo;
 import sunshine_dental_care.repositories.auth.PatientRepo;
@@ -19,16 +36,8 @@ import sunshine_dental_care.repositories.reception.AppointmentRepo;
 import sunshine_dental_care.repositories.reception.AppointmentServiceRepo;
 import sunshine_dental_care.repositories.reception.ServiceVariantRepo;
 import sunshine_dental_care.services.auth_service.MailService;
+import sunshine_dental_care.services.impl.notification.NotificationService;
 import sunshine_dental_care.services.interfaces.reception.BookingService;
-
-import java.math.BigDecimal;
-import java.time.LocalDate;
-import java.time.LocalDateTime;
-import java.time.LocalTime;
-import java.time.ZoneId;
-import java.time.format.DateTimeFormatter;
-import java.util.ArrayList;
-import java.util.List;
 
 @Service
 @RequiredArgsConstructor
@@ -46,6 +55,7 @@ public class BookingServiceImpl implements BookingService {
     private final DoctorRepo doctorRepo;
     private final AppointmentServiceRepo appointmentServiceRepo;
     private final MailService mailService;
+    private final NotificationService notificationService;
 
     // Các khung giờ cố định
     private static final List<LocalTime> FIXED_SLOTS = List.of(
@@ -175,6 +185,10 @@ public class BookingServiceImpl implements BookingService {
 
         // Gửi Mail (Logic của Tuấn)
         notifyBookingSuccess(savedAppointment);
+        
+        // Gửi notification APPOINTMENT_CREATED cho patient
+        sendAppointmentCreatedNotification(savedAppointment);
+        
         return savedAppointment;
     }
 
@@ -261,5 +275,49 @@ public class BookingServiceImpl implements BookingService {
         List<TimeSlotResponse> slots = new ArrayList<>();
         for (LocalTime time : FIXED_SLOTS) slots.add(new TimeSlotResponse(time.toString(), false));
         return slots;
+    }
+
+    /**
+     * Gửi notification APPOINTMENT_CREATED cho patient khi tạo lịch hẹn thành công
+     */
+    private void sendAppointmentCreatedNotification(Appointment appointment) {
+        try {
+            if (appointment.getPatient() == null || appointment.getPatient().getUser() == null) {
+                log.warn("Cannot send notification: appointment {} has no patient user", appointment.getId());
+                return;
+            }
+
+            Integer patientUserId = appointment.getPatient().getUser().getId();
+            String clinicName = appointment.getClinic() != null ? appointment.getClinic().getClinicName() : "Phòng khám";
+            String doctorName = appointment.getDoctor() != null ? appointment.getDoctor().getFullName() : "Bác sĩ";
+            
+            // Format thời gian
+            java.time.ZoneId zoneId = java.time.ZoneId.of("Asia/Ho_Chi_Minh");
+            java.time.LocalDateTime startDateTime = appointment.getStartDateTime().atZone(zoneId).toLocalDateTime();
+            String timeStr = startDateTime.format(java.time.format.DateTimeFormatter.ofPattern("HH:mm dd/MM/yyyy"));
+
+            String message = String.format(
+                "Bạn đã đặt lịch hẹn thành công tại %s với %s vào lúc %s. Lịch hẹn đang chờ xác nhận.",
+                clinicName, doctorName, timeStr);
+
+            NotificationRequest notiRequest = NotificationRequest.builder()
+                    .userId(patientUserId)
+                    .type("APPOINTMENT_CREATED")
+                    .priority("MEDIUM")
+                    .title("Đặt lịch hẹn thành công")
+                    .message(message)
+                    .actionUrl("/appointments")
+                    .relatedEntityType("APPOINTMENT")
+                    .relatedEntityId(appointment.getId())
+                    .build();
+
+            notificationService.sendNotification(notiRequest);
+            log.info("Sent APPOINTMENT_CREATED notification to patient {} for appointment {}", 
+                    patientUserId, appointment.getId());
+        } catch (Exception e) {
+            log.error("Failed to send APPOINTMENT_CREATED notification for appointment {}: {}", 
+                    appointment.getId(), e.getMessage(), e);
+            // Không throw exception để không ảnh hưởng đến việc tạo appointment
+        }
     }
 }

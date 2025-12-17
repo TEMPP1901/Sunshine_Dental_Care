@@ -33,10 +33,11 @@ public interface NotificationRepository extends JpaRepository<Log, Integer> {
     @Query("SELECT COUNT(n) FROM Log n WHERE n.userId = :userId AND n.isRead = false")
     long countAllUnreadByUserId(@Param("userId") Integer userId);
 
-    // Đánh dấu tất cả thông báo là đã đọc cho user
+    // Đánh dấu tất cả thông báo là đã đọc cho user (chỉ thông báo còn hiệu lực)
     @Modifying
     @Query("UPDATE Log n SET n.isRead = true, n.readAt = CURRENT_TIMESTAMP " +
-           "WHERE n.userId = :userId AND n.isRead = false")
+           "WHERE n.userId = :userId AND n.isRead = false " +
+           "AND (n.expiresAt IS NULL OR n.expiresAt > CURRENT_TIMESTAMP)")
     void markAllAsRead(@Param("userId") Integer userId);
 
     // Thống kê tổng số thông báo của user

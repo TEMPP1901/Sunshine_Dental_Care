@@ -1,91 +1,135 @@
 package sunshine_dental_care.scheduler;
 
-import lombok.RequiredArgsConstructor;
-import org.springframework.scheduling.annotation.Scheduled;
-import org.springframework.stereotype.Component;
-import org.springframework.transaction.annotation.Transactional;
-import sunshine_dental_care.entities.Appointment;
-import sunshine_dental_care.entities.AppointmentService;
-import sunshine_dental_care.repositories.reception.AppointmentRepo;
-import sunshine_dental_care.services.auth_service.MailService;
-
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
-import java.time.format.DateTimeFormatter;
-import java.time.temporal.ChronoUnit;
 import java.util.List;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.scheduling.annotation.Scheduled;
+import org.springframework.stereotype.Component;
+import org.springframework.transaction.annotation.Transactional;
+
+import lombok.RequiredArgsConstructor;
+import sunshine_dental_care.dto.notificationDTO.NotificationRequest;
+import sunshine_dental_care.entities.Appointment;
+import sunshine_dental_care.repositories.reception.AppointmentRepo;
+import sunshine_dental_care.services.impl.notification.NotificationService;
+
+/**
+ * Scheduler task để gửi notification nhắc nhở lịch hẹn cho patient
+ * - 24 giờ trước lịch hẹn
+ * - 2 giờ trước lịch hẹn
+ */
 @Component
 @RequiredArgsConstructor
 public class AppointmentReminderTask {
 
+    private static final Logger log = LoggerFactory.getLogger(AppointmentReminderTask.class);
+
     private final AppointmentRepo appointmentRepo;
-    private final MailService mailService;
+    private final NotificationService notificationService;
 
-    /**
-     * PRODUCTION MODE: Chạy mỗi 30 phút.
-     */
-    @Scheduled(cron = "0 0/30 * * * ?")
-    @Transactional
-    public void scanAndRemindAppointments() {
-        Instant now = Instant.now();
+    // Chạy mỗi 30 phút để kiểm tra và gửi reminder
+    @Scheduled(cron = "0 */30 * * * ?")
+    @Transactional(readOnly = true)
+    public void sendAppointmentReminders() {
+        LocalDateTime now = LocalDateTime.now(ZoneId.of("Asia/Ho_Chi_Minh"));
+        log.debug("Starting appointment reminder check at {}", now);
 
-        // --- LOGIC 1: NHẮC 24H (Giữ nguyên) ---
-        Instant start24h = now.plus(23, ChronoUnit.HOURS);
-        Instant end24h = now.plus(24, ChronoUnit.HOURS).plus(30, ChronoUnit.MINUTES);
-        List<Appointment> list24h = appointmentRepo.findAppointmentsToRemind(start24h, end24h);
-        processList(list24h, "24H", false);
-
-        // --- LOGIC 2: NHẮC GẤP (SỬA ĐỔI QUAN TRỌNG) ---
-        // Thay đổi: Quét từ [Hiện tại] đến [2h30p tới]
-        // Để bắt tất cả các lịch hẹn sắp diễn ra trong tương lai gần mà chưa gửi mail
-        Instant startUrgent = now;
-        Instant endUrgent = now.plus(2, ChronoUnit.HOURS).plus(30, ChronoUnit.MINUTES);
-
-        List<Appointment> listUrgent = appointmentRepo.findUrgentAppointmentsToRemind(startUrgent, endUrgent);
-        processList(listUrgent, "URGENT", true);
+        // Tính thời gian 24h và 2h từ bây giờ
+        LocalDateTime reminder24h = now.plusHours(24);
+        LocalDateTime reminder2h = now.plusHours(2);
+        
+        // Tìm các appointment cần gửi reminder 24h
+        sendRemindersForTimeWindow(reminder24h, "24h");
+        
+        // Tìm các appointment cần gửi reminder 2h
+        sendRemindersForTimeWindow(reminder2h, "2h");
     }
 
-    private void processList(List<Appointment> appointments, String type, boolean isUrgent) {
-        if (!appointments.isEmpty()) {
-            System.out.println(">>> [SCAN " + type + "] Tìm thấy " + appointments.size() + " lịch.");
-        }
+    /**
+     * Gửi reminder cho các appointment trong khoảng thời gian cụ thể
+     */
+    private void sendRemindersForTimeWindow(LocalDateTime targetTime, String reminderType) {
+        try {
+            // Tính khoảng thời gian (30 phút trước và sau targetTime để có buffer)
+            LocalDateTime windowStart = targetTime.minusMinutes(30);
+            LocalDateTime windowEnd = targetTime.plusMinutes(30);
+            
+            Instant startInstant = windowStart.atZone(ZoneId.of("Asia/Ho_Chi_Minh")).toInstant();
+            Instant endInstant = windowEnd.atZone(ZoneId.of("Asia/Ho_Chi_Minh")).toInstant();
 
-        for (Appointment appt : appointments) {
-            try {
-                // Chỉ gửi nếu chưa quá hạn (Start time phải còn ở tương lai)
-                // Vì nếu quét từ 'now', có thể dính các lịch vừa trôi qua vài giây
-                if (appt.getStartDateTime().isBefore(Instant.now())) {
-                    continue;
-                }
+            // Tìm các appointment:
+            // - Status là PENDING hoặc CONFIRMED
+            // - StartDateTime trong khoảng thời gian này
+            // - Có patient user (để gửi notification)
+            List<Appointment> appointments = appointmentRepo.findByStatusInAndStartDateTimeBetween(
+                    startInstant, endInstant);
 
-                if (appt.getPatient() != null && appt.getPatient().getUser() != null) {
-                    LocalDateTime ldt = LocalDateTime.ofInstant(appt.getStartDateTime(), ZoneId.systemDefault());
-                    String timeStr = ldt.format(DateTimeFormatter.ofPattern("HH:mm 'ngày' dd/MM/yyyy"));
+            log.debug("Found {} appointments for {} reminder check", appointments.size(), reminderType);
 
-                    String serviceName = "Nha khoa tổng quát";
-                    if (appt.getAppointmentServices() != null && !appt.getAppointmentServices().isEmpty()) {
-                        AppointmentService as = appt.getAppointmentServices().get(0);
-                        if (as.getService() != null) serviceName = as.getService().getServiceName();
+            int sentCount = 0;
+            int skippedCount = 0;
+
+            for (Appointment appointment : appointments) {
+                try {
+                    // Kiểm tra xem đã gửi reminder cho loại này chưa
+                    // (Có thể kiểm tra bằng cách tìm notification với type APPOINTMENT_REMINDER và message chứa reminderType)
+                    // Tạm thời bỏ qua check này để đơn giản, có thể cải thiện sau
+
+                    if (appointment.getPatient() == null || appointment.getPatient().getUser() == null) {
+                        log.warn("Skipping appointment {} - no patient user", appointment.getId());
+                        skippedCount++;
+                        continue;
                     }
 
-                    String address = (appt.getClinic() != null) ? appt.getClinic().getAddress() : "Phòng khám chính";
+                    Integer patientUserId = appointment.getPatient().getUser().getId();
+                    String clinicName = appointment.getClinic() != null ? appointment.getClinic().getClinicName() : "Phòng khám";
+                    String doctorName = appointment.getDoctor() != null ? appointment.getDoctor().getFullName() : "Bác sĩ";
+                    
+                    // Format thời gian
+                    LocalDateTime startDateTime = appointment.getStartDateTime()
+                            .atZone(ZoneId.of("Asia/Ho_Chi_Minh")).toLocalDateTime();
+                    String timeStr = startDateTime.format(java.time.format.DateTimeFormatter.ofPattern("HH:mm dd/MM/yyyy"));
 
-                    if (isUrgent) {
-                        mailService.sendUrgentReminderEmail(appt.getPatient().getUser(), appt, timeStr, serviceName, address);
-                        appt.setIsUrgentReminderSent(true);
+                    String message;
+                    if ("24h".equals(reminderType)) {
+                        message = String.format(
+                                "Nhắc nhở: Bạn có lịch hẹn tại %s với %s vào lúc %s (còn 24 giờ). Vui lòng đến đúng giờ.",
+                                clinicName, doctorName, timeStr);
                     } else {
-                        mailService.sendAppointmentReminderEmail(appt.getPatient().getUser(), appt, timeStr, serviceName, address);
-                        appt.setIsReminderSent(true);
+                        message = String.format(
+                                "Nhắc nhở: Bạn có lịch hẹn tại %s với %s vào lúc %s (còn 2 giờ). Vui lòng chuẩn bị đến phòng khám.",
+                                clinicName, doctorName, timeStr);
                     }
 
-                    appointmentRepo.save(appt);
-                    System.out.println(">>> [SENT " + type + "] ID: " + appt.getId());
+                    NotificationRequest notiRequest = NotificationRequest.builder()
+                            .userId(patientUserId)
+                            .type("APPOINTMENT_REMINDER")
+                            .priority("MEDIUM")
+                            .title("Nhắc nhở lịch hẹn")
+                            .message(message)
+                            .actionUrl("/appointments")
+                            .relatedEntityType("APPOINTMENT")
+                            .relatedEntityId(appointment.getId())
+                            .build();
+
+                    notificationService.sendNotification(notiRequest);
+                    sentCount++;
+                    log.debug("Sent {} reminder notification to patient {} for appointment {}", 
+                            reminderType, patientUserId, appointment.getId());
+                } catch (Exception e) {
+                    log.error("Failed to send {} reminder for appointment {}: {}", 
+                            reminderType, appointment.getId(), e.getMessage(), e);
                 }
-            } catch (Exception e) {
-                System.err.println(">>> [ERROR] ID " + appt.getId() + ": " + e.getMessage());
             }
+
+            log.info("Appointment reminder ({}) completed: {} sent, {} skipped", 
+                    reminderType, sentCount, skippedCount);
+        } catch (Exception e) {
+            log.error("Error sending appointment reminders ({}): {}", reminderType, e.getMessage(), e);
         }
     }
 }

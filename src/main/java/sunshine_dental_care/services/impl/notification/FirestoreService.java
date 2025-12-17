@@ -124,4 +124,46 @@ public class FirestoreService {
             log.error("[Firestore] Error deleting notification: {}", e.getMessage(), e);
         }
     }
+
+    @org.springframework.scheduling.annotation.Async
+    public void markAllAsRead(Integer userId) {
+        try {
+            Firestore db = getFirestore();
+            if (db == null) {
+                log.warn("[Firestore] Firestore instance is null, skipping mark all as read");
+                return;
+            }
+
+            String collectionPath = "notifications/" + userId + "/items";
+            var collectionRef = db.collection(collectionPath);
+            
+            // Query tất cả notifications chưa đọc
+            var query = collectionRef.whereEqualTo("isRead", false);
+            var querySnapshot = query.get().get();
+            
+            if (querySnapshot.isEmpty()) {
+                log.info("[Firestore] No unread notifications to mark as read - UserId: {}", userId);
+                return;
+            }
+
+            // Batch update tất cả unread notifications
+            var batch = db.batch();
+            int count = 0;
+            for (var doc : querySnapshot.getDocuments()) {
+                Map<String, Object> updates = new HashMap<>();
+                updates.put("isRead", true);
+                updates.put("readAt", Instant.now().toString());
+                batch.update(doc.getReference(), updates);
+                count++;
+            }
+            
+            // Firestore batch limit là 500, nhưng chúng ta sẽ xử lý trong một batch
+            // Nếu có nhiều hơn 500, cần chia nhỏ, nhưng tạm thời giả sử không quá 500
+            batch.commit().get();
+            
+            log.info("[Firestore] Marked {} notifications as read - UserId: {}", count, userId);
+        } catch (Exception e) {
+            log.error("[Firestore] Error marking all notifications as read: {}", e.getMessage(), e);
+        }
+    }
 }

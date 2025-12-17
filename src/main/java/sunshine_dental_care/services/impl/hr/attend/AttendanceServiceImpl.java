@@ -282,6 +282,11 @@ public class AttendanceServiceImpl implements AttendanceService {
                         attendanceStatus, request.getUserId(), today);
             }
             attendance.setAttendanceStatus(attendanceStatus);
+            
+            // Gửi notification nếu bị đánh dấu ABSENT
+            if ("ABSENT".equals(attendanceStatus)) {
+                // Lưu ý: attendance chưa được save, sẽ gửi notification sau khi save
+            }
         }
         // Đảm bảo shiftType luôn được set trước khi save (không được null để unique constraint hoạt động)
         if (attendance.getShiftType() == null) {
@@ -298,6 +303,16 @@ public class AttendanceServiceImpl implements AttendanceService {
         User user = userRepo.findById(request.getUserId())
                 .orElseThrow(() -> new AttendanceNotFoundException("User not found"));
         sendCheckInNotification(request.getUserId(), clinicEntity.getClinicName(), checkInTime, attendance.getId());
+        
+        // Gửi notification nếu bị đánh dấu ABSENT
+        if ("ABSENT".equals(attendance.getAttendanceStatus())) {
+            sendAttendanceAbsentNotification(attendance);
+        }
+
+        // Gửi notification DOCTOR_LATE_CHECKIN nếu bác sĩ check-in trễ (> 15 phút)
+        if (isDoctor && attendance.getLateMinutes() != null && attendance.getLateMinutes() > 15) {
+            sendDoctorLateCheckInNotification(attendance, clinicEntity.getClinicName());
+        }
 
         LocalTime expectedEndTime = WorkHoursConstants.EMPLOYEE_END_TIME;
         if (isDoctor && shiftType != null) {
@@ -504,10 +519,17 @@ public class AttendanceServiceImpl implements AttendanceService {
                         // Chỉ set ABSENT nếu chưa có check-in time
                         if (absentAttendance.getCheckInTime() == null) {
                             boolean hasApprovedLeave = leaveRequestRepo.hasApprovedLeaveOnDate(userId, workDate);
-                            absentAttendance.setAttendanceStatus(hasApprovedLeave ? "APPROVED_ABSENCE" : "ABSENT");
-                            attendanceRepo.save(absentAttendance);
+                            String newStatus = hasApprovedLeave ? "APPROVED_ABSENCE" : "ABSENT";
+                            absentAttendance.setAttendanceStatus(newStatus);
+                            Attendance saved = attendanceRepo.save(absentAttendance);
+                            
+                            // Gửi notification nếu bị đánh dấu ABSENT
+                            if ("ABSENT".equals(newStatus)) {
+                                sendAttendanceAbsentNotification(saved);
+                            }
+                            
                             log.info("Marked doctor {} as {} for MORNING shift at clinic {} on {} (checked in {} minutes late for afternoon shift)", 
-                                    userId, absentAttendance.getAttendanceStatus(), clinicId, workDate, minutesLate);
+                                    userId, newStatus, clinicId, workDate, minutesLate);
                         }
                     }
                 }
@@ -609,6 +631,130 @@ public class AttendanceServiceImpl implements AttendanceService {
             notificationService.sendNotification(notiRequest);
         } catch (Exception e) {
             log.error("Failed to send check-out notification", e);
+        }
+    }
+
+    /**
+     * Gửi notification DOCTOR_LATE_CHECKIN cho Reception, HR, Admin khi bác sĩ check-in trễ (> 15 phút)
+     */
+    private void sendDoctorLateCheckInNotification(sunshine_dental_care.entities.Attendance attendance, String clinicName) {
+        try {
+            Integer doctorId = attendance.getUserId();
+            Integer clinicId = attendance.getClinicId();
+            Integer lateMinutes = attendance.getLateMinutes();
+            
+            if (lateMinutes == null || lateMinutes <= 15) {
+                return; // Chỉ gửi nếu trễ > 15 phút
+            }
+
+            User doctor = userRepo.findById(doctorId).orElse(null);
+            String doctorName = doctor != null ? doctor.getFullName() : "Bác sĩ";
+            
+            // Format thời gian
+            java.time.ZoneId zoneId = java.time.ZoneId.of("Asia/Ho_Chi_Minh");
+            java.time.LocalTime checkInTime = attendance.getCheckInTime().atZone(zoneId).toLocalTime();
+            String timeStr = checkInTime.format(java.time.format.DateTimeFormatter.ofPattern("HH:mm"));
+
+            String message = String.format(
+                    "Bác sĩ %s đã check-in trễ %d phút tại %s vào lúc %s ngày %s.",
+                    doctorName, lateMinutes, clinicName, timeStr, attendance.getWorkDate());
+
+            // Lấy danh sách Reception users của clinic này
+            List<Integer> receptionUserIds = getReceptionUserIdsByClinic(clinicId);
+            
+            // Lấy danh sách HR và Admin users
+            List<Integer> hrUserIds = userRoleRepo.findUserIdsByRoleName("HR");
+            List<Integer> adminUserIds = userRoleRepo.findUserIdsByRoleName("ADMIN");
+            
+            // Gộp tất cả user IDs cần thông báo
+            java.util.Set<Integer> allUserIds = new java.util.HashSet<>();
+            allUserIds.addAll(receptionUserIds);
+            allUserIds.addAll(hrUserIds);
+            allUserIds.addAll(adminUserIds);
+
+            int successCount = 0;
+            for (Integer userId : allUserIds) {
+                try {
+                    NotificationRequest notiRequest = NotificationRequest.builder()
+                            .userId(userId)
+                            .type("DOCTOR_LATE_CHECKIN")
+                            .priority("MEDIUM")
+                            .title("Bác sĩ check-in trễ")
+                            .message(message)
+                            .actionUrl("/hr/attendance")
+                            .relatedEntityType("DOCTOR_SCHEDULE")
+                            .relatedEntityId(attendance.getId())
+                            .build();
+
+                    notificationService.sendNotification(notiRequest);
+                    successCount++;
+                } catch (Exception e) {
+                    log.error("Failed to send DOCTOR_LATE_CHECKIN notification to user {}: {}", userId, e.getMessage());
+                }
+            }
+
+            log.info("Sent {} DOCTOR_LATE_CHECKIN notifications for doctor {} ({} minutes late)", 
+                    successCount, doctorName, lateMinutes);
+        } catch (Exception e) {
+            log.error("Failed to send DOCTOR_LATE_CHECKIN notification for attendance {}: {}", 
+                    attendance.getId(), e.getMessage(), e);
+        }
+    }
+
+    /**
+     * Gửi notification ATTENDANCE_ABSENT cho employee khi bị đánh dấu vắng mặt
+     */
+    private void sendAttendanceAbsentNotification(Attendance attendance) {
+        try {
+            Integer userId = attendance.getUserId();
+            Integer clinicId = attendance.getClinicId();
+            
+            User user = userRepo.findById(userId).orElse(null);
+            Clinic clinic = clinicRepo.findById(clinicId).orElse(null);
+            String clinicName = clinic != null ? clinic.getClinicName() : "Phòng khám";
+            
+            String shiftType = attendance.getShiftType();
+            String shiftInfo = "";
+            if (shiftType != null && !"FULL_DAY".equals(shiftType)) {
+                shiftInfo = " ca " + (WorkHoursConstants.SHIFT_TYPE_MORNING.equals(shiftType) ? "sáng" : "chiều");
+            }
+
+            String message = String.format(
+                    "Bạn đã bị đánh dấu vắng mặt%s tại %s ngày %s. Vui lòng liên hệ HR nếu có lý do chính đáng.",
+                    shiftInfo, clinicName, attendance.getWorkDate());
+
+            NotificationRequest notiRequest = NotificationRequest.builder()
+                    .userId(userId)
+                    .type("ATTENDANCE_ABSENT")
+                    .priority("HIGH")
+                    .title("Vắng mặt")
+                    .message(message)
+                    .actionUrl("/my-attendance")
+                    .relatedEntityType("ATTENDANCE")
+                    .relatedEntityId(attendance.getId())
+                    .build();
+
+            notificationService.sendNotification(notiRequest);
+            log.info("Sent ATTENDANCE_ABSENT notification to user {} for attendance {}", userId, attendance.getId());
+        } catch (Exception e) {
+            log.error("Failed to send ATTENDANCE_ABSENT notification for attendance {}: {}", 
+                    attendance.getId(), e.getMessage(), e);
+        }
+    }
+
+    /**
+     * Lấy danh sách reception user IDs của một cơ sở cụ thể
+     * Note: Hiện tại chỉ trả về tất cả reception users, không filter theo clinic
+     * TODO: Có thể inject UserClinicAssignmentRepo để filter chính xác theo clinic
+     */
+    private List<Integer> getReceptionUserIdsByClinic(Integer clinicId) {
+        try {
+            // Lấy tất cả reception user IDs trong hệ thống
+            List<Integer> allReceptionUserIds = userRoleRepo.findUserIdsByRoleName("RECEPTION");
+            return allReceptionUserIds != null ? allReceptionUserIds : List.of();
+        } catch (Exception e) {
+            log.error("Failed to get reception user IDs for clinic {}: {}", clinicId, e.getMessage());
+            return List.of();
         }
     }
 
@@ -891,6 +1037,7 @@ public class AttendanceServiceImpl implements AttendanceService {
                             newStatus, ADMIN_ALLOWED_STATUSES));
         }
 
+        String oldStatus = attendance.getAttendanceStatus();
         attendance.setAttendanceStatus(newStatus);
         // Thêm note của admin vào ghi chú
         if (adminNote != null && !adminNote.trim().isEmpty()) {
@@ -899,6 +1046,11 @@ public class AttendanceServiceImpl implements AttendanceService {
         }
         attendance.setUpdatedAt(Instant.now());
         Attendance saved = attendanceRepo.save(attendance);
+
+        // Gửi notification nếu status được đổi sang ABSENT
+        if ("ABSENT".equals(newStatus) && !"ABSENT".equals(oldStatus)) {
+            sendAttendanceAbsentNotification(saved);
+        }
 
         User actor = resolveUserById(adminUserId);
         if (actor != null) {

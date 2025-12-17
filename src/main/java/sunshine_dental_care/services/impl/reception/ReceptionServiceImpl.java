@@ -5,23 +5,41 @@ import java.util.List;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
-import jakarta.validation.ValidationException;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
 import org.springframework.security.crypto.password.PasswordEncoder;
-import org.springframework.stereotype.Service; // Annotation của Spring
-import org.springframework.transaction.annotation.Transactional;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional; // Annotation của Spring
 
+import jakarta.validation.ValidationException;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import sunshine_dental_care.dto.hrDTO.DoctorScheduleDto;
 import sunshine_dental_care.dto.notificationDTO.NotificationRequest;
-import sunshine_dental_care.dto.receptionDTO.*;
+import sunshine_dental_care.dto.receptionDTO.AppointmentRequest;
+import sunshine_dental_care.dto.receptionDTO.AppointmentResponse;
+import sunshine_dental_care.dto.receptionDTO.AppointmentUpdateRequest;
+import sunshine_dental_care.dto.receptionDTO.BillInvoiceDTO;
+import sunshine_dental_care.dto.receptionDTO.PatientHistoryDTO;
+import sunshine_dental_care.dto.receptionDTO.PatientRequest;
+import sunshine_dental_care.dto.receptionDTO.PatientResponse;
+import sunshine_dental_care.dto.receptionDTO.RescheduleRequest;
+import sunshine_dental_care.dto.receptionDTO.ServiceItemRequest;
 import sunshine_dental_care.dto.receptionDTO.mapper.AppointmentMapper;
 import sunshine_dental_care.dto.receptionDTO.mapper.DoctorScheduleMapper;
-import sunshine_dental_care.entities.*;
+import sunshine_dental_care.entities.Appointment;
+import sunshine_dental_care.entities.AppointmentService;
+import sunshine_dental_care.entities.Clinic;
+import sunshine_dental_care.entities.DoctorSchedule;
+import sunshine_dental_care.entities.Log;
+import sunshine_dental_care.entities.Patient;
+import sunshine_dental_care.entities.Role;
+import sunshine_dental_care.entities.Room;
 import sunshine_dental_care.entities.ServiceVariant;
+import sunshine_dental_care.entities.User;
+import sunshine_dental_care.entities.UserClinicAssignment;
+import sunshine_dental_care.entities.UserRole;
 import sunshine_dental_care.exceptions.reception.AccessDeniedException;
 import sunshine_dental_care.exceptions.reception.AppointmentConflictException;
 import sunshine_dental_care.exceptions.reception.ResourceNotFoundException;
@@ -233,6 +251,10 @@ public class ReceptionServiceImpl implements ReceptionService {
 
             appointmentServiceRepo.save(as);
         }
+        
+        // Gửi notification APPOINTMENT_CREATED cho patient
+        sendAppointmentCreatedNotification(appointment);
+        
         return appointmentMapper.mapToAppointmentResponse(appointment);
     }
 
@@ -457,6 +479,50 @@ public class ReceptionServiceImpl implements ReceptionService {
         }
 
         return appointmentMapper.mapToAppointmentResponse(savedAppointment);
+    }
+
+    /**
+     * Gửi notification APPOINTMENT_CREATED cho patient khi tạo lịch hẹn thành công
+     */
+    private void sendAppointmentCreatedNotification(Appointment appointment) {
+        try {
+            if (appointment.getPatient() == null || appointment.getPatient().getUser() == null) {
+                log.warn("Cannot send notification: appointment {} has no patient user", appointment.getId());
+                return;
+            }
+
+            Integer patientUserId = appointment.getPatient().getUser().getId();
+            String clinicName = appointment.getClinic() != null ? appointment.getClinic().getClinicName() : "Phòng khám";
+            String doctorName = appointment.getDoctor() != null ? appointment.getDoctor().getFullName() : "Bác sĩ";
+            
+            // Format thời gian
+            java.time.ZoneId zoneId = java.time.ZoneId.of("Asia/Ho_Chi_Minh");
+            java.time.LocalDateTime startDateTime = appointment.getStartDateTime().atZone(zoneId).toLocalDateTime();
+            String timeStr = startDateTime.format(java.time.format.DateTimeFormatter.ofPattern("HH:mm dd/MM/yyyy"));
+
+            String message = String.format(
+                "Bạn đã đặt lịch hẹn thành công tại %s với %s vào lúc %s. Lịch hẹn đang chờ xác nhận.",
+                clinicName, doctorName, timeStr);
+
+            NotificationRequest notiRequest = NotificationRequest.builder()
+                    .userId(patientUserId)
+                    .type("APPOINTMENT_CREATED")
+                    .priority("MEDIUM")
+                    .title("Đặt lịch hẹn thành công")
+                    .message(message)
+                    .actionUrl("/appointments")
+                    .relatedEntityType("APPOINTMENT")
+                    .relatedEntityId(appointment.getId())
+                    .build();
+
+            notificationService.sendNotification(notiRequest);
+            log.info("Sent APPOINTMENT_CREATED notification to patient {} for appointment {}", 
+                    patientUserId, appointment.getId());
+        } catch (Exception e) {
+            log.error("Failed to send APPOINTMENT_CREATED notification for appointment {}: {}", 
+                    appointment.getId(), e.getMessage(), e);
+            // Không throw exception để không ảnh hưởng đến việc tạo appointment
+        }
     }
 
     /**

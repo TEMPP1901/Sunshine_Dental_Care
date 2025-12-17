@@ -37,14 +37,25 @@ public class NotificationAsyncService {
     // Gửi notification qua WebSocket
     private void sendToWebSocket(NotificationResponse notification, String userId) {
         try {
-            String destination = "/user/" + userId + "/queue/notifications";
+            // Spring WebSocket convertAndSendToUser sử dụng username từ principal
+            // Trong CurrentUser, username được set là String.valueOf(userId)
+            // Nên cần đảm bảo userId được truyền đúng format (String)
+            String username = userId; // Username trong principal là String.valueOf(userId)
+            String destination = "/user/" + username + "/queue/notifications";
+            
+            log.debug("[WebSocket] Attempting to send notification {} to user {} (username: {}) at destination {}", 
+                    notification.getNotificationId(), userId, username, destination);
+            
             messagingTemplate.convertAndSendToUser(
-                    userId,
+                    username,
                     "/queue/notifications",
                     notification);
-            log.info("[WebSocket] Notification sent successfully to user {} at destination {}", userId, destination);
+            
+            log.info("[WebSocket] Notification {} sent successfully to user {} (username: {}) at destination {}", 
+                    notification.getNotificationId(), userId, username, destination);
         } catch (Exception e) {
             log.error("[WebSocket] Error sending WebSocket message to user {}: {}", userId, e.getMessage(), e);
+            // Không throw exception để không làm gián đoạn việc gửi Firestore và FCM
         }
     }
 

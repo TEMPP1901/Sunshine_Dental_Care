@@ -11,7 +11,16 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import lombok.RequiredArgsConstructor;
-import sunshine_dental_care.dto.authDTO.*;
+import sunshine_dental_care.dto.authDTO.ChangePasswordRequest;
+import sunshine_dental_care.dto.authDTO.ForgotPasswordRequest;
+import sunshine_dental_care.dto.authDTO.LoginRequest;
+import sunshine_dental_care.dto.authDTO.LoginResponse;
+import sunshine_dental_care.dto.authDTO.PhoneLoginStep1Request;
+import sunshine_dental_care.dto.authDTO.PhoneLoginStep2Request;
+import sunshine_dental_care.dto.authDTO.PhonePasswordLoginRequest;
+import sunshine_dental_care.dto.authDTO.ResetPasswordRequest;
+import sunshine_dental_care.dto.authDTO.SignUpRequest;
+import sunshine_dental_care.dto.authDTO.SignUpResponse;
 import sunshine_dental_care.entities.Patient;
 import sunshine_dental_care.entities.User;
 import sunshine_dental_care.entities.UserRole;

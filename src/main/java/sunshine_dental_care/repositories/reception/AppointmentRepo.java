@@ -134,4 +134,14 @@ public interface AppointmentRepo extends JpaRepository<Appointment, Integer> {
 
     // Tìm tất cả lịch hẹn của 1 bệnh nhân
     List<Appointment> findByPatientId(Integer patientId);
+
+    // Query để tìm appointments cần gửi reminder (dùng cho scheduler)
+    @Query("SELECT a FROM Appointment a " +
+            "WHERE (a.status = 'PENDING' OR a.status = 'CONFIRMED') " +
+            "AND a.startDateTime >= :start AND a.startDateTime <= :end " +
+            "AND a.patient.user IS NOT NULL")
+    List<Appointment> findByStatusInAndStartDateTimeBetween(
+            @Param("start") Instant start,
+            @Param("end") Instant end
+    );
 }

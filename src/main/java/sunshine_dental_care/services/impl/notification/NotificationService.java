@@ -155,6 +155,13 @@ public class NotificationService {
     @Transactional
     public void markAllAsRead(Integer userId) {
         notificationRepository.markAllAsRead(userId);
+        
+        // Gửi cập nhật lên Firestore, không throw lỗi để không làm rollback transaction
+        try {
+            firestoreService.markAllAsRead(userId);
+        } catch (Exception e) {
+            log.error("[Firestore] Error marking all as read in Firestore: {}", e.getMessage());
+        }
     }
 
     @Transactional(readOnly = true)
