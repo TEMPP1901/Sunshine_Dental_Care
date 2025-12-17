@@ -71,8 +71,15 @@ public class SecurityConfig {
                         .requestMatchers("/uploads_avatar/**").permitAll()
                         .requestMatchers("/uploads/**").permitAll()
                         .requestMatchers("/ws/**").permitAll()
+                        .requestMatchers("/auth/sign-up").permitAll()
 
-                        // --- PUBLIC API (AUTH) ---
+                        // Products & inventory
+                        .requestMatchers("/api/products/accountant/**").hasAnyRole("ACCOUNTANT", "ADMIN")
+                        .requestMatchers("/api/inventory/**").hasAnyRole("ACCOUNTANT", "ADMIN")
+                        .requestMatchers("/api/invoices/**").hasAnyRole("ACCOUNTANT", "ADMIN")
+                        .requestMatchers("/api/payroll/**").hasAnyRole("ACCOUNTANT", "ADMIN")
+
+                        // Auth Endpoints
                         .requestMatchers(
                                 "/api/auth/sign-up",
                                 "/api/auth/login",

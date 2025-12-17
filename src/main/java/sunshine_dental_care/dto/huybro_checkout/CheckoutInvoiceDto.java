@@ -50,4 +50,5 @@ public class CheckoutInvoiceDto {
     private String invoiceStatus;
 
     private List<CheckoutInvoiceItemDto> items;
+
 }

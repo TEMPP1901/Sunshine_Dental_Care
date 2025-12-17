@@ -25,7 +25,7 @@ import lombok.extern.slf4j.Slf4j;
 import sunshine_dental_care.dto.huybro_cart.CartViewDto;
 import sunshine_dental_care.dto.huybro_checkout.CheckoutCreateRequestDto;
 import sunshine_dental_care.dto.huybro_checkout.CheckoutInvoiceDto;
-import sunshine_dental_care.entities.huybro_product_invoice.ProductInvoice;
+import sunshine_dental_care.entities.huybro_product_invoices.ProductInvoice;
 import sunshine_dental_care.repositories.huybro_products.ProductInvoiceRepository;
 import sunshine_dental_care.services.huybro_cart.interfaces.CartService;
 import sunshine_dental_care.services.huybro_checkout.interfaces.CheckoutInvoiceService;

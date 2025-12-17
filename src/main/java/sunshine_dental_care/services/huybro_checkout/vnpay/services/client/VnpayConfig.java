@@ -7,6 +7,7 @@ import org.springframework.context.annotation.Configuration;
 
 import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
+import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.util.*;
 
@@ -79,7 +80,7 @@ public class VnpayConfig {
             if ((fieldValue != null) && (fieldValue.length() > 0)) {
                 sb.append(fieldName);
                 sb.append("=");
-                sb.append(fieldValue);
+                sb.append(URLEncoder.encode(fieldValue, StandardCharsets.US_ASCII));
             }
             if (itr.hasNext()) {
                 sb.append("&");

@@ -1,4 +1,4 @@
-package sunshine_dental_care.entities.huybro_product_invoice;
+package sunshine_dental_care.entities.huybro_product_invoices;
 
 import java.math.BigDecimal;
 import java.time.Instant;
@@ -136,5 +136,8 @@ public class ProductInvoice {
     @Nationalized
     @Transient // Column not present in DB; avoid SQL errors
     private String invoiceStatus;
+
+    @Column(name = "exchangeRate", precision = 18, scale = 6) // Scale lớn để chính xác
+    private BigDecimal exchangeRate;
 
 }
