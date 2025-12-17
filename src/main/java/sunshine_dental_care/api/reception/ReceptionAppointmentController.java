@@ -3,7 +3,6 @@ package sunshine_dental_care.api.reception;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.Map;
-
 import org.springframework.data.domain.Page;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.ResponseEntity;
@@ -216,5 +215,22 @@ public class ReceptionAppointmentController {
     @PreAuthorize("hasAnyRole('RECEPTION', 'ADMIN')")
     public ResponseEntity<List<PatientHistoryDTO>> getPatientHistory(@PathVariable Integer id) {
         return ResponseEntity.ok(receptionService.getPatientHistory(id));
+    }
+
+    // API Lấy danh sách hóa đơn (Invoices)
+    @GetMapping("/invoices")
+    public ResponseEntity<Page<AppointmentResponse>> getInvoiceList(
+            @AuthenticationPrincipal CurrentUser currentUser, // Dùng @AuthenticationPrincipal chuẩn của Spring Security
+            @RequestParam(required = false) String keyword,
+            @RequestParam(required = false) LocalDate fromDate,
+            @RequestParam(required = false) LocalDate toDate,
+            @RequestParam(required = false) String paymentStatus,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "10") int size
+    ) {
+        Page<AppointmentResponse> result = receptionService.getInvoiceList(
+                currentUser, keyword, fromDate, toDate, paymentStatus, page, size
+        );
+        return ResponseEntity.ok(result);
     }
 }

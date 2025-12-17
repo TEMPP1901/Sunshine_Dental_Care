@@ -111,9 +111,13 @@ public class Appointment {
     @Column(name = "total_amount")
     private java.math.BigDecimal totalAmount;
 
+    @Column(name = "invoice_code")
+    private String invoiceCode;
+
     // Mỗi Lịch hẹn (Appointment) có thể chứa nhiều (Many) bản ghi Chi tiết Dịch vụ Lịch hẹn (AppointmentService).
     @OneToMany(mappedBy = "appointment", cascade = CascadeType.ALL, fetch = FetchType.LAZY)
     private List<AppointmentService> appointmentServices;
+
 
     // --- GETTERS & SETTERS ---
 
@@ -204,6 +208,14 @@ public class Appointment {
     }
     public void setTotalAmount(java.math.BigDecimal totalAmount) {
         this.totalAmount = totalAmount;
+    }
+
+    public String getInvoiceCode() {
+        return invoiceCode;
+    }
+
+    public void setInvoiceCode(String invoiceCode) {
+        this.invoiceCode = invoiceCode;
     }
 
     @PrePersist
