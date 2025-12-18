@@ -19,7 +19,7 @@ public class BookingCleanupService {
 
     public void scanAndCancelExpiredBookings() {
 
-        // 1. Tính thời điểm giới hạn (Hiện tại - 15 phút)
+        // 1. Tính thời điểm giới hạn (Hiện tại - 10 phút)
         // Nghĩa là: Những đơn nào tạo TRƯỚC thời điểm này là đã quá hạn
         Instant expirationTime = Instant.now().minus(10, ChronoUnit.MINUTES);
 

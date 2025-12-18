@@ -147,7 +147,7 @@ public class ReceptionAppointmentController {
     @PreAuthorize("hasAnyRole('RECEPTION', 'ADMIN')")
     public ResponseEntity<AppointmentResponse> assignRoom(
             @PathVariable Integer id,
-            @RequestParam Integer roomId) {
+            @RequestParam(required = false) Integer roomId) {
 
         AppointmentResponse response = receptionService.assignRoomToAppointment(id, roomId);
         return ResponseEntity.ok(response);
