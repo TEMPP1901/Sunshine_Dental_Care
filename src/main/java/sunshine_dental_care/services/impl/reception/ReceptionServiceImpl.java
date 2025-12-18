@@ -314,6 +314,11 @@ public class ReceptionServiceImpl implements ReceptionService {
         appointment.setStartDateTime(newStart);
         appointment.setEndDateTime(newEnd);
 
+        // đổi status lịch khám sau khi drag and drop từ PENDING -> RESCHEDULED
+        if (request.getStatus() != null && !request.getStatus().isEmpty()) {
+            appointment.setStatus(request.getStatus());
+        }
+
         // Nếu đổi bác sĩ thì reset room
         if (originalDoctor == null || !targetDoctor.getId().equals(originalDoctor.getId())) {
             appointment.setRoom(null);
@@ -448,6 +453,10 @@ public class ReceptionServiceImpl implements ReceptionService {
         // Cập nhật trạng thái nếu có
         if (newStatus != null && !newStatus.isEmpty()) {
             appointment.setStatus(newStatus);
+            // Logic giải phóng phòng thành trống nếu lịch completed hoặc hủy
+            if ("COMPLETED".equalsIgnoreCase(newStatus) || "CANCELLED".equalsIgnoreCase(newStatus)) {
+                appointment.setRoom(null);
+            }
         }
 
         // Cập nhật ghi chú nếu có
@@ -549,7 +558,19 @@ public class ReceptionServiceImpl implements ReceptionService {
         // 1. Lấy thông tin lịch hẹn
         Appointment appt = appointmentRepo.findById(appointmentId)
                 .orElseThrow(() -> new ResourceNotFoundException("Appointment not found"));
+        // VỚI LỊCH HẸN ĐÃ HOÀN THÀNH, HỦY HOẶC ĐANG TIẾN HÀNH THÌ KHÔNG ĐƯỢC XẾP PHÒNG
+        String status = appt.getStatus();
+        if ("COMPLETED".equalsIgnoreCase(status) ||
+                "CANCELLED".equalsIgnoreCase(status) ||
+                "IN_PROGRESS".equalsIgnoreCase(status)) {
+            throw new ValidationException("Lỗi: Không thể xếp phòng cho lịch hẹn đã " + status);
+        }
 
+        // LOGIC RESET: Nếu roomId là null, nghĩa là muốn reset phòng
+        if (roomId == null) {
+            appt.setRoom(null);
+            return appointmentMapper.mapToAppointmentResponse(appointmentRepo.save(appt));
+        }
         // 2. Lấy thông tin phòng
         Room room = roomRepo.findById(roomId)
                 .orElseThrow(() -> new ResourceNotFoundException("Room not found"));
@@ -710,6 +731,9 @@ public class ReceptionServiceImpl implements ReceptionService {
 
         appt.setPaymentStatus("PAID");
         appt.setStatus("COMPLETED");
+
+        // Sau khi thanh toán xong sẽ cập nhật lại room thành trống
+        appt.setRoom(null);
 
         appointmentRepo.save(appt); // Lúc này invoiceCode sẽ được lưu cứng vào DB
 

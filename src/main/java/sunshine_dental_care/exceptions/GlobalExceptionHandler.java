@@ -452,4 +452,36 @@ public class GlobalExceptionHandler {
         response.put("fieldErrors", ex.getFieldErrors()); // Trả về Map lỗi chi tiết: field -> message
         return ResponseEntity.badRequest().body(response);
     }
+
+
+    // --- XỬ LÝ LỖI CHO LỄ TÂN (RECEPTION) ---
+    @ExceptionHandler(sunshine_dental_care.exceptions.reception.AppointmentConflictException.class)
+    public ResponseEntity<Map<String, Object>> handleAppointmentConflict(sunshine_dental_care.exceptions.reception.AppointmentConflictException ex) {
+        Map<String, Object> body = new HashMap<>();
+        body.put("timestamp", LocalDateTime.now());
+        body.put("status", HttpStatus.CONFLICT.value());
+        body.put("error", "Conflict");
+        body.put("message", ex.getMessage()); // Trả về câu: "Thời gian (11:00-11:45) nằm ngoài ca làm việc..."
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(body);
+    }
+
+    @ExceptionHandler(sunshine_dental_care.exceptions.reception.ResourceNotFoundException.class)
+    public ResponseEntity<Map<String, Object>> handleResourceNotFound(sunshine_dental_care.exceptions.reception.ResourceNotFoundException ex) {
+        Map<String, Object> body = new HashMap<>();
+        body.put("timestamp", LocalDateTime.now());
+        body.put("status", HttpStatus.NOT_FOUND.value());
+        body.put("error", "Not Found");
+        body.put("message", ex.getMessage());
+        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(body);
+    }
+
+    @ExceptionHandler(sunshine_dental_care.exceptions.reception.AccessDeniedException.class)
+    public ResponseEntity<Map<String, Object>> handleAccessDenied(sunshine_dental_care.exceptions.reception.AccessDeniedException ex) {
+        Map<String, Object> body = new HashMap<>();
+        body.put("timestamp", LocalDateTime.now());
+        body.put("status", HttpStatus.FORBIDDEN.value());
+        body.put("error", "Forbidden");
+        body.put("message", ex.getMessage());
+        return ResponseEntity.status(HttpStatus.FORBIDDEN).body(body);
+    }
 }
