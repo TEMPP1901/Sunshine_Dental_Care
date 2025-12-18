@@ -11,16 +11,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import lombok.RequiredArgsConstructor;
-import sunshine_dental_care.dto.authDTO.ChangePasswordRequest;
-import sunshine_dental_care.dto.authDTO.ForgotPasswordRequest;
-import sunshine_dental_care.dto.authDTO.LoginRequest;
-import sunshine_dental_care.dto.authDTO.LoginResponse;
-import sunshine_dental_care.dto.authDTO.PhoneLoginStep1Request;
-import sunshine_dental_care.dto.authDTO.PhoneLoginStep2Request;
-import sunshine_dental_care.dto.authDTO.PhonePasswordLoginRequest;
-import sunshine_dental_care.dto.authDTO.ResetPasswordRequest;
-import sunshine_dental_care.dto.authDTO.SignUpRequest;
-import sunshine_dental_care.dto.authDTO.SignUpResponse;
+import sunshine_dental_care.dto.authDTO.*;
 import sunshine_dental_care.entities.Patient;
 import sunshine_dental_care.entities.User;
 import sunshine_dental_care.entities.UserRole;
@@ -309,9 +300,7 @@ public class AuthServiceImp implements AuthService {
         u.setFailedLoginAttempts(0);
         u.setIsActive(true);
         userRepo.save(u);
-        
-        // Khi unlock qua reset password, cần set tất cả UserRole thành active
-        // Vì khi lock, tất cả UserRole đã bị set inactive
+
         List<UserRole> userRoles = userRoleRepo.findByUserId(u.getId());
         for (UserRole userRole : userRoles) {
             userRole.setIsActive(true);
@@ -396,44 +385,40 @@ public class AuthServiceImp implements AuthService {
     }
 
     // -------------------------------------------------------------
-    // [MỚI] Triển khai QR Logic
+    // [MỚI] Triển khai QR Logic (DÙNG EMAIL)
     // -------------------------------------------------------------
 
     @Override
     public String generateQrToken(String email) {
-        // Tạo token ngắn hạn (2 phút) chứa email người dùng
-        // Lưu ý: Đảm bảo JwtService đã có hàm generateShortLivedToken
+        // Sử dụng email làm subject cho token QR
         return jwtService.generateShortLivedToken(email);
     }
 
     @Override
     @Transactional
     public LoginResponse loginWithQrCode(String qrToken) {
-        // 1. Trích xuất username/email từ Token QR
-        String email = jwtService.extractUsername(qrToken);
+        // 1. Trích xuất email từ Token
+        String email = jwtService.extractUsername(qrToken); // extractUsername chính là extractEmail trong JwtService
+
+        System.out.println(">>> [QR LOGIN] Mobile sent token. Extracted Email: [" + email + "]");
+
         if (email == null) {
-            throw new BadCredentialsException("QR Code không hợp lệ hoặc đã hết hạn (No subject).");
+            throw new BadCredentialsException("QR Code không hợp lệ (No subject/email).");
         }
 
-        // 2. Tìm User
-        User user = userRepo.findByEmailIgnoreCase(email)
-                .orElseThrow(() -> new BadCredentialsException("User not found from QR Code."));
-
-        // 3. Validate Token
-        // Hàm isTokenValid của bạn có thể cần UserDetails, ở đây ta tạo UserDetails dummy hoặc overload hàm validate
-        // Giả sử JwtService có hàm: boolean isTokenValid(String token, UserDetails userDetails)
-        // Ta cần load UserDetails hoặc kiểm tra thủ công.
-        // Đơn giản nhất: Kiểm tra hạn token và subject
+        // 2. Validate Token hết hạn
         if (jwtService.isTokenExpired(qrToken)) {
             throw new BadCredentialsException("QR Code đã hết hạn.");
         }
 
-        // Nếu muốn chặt chẽ hơn, check subject khớp với user (đã làm ở bước 1)
-        if (!email.equals(user.getEmail())) {
-            throw new BadCredentialsException("QR Code không thuộc về user này.");
-        }
+        // 3. Tìm User bằng EMAIL
+        User user = userRepo.findByEmailIgnoreCase(email.trim())
+                .orElseThrow(() -> {
+                    System.err.println(">>> [ERROR] User not found in DB for email: [" + email + "]");
+                    return new BadCredentialsException("User not found from QR Code.");
+                });
 
-        // 4. Nếu hợp lệ -> Cấp quyền đăng nhập (Access + Refresh Token)
+        // 4. Cấp quyền đăng nhập
         user.setLastLoginAt(Instant.now());
         userRepo.save(user);
 
