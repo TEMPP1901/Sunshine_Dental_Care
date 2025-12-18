@@ -45,7 +45,7 @@ public interface AppointmentRepo extends JpaRepository<Appointment, Integer> {
      */
     @Query("SELECT a FROM Appointment a " +
             "WHERE a.doctor.id = :doctorId " +
-            "AND a.status IN ('CONFIRMED', 'SCHEDULED', 'PENDING') " +
+            "AND a.status IN ('SCHEDULED', 'PENDING', 'IN-PROGRESS') " +
             "AND CAST(a.startDateTime AS date) = :date")
     List<Appointment> findBusySlotsByDoctorAndDate(
             @Param("doctorId") Integer doctorId,
