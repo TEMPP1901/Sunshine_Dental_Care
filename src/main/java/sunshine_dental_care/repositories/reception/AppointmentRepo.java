@@ -173,4 +173,42 @@ public interface AppointmentRepo extends JpaRepository<Appointment, Integer> {
 
     // Hàm tiện ích: Tìm nhanh theo mã hóa đơn chính xác (để check trùng hoặc scan QR)
     Optional<Appointment> findByInvoiceCode(String invoiceCode);
+
+    // --- 6. PHẦN ADMIN DASHBOARD: Thống kê appointments ---
+    
+    // Đếm số appointments trong khoảng thời gian
+    @Query("SELECT COUNT(a) FROM Appointment a WHERE a.startDateTime >= :start AND a.startDateTime < :end")
+    long countByStartDateTimeBetween(
+            @Param("start") Instant start,
+            @Param("end") Instant end
+    );
+    
+    // Đếm số appointments trong khoảng thời gian với status cụ thể
+    @Query("SELECT COUNT(a) FROM Appointment a WHERE a.startDateTime >= :start AND a.startDateTime < :end AND a.status = :status")
+    long countByStartDateTimeBetweenAndStatus(
+            @Param("start") Instant start,
+            @Param("end") Instant end,
+            @Param("status") String status
+    );
+    
+    // Lấy danh sách appointments trong khoảng thời gian (để thống kê theo status)
+    @Query("SELECT a FROM Appointment a WHERE a.startDateTime >= :start AND a.startDateTime < :end")
+    List<Appointment> findByStartDateTimeBetween(
+            @Param("start") Instant start,
+            @Param("end") Instant end
+    );
+    
+    // Tính tổng doanh thu từ appointments (tất cả appointments đã thanh toán)
+    @Query("""
+            SELECT COALESCE(SUM(a.totalAmount), 0) FROM Appointment a
+            WHERE a.startDateTime >= :startInstant
+              AND a.startDateTime < :endInstant
+              AND a.paymentStatus = 'PAID'
+              AND a.status = 'COMPLETED'
+              AND a.totalAmount IS NOT NULL
+            """)
+    java.math.BigDecimal sumRevenueFromAppointments(
+            @Param("startInstant") Instant startInstant,
+            @Param("endInstant") Instant endInstant
+    );
 }
