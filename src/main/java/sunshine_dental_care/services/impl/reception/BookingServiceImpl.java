@@ -185,10 +185,9 @@ public class BookingServiceImpl implements BookingService {
 
         // Gửi Mail (Logic của Tuấn)
         notifyBookingSuccess(savedAppointment);
-        
+
         // Gửi notification APPOINTMENT_CREATED cho patient
         sendAppointmentCreatedNotification(savedAppointment);
-        
         return savedAppointment;
     }
 
@@ -290,15 +289,15 @@ public class BookingServiceImpl implements BookingService {
             Integer patientUserId = appointment.getPatient().getUser().getId();
             String clinicName = appointment.getClinic() != null ? appointment.getClinic().getClinicName() : "Phòng khám";
             String doctorName = appointment.getDoctor() != null ? appointment.getDoctor().getFullName() : "Bác sĩ";
-            
+
             // Format thời gian
             java.time.ZoneId zoneId = java.time.ZoneId.of("Asia/Ho_Chi_Minh");
             java.time.LocalDateTime startDateTime = appointment.getStartDateTime().atZone(zoneId).toLocalDateTime();
             String timeStr = startDateTime.format(java.time.format.DateTimeFormatter.ofPattern("HH:mm dd/MM/yyyy"));
 
             String message = String.format(
-                "Bạn đã đặt lịch hẹn thành công tại %s với %s vào lúc %s. Lịch hẹn đang chờ xác nhận.",
-                clinicName, doctorName, timeStr);
+                    "Bạn đã đặt lịch hẹn thành công tại %s với %s vào lúc %s. Lịch hẹn đang chờ xác nhận.",
+                    clinicName, doctorName, timeStr);
 
             NotificationRequest notiRequest = NotificationRequest.builder()
                     .userId(patientUserId)
@@ -312,10 +311,10 @@ public class BookingServiceImpl implements BookingService {
                     .build();
 
             notificationService.sendNotification(notiRequest);
-            log.info("Sent APPOINTMENT_CREATED notification to patient {} for appointment {}", 
+            log.info("Sent APPOINTMENT_CREATED notification to patient {} for appointment {}",
                     patientUserId, appointment.getId());
         } catch (Exception e) {
-            log.error("Failed to send APPOINTMENT_CREATED notification for appointment {}: {}", 
+            log.error("Failed to send APPOINTMENT_CREATED notification for appointment {}: {}",
                     appointment.getId(), e.getMessage(), e);
             // Không throw exception để không ảnh hưởng đến việc tạo appointment
         }
