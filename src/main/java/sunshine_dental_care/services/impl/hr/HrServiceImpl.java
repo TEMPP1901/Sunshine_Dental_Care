@@ -244,6 +244,16 @@ public class HrServiceImpl implements HrService {
                 .collect(Collectors.toList());
     }
 
+    @Override
+    @Transactional(readOnly = true)
+    public List<DoctorScheduleDto> getMyScheduleByDate(Integer userId, LocalDate date) {
+        List<DoctorSchedule> schedules = doctorScheduleRepo.findByDoctorIdAndWorkDate(userId, date);
+        log.debug("Fetching my schedule for user {} on {}, found {} schedules", userId, date, schedules.size());
+        return schedules.stream()
+                .map(this::convertToDto)
+                .collect(Collectors.toList());
+    }
+
     // validateSchedule và validateAssignment đã được chuyển sang
     // ScheduleValidationServiceImpl
 

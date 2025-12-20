@@ -160,6 +160,20 @@ public interface PatientInsightRepository
             @Param("patientId") Integer patientId
     );
 
+    @Query("""
+        SELECT s
+        FROM AppointmentService s
+        JOIN FETCH s.appointment a
+        JOIN FETCH s.service svc
+        LEFT JOIN FETCH s.serviceVariant var
+        WHERE a.patient.id = :patientId
+          AND a.status = 'COMPLETED'
+        ORDER BY a.startDateTime DESC
+    """)
+    List<AppointmentService> recentAppointmentServicesByPatientId(
+            @Param("patientId") Integer patientId
+    );
+
     // Tìm dịch vụ với điều kiện chi tiết (quantity, unitPrice, discountPct, note)
     @Query("""
         SELECT s

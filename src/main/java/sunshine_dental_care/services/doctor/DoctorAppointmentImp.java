@@ -27,14 +27,18 @@ public class DoctorAppointmentImp implements DoctorAppointmentService{
     private DoctorRepo _doctorRepo;
     private DoctorAppointmentRepo _doctorAppointmentRepo;
     private sunshine_dental_care.repositories.doctor.MedicalRecordRepository _medicalRecordRepository;
+    private AppointmentAISummaryCacheService _aiSummaryCacheService;
 
-    private static final Logger logger = LoggerFactory.getLogger(DoctorAppointmentImp.class); 
+    private static final Logger logger = LoggerFactory.getLogger(DoctorAppointmentImp.class);
 
-    public DoctorAppointmentImp(DoctorRepo doctorRepo, DoctorAppointmentRepo doctorAppointmentRepo,
-                                sunshine_dental_care.repositories.doctor.MedicalRecordRepository medicalRecordRepository) {
-        _doctorRepo = doctorRepo;
-        _doctorAppointmentRepo = doctorAppointmentRepo;
-        _medicalRecordRepository = medicalRecordRepository;
+    public DoctorAppointmentImp(DoctorRepo doctorRepo,
+                                DoctorAppointmentRepo doctorAppointmentRepo,
+                                sunshine_dental_care.repositories.doctor.MedicalRecordRepository medicalRecordRepository,
+                                AppointmentAISummaryCacheService aiSummaryCacheService) {
+        this._doctorRepo = doctorRepo;
+        this._doctorAppointmentRepo = doctorAppointmentRepo;
+        this._medicalRecordRepository = medicalRecordRepository;
+        this._aiSummaryCacheService = aiSummaryCacheService;
     }
 
     // Hàm chuyển đổi từ entity Appointment sang DTO DoctorAppointmentDTO
@@ -42,7 +46,7 @@ public class DoctorAppointmentImp implements DoctorAppointmentService{
         // Lấy service và variant từ AppointmentService (ưu tiên từ appointmentServices đầu tiên)
         sunshine_dental_care.entities.Service service = null;
         sunshine_dental_care.entities.ServiceVariant serviceVariant = null;
-        
+
         if (appointment.getAppointmentServices() != null && !appointment.getAppointmentServices().isEmpty()) {
             // Lấy service và variant từ AppointmentService đầu tiên
             AppointmentService firstAppointmentService = appointment.getAppointmentServices().get(0);
@@ -52,7 +56,7 @@ public class DoctorAppointmentImp implements DoctorAppointmentService{
             // Fallback: nếu không có appointmentServices, lấy từ service trực tiếp (backward compatibility)
             service = appointment.getService();
         }
-        
+
         return DoctorAppointmentDTO.builder()
                 .appointmentId(appointment.getId())
                 .clinic(toClinicSummary(appointment.getClinic())) // Thông tin phòng khám
@@ -81,7 +85,7 @@ public class DoctorAppointmentImp implements DoctorAppointmentService{
         if (service == null) {
             return null;
         }
-        
+
         // Map variants nếu có
         List<ServiceVariantDTO> variantDTOs = null;
         if (service.getVariants() != null && !service.getVariants().isEmpty()) {
@@ -98,7 +102,7 @@ public class DoctorAppointmentImp implements DoctorAppointmentService{
                             .build())
                     .collect(Collectors.toList());
         }
-        
+
         return ServiceDTO.builder()
                 .id(service.getId())
                 .serviceName(service.getServiceName())
@@ -117,7 +121,7 @@ public class DoctorAppointmentImp implements DoctorAppointmentService{
         if (serviceVariant == null) {
             return null;
         }
-        
+
         return ServiceVariantDTO.builder()
                 .variantId(serviceVariant.getId())
                 .variantName(serviceVariant.getVariantName())
@@ -180,7 +184,7 @@ public class DoctorAppointmentImp implements DoctorAppointmentService{
     // Lấy tất cả lịch hẹn theo id của bác sĩ
     public List<DoctorAppointmentDTO> findByDoctorId(Integer id) {
         var doctor = _doctorRepo.findById(id)
-            .orElseThrow(() -> new IllegalArgumentException("Doctor not found")); // Kiểm tra bác sĩ tồn tại
+                .orElseThrow(() -> new IllegalArgumentException("Doctor not found")); // Kiểm tra bác sĩ tồn tại
         List<Appointment> appointments = _doctorAppointmentRepo.findByDoctorId(doctor.getId());
         // Chuyển từng entity Appointment sang DTO
         return appointments.stream().map(this::mapToDTO).collect(Collectors.toList());
@@ -190,7 +194,7 @@ public class DoctorAppointmentImp implements DoctorAppointmentService{
     // Lấy danh sách lịch hẹn của bác sĩ theo trạng thái
     public List<DoctorAppointmentDTO> findByDoctorIdAndStatus(Integer id, String status) {
         var doctor = _doctorRepo.findById(id)
-            .orElseThrow(() -> new IllegalArgumentException("Doctor not found"));
+                .orElseThrow(() -> new IllegalArgumentException("Doctor not found"));
         List<Appointment> appointments = _doctorAppointmentRepo.findByDoctorIdAndStatus(doctor.getId(), status);
         return appointments.stream().map(this::mapToDTO).collect(Collectors.toList());
     }
@@ -199,7 +203,7 @@ public class DoctorAppointmentImp implements DoctorAppointmentService{
     // Lấy chi tiết lịch hẹn theo id lịch hẹn và id bác sĩ
     public DoctorAppointmentDTO findByIdAndDoctorId(Integer appointmentId, Integer doctorId) {
         var doctor = _doctorRepo.findById(doctorId)
-            .orElseThrow(() -> new IllegalArgumentException("Doctor not found"));
+                .orElseThrow(() -> new IllegalArgumentException("Doctor not found"));
         Appointment appointment = _doctorAppointmentRepo.findByIdAndDoctorId(appointmentId, doctor.getId());
         if (appointment == null) {
             throw new IllegalArgumentException("Appointment not found");
@@ -217,7 +221,7 @@ public class DoctorAppointmentImp implements DoctorAppointmentService{
 
         // Normalize status values
         if ("IN-PROGRESS".equals(normalized) || "IN_PROGRESS".equals(normalized)) {
-            normalized = "PROCESSING";
+            normalized = "IN_PROGRESS";
         }
         if ("CANCELLED".equals(normalized)) {
             normalized = "CANCELED";
@@ -226,6 +230,9 @@ public class DoctorAppointmentImp implements DoctorAppointmentService{
         switch (normalized) {
             case "COMPLETED":
                 validateCanComplete(appointment);
+
+                _aiSummaryCacheService.evict(appointmentId);
+                logger.info("Cleared AI summary cache for appointmentId={} after status change to COMPLETED", appointmentId);
                 break;
             case "PROCESSING":
                 validateCanProcess(appointment);
@@ -268,10 +275,9 @@ public class DoctorAppointmentImp implements DoctorAppointmentService{
         // Kiểm tra chắc chắn đã có medical record cho appointment này
         Integer appointmentId = appointment.getId();
 
-        // Cách 1: Kiểm tra trực tiếp qua appointment
         boolean hasMedicalRecord = _medicalRecordRepository.existsByAppointmentId(appointmentId);
 
-        // Cách 2: Hoặc kiểm tra qua appointmentService nếu cần
+
         if (!hasMedicalRecord) {
             hasMedicalRecord = _medicalRecordRepository.existsByAppointmentService_Appointment_Id(appointmentId);
         }
@@ -304,7 +310,7 @@ public class DoctorAppointmentImp implements DoctorAppointmentService{
     // Lấy các lịch hẹn của bác sĩ trong một khoảng thời gian cụ thể
     public List<DoctorAppointmentDTO> findByDoctorIdAndStartDateTimeBetween(Integer doctorId, Instant startDate, Instant endDate) {
         var doctor = _doctorRepo.findById(doctorId)
-            .orElseThrow(() -> new IllegalArgumentException("Doctor not found"));
+                .orElseThrow(() -> new IllegalArgumentException("Doctor not found"));
         List<Appointment> appointments = _doctorAppointmentRepo.findByDoctorIdAndStartDateTimeBetween(
                 doctor.getId(), startDate, endDate);
         return appointments.stream().map(this::mapToDTO).collect(Collectors.toList());

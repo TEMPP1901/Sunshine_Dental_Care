@@ -29,4 +29,7 @@ public interface HrService {
 
     // Lấy lịch làm việc của user (bác sĩ) trong tuần
     List<DoctorScheduleDto> getMySchedule(Integer userId, LocalDate weekStart);
-}
+
+    // Lấy lịch làm việc của user (bác sĩ) theo một ngày cụ thể
+    List<DoctorScheduleDto> getMyScheduleByDate(Integer userId, LocalDate date);
+} 
