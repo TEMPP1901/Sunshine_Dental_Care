@@ -123,13 +123,27 @@ public class BookingServiceImpl implements BookingService {
         return responseSlots;
     }
 
-    // ========================================================================
-    // 2. HÀM CREATE APPOINTMENT (TẠO LỊCH) - CỦA TUẤN
-    // ========================================================================
+
     @Override
-    @Transactional
+    @Transactional // Đảm bảo tính nguyên tử: Check xong mới Save
     public Appointment createAppointment(AppointmentRequest request) {
         log.info("Creating appointment for Patient ID: {}", request.getPatientId());
+
+        // --- BƯỚC CHỐNG TRÙNG LỊCH (RACE CONDITION PREVENTION) ---
+        // Kiểm tra xem Bác sĩ đã có lịch nào KHÁC 'CANCELLED' vào đúng khung giờ này chưa
+        boolean alreadyExists = appointmentRepo.existsByDoctorIdAndStartDateTimeAndStatusNot(
+                request.getDoctorId(),
+                request.getStartDateTime(),
+                "CANCELLED"
+        );
+
+        if (alreadyExists) {
+            log.warn("Conflict detected: Slot {} is already taken for doctor {}",
+                    request.getStartDateTime(), request.getDoctorId());
+            // Ném lỗi để Transaction tự rollback và báo về Frontend
+            throw new RuntimeException("SLOT_ALREADY_BOOKED");
+        }
+        // ---------------------------------------------------------
 
         Clinic clinic = clinicRepo.findById(request.getClinicId())
                 .orElseThrow(() -> new ResourceNotFoundException("Clinic not found"));
@@ -161,9 +175,10 @@ public class BookingServiceImpl implements BookingService {
         appointment.setBookingFee(request.getBookingFee() != null ? request.getBookingFee() : BigDecimal.ZERO);
         appointment.setAppointmentType(request.getAppointmentType() != null ? request.getAppointmentType() : "STANDARD");
 
-        Appointment savedAppointment = appointmentRepo.save(appointment);
+        // Dùng saveAndFlush để ép ghi xuống DB ngay trong Transaction nhằm phát hiện xung đột sớm nhất
+        Appointment savedAppointment = appointmentRepo.saveAndFlush(appointment);
 
-        // Lưu Services đi kèm
+        // Lưu Services đi kèm (Giữ nguyên logic của ông)
         if (request.getServices() != null && !request.getServices().isEmpty()) {
             List<AppointmentService> appointmentServices = new ArrayList<>();
             for (ServiceItemRequest item : request.getServices()) {
@@ -183,18 +198,12 @@ public class BookingServiceImpl implements BookingService {
             savedAppointment.setAppointmentServices(appointmentServices);
         }
 
-        // Gửi Mail (Logic của Tuấn)
         notifyBookingSuccess(savedAppointment);
-        
-        // Gửi notification APPOINTMENT_CREATED cho patient
         sendAppointmentCreatedNotification(savedAppointment);
-        
+
         return savedAppointment;
     }
 
-    // ========================================================================
-    // 3. HÀM CHECK SESSION AVAILABILITY - CỦA LONG (MỚI)
-    // ========================================================================
     @Override
     public SessionAvailabilityResponse checkSessionAvailability(Integer clinicId, LocalDate date) {
         if (date.getDayOfWeek() == java.time.DayOfWeek.SUNDAY) {
@@ -290,15 +299,15 @@ public class BookingServiceImpl implements BookingService {
             Integer patientUserId = appointment.getPatient().getUser().getId();
             String clinicName = appointment.getClinic() != null ? appointment.getClinic().getClinicName() : "Phòng khám";
             String doctorName = appointment.getDoctor() != null ? appointment.getDoctor().getFullName() : "Bác sĩ";
-            
+
             // Format thời gian
             java.time.ZoneId zoneId = java.time.ZoneId.of("Asia/Ho_Chi_Minh");
             java.time.LocalDateTime startDateTime = appointment.getStartDateTime().atZone(zoneId).toLocalDateTime();
             String timeStr = startDateTime.format(java.time.format.DateTimeFormatter.ofPattern("HH:mm dd/MM/yyyy"));
 
             String message = String.format(
-                "Bạn đã đặt lịch hẹn thành công tại %s với %s vào lúc %s. Lịch hẹn đang chờ xác nhận.",
-                clinicName, doctorName, timeStr);
+                    "Bạn đã đặt lịch hẹn thành công tại %s với %s vào lúc %s. Lịch hẹn đang chờ xác nhận.",
+                    clinicName, doctorName, timeStr);
 
             NotificationRequest notiRequest = NotificationRequest.builder()
                     .userId(patientUserId)
@@ -312,10 +321,10 @@ public class BookingServiceImpl implements BookingService {
                     .build();
 
             notificationService.sendNotification(notiRequest);
-            log.info("Sent APPOINTMENT_CREATED notification to patient {} for appointment {}", 
+            log.info("Sent APPOINTMENT_CREATED notification to patient {} for appointment {}",
                     patientUserId, appointment.getId());
         } catch (Exception e) {
-            log.error("Failed to send APPOINTMENT_CREATED notification for appointment {}: {}", 
+            log.error("Failed to send APPOINTMENT_CREATED notification for appointment {}: {}",
                     appointment.getId(), e.getMessage(), e);
             // Không throw exception để không ảnh hưởng đến việc tạo appointment
         }

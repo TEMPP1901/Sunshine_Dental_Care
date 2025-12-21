@@ -6,6 +6,7 @@ import java.util.stream.Collectors;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
@@ -41,6 +42,9 @@ public class DoctorAppointmentImp implements DoctorAppointmentService{
     private UserRepo _userRepo;
     private AuditLogService _auditLogService;
     private NotificationService _notificationService;
+    
+    // thêm template khai báo để websocket cho lễ tân khi doc thay đổi status lịch
+    private SimpMessagingTemplate messagingTemplate;
 
     private static final Logger logger = LoggerFactory.getLogger(DoctorAppointmentImp.class);
 
@@ -49,13 +53,15 @@ public class DoctorAppointmentImp implements DoctorAppointmentService{
                                 sunshine_dental_care.repositories.doctor.MedicalRecordRepository medicalRecordRepository,
                                 UserRepo userRepo,
                                 AuditLogService auditLogService,
-                                NotificationService notificationService) {
+                                NotificationService notificationService,
+                                SimpMessagingTemplate messagingTemplate) {
         _doctorRepo = doctorRepo;
         _doctorAppointmentRepo = doctorAppointmentRepo;
         _medicalRecordRepository = medicalRecordRepository;
         _userRepo = userRepo;
         _auditLogService = auditLogService;
         _notificationService = notificationService;
+        this.messagingTemplate = messagingTemplate;
     }
 
     // Hàm chuyển đổi từ entity Appointment sang DTO DoctorAppointmentDTO
@@ -261,20 +267,20 @@ public class DoctorAppointmentImp implements DoctorAppointmentService{
 
         // Normalize status values
         if ("IN-PROGRESS".equals(normalized) || "IN_PROGRESS".equals(normalized)) {
-            normalized = "PROCESSING";
+            normalized = "IN_PROGRESS";
         }
         if ("CANCELLED".equals(normalized)) {
-            normalized = "CANCELED";
+            normalized = "CANCELLED";
         }
 
         switch (normalized) {
             case "COMPLETED":
                 validateCanComplete(appointment);
                 break;
-            case "PROCESSING":
+            case "IN_PROGRESS":
                 validateCanProcess(appointment);
                 break;
-            case "CANCELED":
+            case "CANCELLED":
                 validateCanCancel(appointment);
                 break;
             default:
@@ -285,6 +291,12 @@ public class DoctorAppointmentImp implements DoctorAppointmentService{
         // Update status
         appointment.setStatus(normalized);
         _doctorAppointmentRepo.save(appointment);
+
+        // Gửi tín hiệu WebSocket để Lễ tân cập nhật lại danh sách nếu status thay đổi
+        if (!normalized.equals(oldStatus)) {
+            messagingTemplate.convertAndSend("/topic/appointments", "REFRESH_DATA");
+            log.info("Đã gửi tín hiệu WebSocket cập nhật status lịch hẹn cho Lễ tân!");
+        }
 
         // Audit log: bác sĩ đổi trạng thái lịch hẹn
         User actor = resolveCurrentUser();
@@ -372,24 +384,24 @@ public class DoctorAppointmentImp implements DoctorAppointmentService{
         }
     }
 
-    // Kiểm tra điều kiện chuyển sang PROCESSING
+    // Kiểm tra điều kiện chuyển sang IN_PROGRESS
     private void validateCanProcess(Appointment appointment) {
         java.time.Instant now = java.time.Instant.now();
         java.time.Instant startMinus5 = appointment.getStartDateTime().minus(java.time.Duration.ofMinutes(5));
 
         if (now.isBefore(startMinus5)) {
-            throw new IllegalArgumentException("Cannot set to PROCESSING: appointment can only start within 5 minutes of scheduled time");
+            throw new IllegalArgumentException("Cannot set to IN_PROGRESS: appointment can only start within 5 minutes of scheduled time");
         }
 
         if (!"SCHEDULED".equalsIgnoreCase(appointment.getStatus())) {
-            throw new IllegalArgumentException("Cannot set to PROCESSING: only SCHEDULED appointments can be started");
+            throw new IllegalArgumentException("Cannot set to IN_PROGRESS: only SCHEDULED appointments can be started");
         }
     }
 
     // Kiểm tra điều kiện chuyển sang COMPLETED - FIXED
     private void validateCanComplete(Appointment appointment) {
-        if (!"PROCESSING".equalsIgnoreCase(appointment.getStatus())) {
-            throw new IllegalArgumentException("Cannot set to COMPLETED: appointment must be PROCESSING");
+        if (!"IN_PROGRESS".equalsIgnoreCase(appointment.getStatus())) {
+            throw new IllegalArgumentException("Cannot set to COMPLETED: appointment must be IN_PROGRESS");
         }
 
         // Kiểm tra chắc chắn đã có medical record cho appointment này
@@ -411,18 +423,18 @@ public class DoctorAppointmentImp implements DoctorAppointmentService{
         }
     }
 
-    // Kiểm tra điều kiện chuyển sang CANCELED
+    // Kiểm tra điều kiện chuyển sang CANCELLED
     private void validateCanCancel(Appointment appointment) {
         if (!"SCHEDULED".equalsIgnoreCase(appointment.getStatus()) &&
                 !"CONFIRMED".equalsIgnoreCase(appointment.getStatus())) {
-            throw new IllegalArgumentException("Cannot set to CANCELED: only SCHEDULED or CONFIRMED appointments allowed");
+            throw new IllegalArgumentException("Cannot set to CANCELLED: only SCHEDULED or CONFIRMED appointments allowed");
         }
 
         java.time.Instant now = java.time.Instant.now();
         java.time.Instant startPlus20 = appointment.getStartDateTime().plus(java.time.Duration.ofMinutes(20));
 
         if (now.isBefore(startPlus20)) {
-            throw new IllegalArgumentException("Cannot set to CANCELED before 20 minutes after scheduled start time");
+            throw new IllegalArgumentException("Cannot set to CANCELLED before 20 minutes after scheduled start time");
         }
     }
 

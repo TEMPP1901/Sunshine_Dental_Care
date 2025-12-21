@@ -211,4 +211,7 @@ public interface AppointmentRepo extends JpaRepository<Appointment, Integer> {
             @Param("startInstant") Instant startInstant,
             @Param("endInstant") Instant endInstant
     );
+
+    // CHỐNG RACE CONDITION KHI ĐẶT LỊCH
+    boolean existsByDoctorIdAndStartDateTimeAndStatusNot(Integer doctorId, java.time.Instant startDateTime, String status);
 }
