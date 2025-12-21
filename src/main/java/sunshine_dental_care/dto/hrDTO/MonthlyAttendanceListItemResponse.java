@@ -12,10 +12,10 @@ public class MonthlyAttendanceListItemResponse {
     
     // Thống kê trong tháng
     private Integer workingDays;      // Số ngày có schedule
-    private Integer presentDays;      // Số ngày present (ON_TIME)
-    private Integer lateDays;         // Số ngày late
+    private Double presentDays;       // Số ngày present (bác sĩ có thể là 0.5 nếu chỉ làm 1/2 ca)
+    private Double lateDays;          // Số ngày late (bác sĩ có thể là 0.5 nếu chỉ làm 1/2 ca)
     private Integer absentDays;       // Số ngày absent
-    private Integer leaveDays;        // Số ngày nghỉ phép
+    private Double leaveDays;         // Số ngày nghỉ phép (bác sĩ có thể là 0.5 nếu chỉ nghỉ 1/2 ca)
     private Integer offDays;          // Số ngày nghỉ
     
     // Tổng thời gian làm việc trong tháng
@@ -26,7 +26,7 @@ public class MonthlyAttendanceListItemResponse {
     // Thông tin cho tính lương theo giờ
     private Integer totalLateMinutes;   // Tổng số phút đi trễ trong tháng
     private Integer totalEarlyMinutes; // Tổng số phút ra sớm trong tháng
-    private Integer actualWorkedDays;  // Số ngày đi làm thực tế (có check-in)
+    private Double actualWorkedDays;   // Số ngày đi làm thực tế (bác sĩ có thể là 0.5 nếu chỉ làm 1/2 ca)
     
     // Getters and Setters
     public Integer getUserId() {
@@ -69,19 +69,19 @@ public class MonthlyAttendanceListItemResponse {
         this.workingDays = workingDays;
     }
     
-    public Integer getPresentDays() {
+    public Double getPresentDays() {
         return presentDays;
     }
     
-    public void setPresentDays(Integer presentDays) {
+    public void setPresentDays(Double presentDays) {
         this.presentDays = presentDays;
     }
     
-    public Integer getLateDays() {
+    public Double getLateDays() {
         return lateDays;
     }
     
-    public void setLateDays(Integer lateDays) {
+    public void setLateDays(Double lateDays) {
         this.lateDays = lateDays;
     }
     
@@ -93,11 +93,11 @@ public class MonthlyAttendanceListItemResponse {
         this.absentDays = absentDays;
     }
     
-    public Integer getLeaveDays() {
+    public Double getLeaveDays() {
         return leaveDays;
     }
     
-    public void setLeaveDays(Integer leaveDays) {
+    public void setLeaveDays(Double leaveDays) {
         this.leaveDays = leaveDays;
     }
     
@@ -149,11 +149,11 @@ public class MonthlyAttendanceListItemResponse {
         this.totalEarlyMinutes = totalEarlyMinutes;
     }
     
-    public Integer getActualWorkedDays() {
+    public Double getActualWorkedDays() {
         return actualWorkedDays;
     }
     
-    public void setActualWorkedDays(Integer actualWorkedDays) {
+    public void setActualWorkedDays(Double actualWorkedDays) {
         this.actualWorkedDays = actualWorkedDays;
     }
 }
