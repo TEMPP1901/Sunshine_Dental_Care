@@ -25,7 +25,10 @@ public class LeaveRequestResponse {
     private Instant updatedAt;
 
     // New fields for HR view
-    private Integer leaveBalance;
+    private Integer leaveBalance; // Số ngày nghỉ trong tháng hiện tại
+    private Integer annualLeaveTotal; // Tổng số phép năm (12 ngày)
+    private Integer annualLeaveUsed; // Đã dùng bao nhiêu ngày trong năm
+    private Integer annualLeaveRemaining; // Còn lại bao nhiêu ngày
     private Boolean replacementAvailable;
     private List<String> potentialReplacements;
     private String userRole;
@@ -188,5 +191,29 @@ public class LeaveRequestResponse {
 
     public void setPotentialReplacements(List<String> potentialReplacements) {
         this.potentialReplacements = potentialReplacements;
+    }
+
+    public Integer getAnnualLeaveTotal() {
+        return annualLeaveTotal;
+    }
+
+    public void setAnnualLeaveTotal(Integer annualLeaveTotal) {
+        this.annualLeaveTotal = annualLeaveTotal;
+    }
+
+    public Integer getAnnualLeaveUsed() {
+        return annualLeaveUsed;
+    }
+
+    public void setAnnualLeaveUsed(Integer annualLeaveUsed) {
+        this.annualLeaveUsed = annualLeaveUsed;
+    }
+
+    public Integer getAnnualLeaveRemaining() {
+        return annualLeaveRemaining;
+    }
+
+    public void setAnnualLeaveRemaining(Integer annualLeaveRemaining) {
+        this.annualLeaveRemaining = annualLeaveRemaining;
     }
 }

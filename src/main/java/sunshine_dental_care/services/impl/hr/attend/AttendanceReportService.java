@@ -24,12 +24,14 @@ import sunshine_dental_care.dto.hrDTO.MonthlySummaryResponse;
 import sunshine_dental_care.dto.hrDTO.mapper.AttendanceReportMapper;
 import sunshine_dental_care.entities.Attendance;
 import sunshine_dental_care.entities.Department;
+import sunshine_dental_care.entities.DoctorSchedule;
 import sunshine_dental_care.entities.User;
 import sunshine_dental_care.entities.UserRole;
 import sunshine_dental_care.repositories.auth.UserRepo;
 import sunshine_dental_care.repositories.auth.UserRoleRepo;
 import sunshine_dental_care.repositories.hr.AttendanceRepository;
 import sunshine_dental_care.repositories.hr.DepartmentRepo;
+import sunshine_dental_care.repositories.hr.DoctorScheduleRepo;
 import sunshine_dental_care.utils.WorkHoursConstants;
 
 @Service
@@ -43,6 +45,7 @@ public class AttendanceReportService {
     private final UserRoleRepo userRoleRepo;
     private final AttendanceStatusCalculator attendanceStatusCalculator;
     private final AttendanceReportMapper attendanceReportMapper;
+    private final DoctorScheduleRepo doctorScheduleRepo;
 
     // Lấy tổng kết chấm công theo ngày cho từng phòng ban
     public List<DailySummaryResponse> getDailySummary(LocalDate workDate) {
@@ -229,6 +232,21 @@ public class AttendanceReportService {
                     item.setCheckInTime(null);
                     item.setCheckOutTime(null);
                     item.setRemarks("Fixed Attendance");
+                    
+                    // Nếu bác sĩ có schedule thì hiển thị shift, nếu không thì để null (không hiển thị)
+                    List<DoctorSchedule> doctorSchedules = doctorScheduleRepo
+                            .findByDoctorIdAndWorkDate(user.getId(), workDate);
+                    if (!doctorSchedules.isEmpty()) {
+                        // Lấy schedule đầu tiên để hiển thị (bác sĩ có thể có nhiều ca trong ngày)
+                        DoctorSchedule schedule = doctorSchedules.get(0);
+                        item.setShiftStartTime(schedule.getStartTime());
+                        item.setShiftEndTime(schedule.getEndTime());
+                        item.setShiftDisplay(formatTime(schedule.getStartTime()) + " - " + formatTime(schedule.getEndTime()));
+                        long shiftHours = java.time.Duration.between(schedule.getStartTime(), schedule.getEndTime()).toHours();
+                        item.setShiftHours(shiftHours + " hr Shift: A");
+                    }
+                    // Nếu không có schedule thì không set shift (sẽ hiển thị "-" ở frontend)
+                    
                     items.add(item);
                 } else {
                     // Tạo item cho từng ca làm việc của bác sĩ trong ngày
@@ -339,11 +357,16 @@ public class AttendanceReportService {
 
         LocalDate startDate = LocalDate.of(year, month, 1);
         LocalDate endDate = startDate.withDayOfMonth(startDate.lengthOfMonth());
+        
+        // Chỉ tính đến ngày hiện tại (không phải đến cuối tháng)
+        // Vì chưa đến các ngày tương lai
+        LocalDate today = LocalDate.now();
+        LocalDate effectiveEndDate = today.isBefore(endDate) ? today : endDate;
 
-        // Đếm số ngày làm việc trong tháng (trừ Chủ nhật)
+        // Đếm số ngày làm việc từ đầu tháng đến ngày hiện tại (trừ Chủ nhật)
         int workingDays = 0;
         LocalDate current = startDate;
-        while (!current.isAfter(endDate)) {
+        while (!current.isAfter(effectiveEndDate)) {
             DayOfWeek dayOfWeek = current.getDayOfWeek();
             if (dayOfWeek != DayOfWeek.SUNDAY) {
                 workingDays++;
@@ -485,10 +508,14 @@ public class AttendanceReportService {
 
             List<Attendance> userAttendances = attendanceByUserId.getOrDefault(user.getId(), new ArrayList<>());
 
-            // Đếm số ngày làm việc trong tháng (bỏ Chủ nhật)
+            // Đếm số ngày làm việc từ đầu tháng đến ngày hiện tại (không phải đến cuối tháng)
+            // Chỉ tính đến ngày hiện tại vì chưa đến các ngày tương lai
+            LocalDate today = LocalDate.now();
+            LocalDate effectiveEndDate = today.isBefore(endDate) ? today : endDate;
+            
             int workingDays = 0;
             LocalDate current = startDate;
-            while (!current.isAfter(endDate)) {
+            while (!current.isAfter(effectiveEndDate)) {
                 if (current.getDayOfWeek() != DayOfWeek.SUNDAY) {
                     workingDays++;
                 }
@@ -496,7 +523,7 @@ public class AttendanceReportService {
             }
 
             MonthlyAttendanceListItemResponse mapped = attendanceReportMapper.mapToMonthlyListItem(
-                    user, userAttendances, workingDays, startDate, endDate);
+                    user, userAttendances, workingDays, startDate, effectiveEndDate);
             item.setWorkingDays(mapped.getWorkingDays());
             item.setPresentDays(mapped.getPresentDays());
             item.setLateDays(mapped.getLateDays());

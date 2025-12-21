@@ -4,6 +4,8 @@ import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalTime;
 import java.util.List;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 import org.springframework.stereotype.Component;
 
@@ -14,7 +16,6 @@ import sunshine_dental_care.entities.Attendance;
 import sunshine_dental_care.entities.DoctorSchedule;
 import sunshine_dental_care.entities.User;
 import sunshine_dental_care.repositories.hr.DoctorScheduleRepo;
-import sunshine_dental_care.services.impl.hr.attend.AttendanceStatusCalculator;
 import sunshine_dental_care.utils.WorkHoursConstants;
 
 /**
@@ -27,7 +28,6 @@ import sunshine_dental_care.utils.WorkHoursConstants;
 public class AttendanceReportMapper {
 
     private final DoctorScheduleRepo doctorScheduleRepo;
-    private final AttendanceStatusCalculator attendanceStatusCalculator;
 
     /**
      * Map Attendance entity sang DailyAttendanceListItemResponse DTO.
@@ -46,6 +46,19 @@ public class AttendanceReportMapper {
         boolean hasCheckIn = attendance.getCheckInTime() != null;
         boolean hasCheckOut = attendance.getCheckOutTime() != null;
 
+        // Kiểm tra note có chứa explanation request không để xử lý mâu thuẫn
+        String note = attendance.getNote();
+        boolean hasExplanationRequest = note != null && note.contains("[EXPLANATION_REQUEST:");
+        String explanationType = null;
+        if (hasExplanationRequest) {
+            // Trích xuất loại explanation từ note: [EXPLANATION_REQUEST:ABSENT], [EXPLANATION_REQUEST:LATE], etc.
+            Pattern pattern = Pattern.compile("\\[EXPLANATION_REQUEST:([^\\]]+)\\]");
+            Matcher matcher = pattern.matcher(note);
+            if (matcher.find()) {
+                explanationType = matcher.group(1);
+            }
+        }
+
         // Phân loại trạng thái chấm công
         if (status == null) {
             if (hasCheckIn || hasCheckOut) {
@@ -59,8 +72,15 @@ public class AttendanceReportMapper {
             switch (status) {
                 case "ON_TIME":
                 case "APPROVED_PRESENT":
-                    item.setStatus("Present");
-                    item.setStatusColor("green");
+                    // Nếu có explanation request cho ABSENT nhưng status là Present → có mâu thuẫn
+                    // Ưu tiên hiển thị status theo explanation request nếu chưa được xử lý
+                    if (hasExplanationRequest && "ABSENT".equals(explanationType)) {
+                        item.setStatus("Present (Pending Explanation)");
+                        item.setStatusColor("orange");
+                    } else {
+                        item.setStatus("Present");
+                        item.setStatusColor("green");
+                    }
                     break;
                 case "LATE":
                 case "APPROVED_LATE":
@@ -148,18 +168,74 @@ public class AttendanceReportMapper {
             item.setWorkedDisplay("0 hr 00 min");
         }
 
-        // Lấy ca trực cho bác sĩ (nếu có)
-        List<DoctorSchedule> schedules = doctorScheduleRepo
+        // Kiểm tra xem có phải bác sĩ không (dựa vào có schedule hay không)
+        List<DoctorSchedule> schedulesByClinic = doctorScheduleRepo
                 .findByUserIdAndClinicIdAndWorkDate(user.getId(), attendance.getClinicId(), workDate);
+        
+        // Nếu không tìm thấy schedule theo clinic, thử tìm tất cả schedule của bác sĩ trong ngày
+        List<DoctorSchedule> allSchedules = schedulesByClinic.isEmpty() 
+                ? doctorScheduleRepo.findByDoctorIdAndWorkDate(user.getId(), workDate)
+                : schedulesByClinic;
+        
+        boolean isDoctor = !allSchedules.isEmpty();
+        
+        DoctorSchedule matchedSchedule = null;
+        boolean shiftMismatch = false;
+        String shiftMismatchWarning = "";
 
-        if (!schedules.isEmpty()) {
-            // Bác sĩ có schedule
-            DoctorSchedule schedule = schedules.get(0);
-            item.setShiftStartTime(schedule.getStartTime());
-            item.setShiftEndTime(schedule.getEndTime());
-            item.setShiftDisplay(formatTime(schedule.getStartTime()) + " - " + formatTime(schedule.getEndTime()));
-            long shiftHours = java.time.Duration.between(schedule.getStartTime(), schedule.getEndTime()).toHours();
-            item.setShiftHours(shiftHours + " hr Shift: A");
+        if (isDoctor) {
+            // Bác sĩ có schedule - tìm schedule khớp với shiftType của attendance
+            String shiftType = attendance.getShiftType();
+            if (shiftType != null && !shiftType.equals("FULL_DAY")) {
+                // Tìm schedule khớp với shiftType (MORNING hoặc AFTERNOON)
+                for (DoctorSchedule schedule : allSchedules) {
+                    // Xác định shift type từ sta   rtTime của schedule
+                    String scheduleShiftType = WorkHoursConstants.determineShiftType(schedule.getStartTime());
+                    if (shiftType.equals(scheduleShiftType)) {
+                        matchedSchedule = schedule;
+                        break;
+                    }
+                }
+            }
+            // Nếu không tìm thấy schedule khớp, lấy schedule đầu tiên
+            if (matchedSchedule == null && !allSchedules.isEmpty()) {
+                matchedSchedule = allSchedules.get(0);
+            }
+
+            if (matchedSchedule != null) {
+                item.setShiftStartTime(matchedSchedule.getStartTime());
+                item.setShiftEndTime(matchedSchedule.getEndTime());
+                item.setShiftDisplay(formatTime(matchedSchedule.getStartTime()) + " - " + formatTime(matchedSchedule.getEndTime()));
+                long shiftHours = java.time.Duration.between(matchedSchedule.getStartTime(), matchedSchedule.getEndTime()).toHours();
+                item.setShiftHours(shiftHours + " hr Shift: A");
+
+                // Kiểm tra shift mismatch: nếu có check-in/check-out nhưng không khớp với shift được gán
+                if (hasCheckIn && hasCheckOut) {
+                    LocalTime checkInLocalTime = attendance.getCheckInTime()
+                            .atZone(java.time.ZoneId.systemDefault())
+                            .toLocalTime();
+                    LocalTime checkOutLocalTime = attendance.getCheckOutTime()
+                            .atZone(java.time.ZoneId.systemDefault())
+                            .toLocalTime();
+                    LocalTime shiftStart = matchedSchedule.getStartTime();
+                    LocalTime shiftEnd = matchedSchedule.getEndTime();
+
+                    // Kiểm tra xem check-in/check-out có nằm trong khoảng shift không
+                    // Cho phép sai lệch 1 giờ (60 phút) để xử lý trường hợp trễ/muộn
+                    long checkInDiff = java.time.Duration.between(shiftStart, checkInLocalTime).toMinutes();
+                    long checkOutDiff = java.time.Duration.between(checkOutLocalTime, shiftEnd).toMinutes();
+
+                    // Nếu check-in sớm hơn shift start quá 2 giờ hoặc muộn hơn shift end quá 2 giờ → mismatch
+                    if (checkInDiff < -120 || checkOutDiff < -120 || 
+                        (checkInLocalTime.isAfter(shiftEnd.plusHours(1)) && checkOutLocalTime.isAfter(shiftEnd.plusHours(1)))) {
+                        shiftMismatch = true;
+                        shiftMismatchWarning = String.format(" [SHIFT_MISMATCH: Worked %s-%s but scheduled %s-%s]", 
+                            formatTime(checkInLocalTime), formatTime(checkOutLocalTime),
+                            formatTime(shiftStart), formatTime(shiftEnd));
+                    }
+                }
+            }
+            // Nếu bác sĩ không có schedule nào → không set shift (sẽ hiển thị "-" ở frontend)
         } else {
             // Nhân viên không có schedule → dùng giờ mặc định
             LocalTime defaultStart = WorkHoursConstants.EMPLOYEE_START_TIME;
@@ -171,7 +247,30 @@ public class AttendanceReportMapper {
             item.setShiftHours(WorkHoursConstants.EMPLOYEE_EXPECTED_HOURS + " hr Shift: A");
         }
 
-        item.setRemarks(attendance.getNote() != null ? attendance.getNote() : "Fixed Attendance");
+        // Xử lý remarks: thêm cảnh báo nếu có shift mismatch hoặc mâu thuẫn status
+        StringBuilder remarksBuilder = new StringBuilder();
+        if (note != null && !note.trim().isEmpty()) {
+            remarksBuilder.append(note);
+        }
+        if (shiftMismatch) {
+            if (remarksBuilder.length() > 0) {
+                remarksBuilder.append(" | ");
+            }
+            remarksBuilder.append(shiftMismatchWarning);
+        }
+        // Nếu có mâu thuẫn giữa status và explanation request, thêm cảnh báo
+        if (hasExplanationRequest && explanationType != null) {
+            if (("ABSENT".equals(explanationType) && !"ABSENT".equals(status) && !"APPROVED_ABSENCE".equals(status)) ||
+                ("LATE".equals(explanationType) && !"LATE".equals(status) && !"APPROVED_LATE".equals(status))) {
+                if (remarksBuilder.length() > 0) {
+                    remarksBuilder.append(" | ");
+                }
+                remarksBuilder.append(String.format(" [STATUS_MISMATCH: Status is %s but explanation request is for %s]", 
+                    status != null ? status : "null", explanationType));
+            }
+        }
+        
+        item.setRemarks(remarksBuilder.length() > 0 ? remarksBuilder.toString() : "Fixed Attendance");
 
         return item;
     }
@@ -200,45 +299,16 @@ public class AttendanceReportMapper {
         item.setEmployeeName(user.getFullName());
         item.setAvatarUrl(user.getAvatarUrl());
 
-        int presentDays = 0;
-        int lateDays = 0;
-        int absentDays = 0;
-        int leaveDays = 0;
         int offDays = 0;
-        int actualWorkedDays = 0;
         BigDecimal totalWorkHours = BigDecimal.ZERO;
         int totalLateMinutes = 0;
         int totalEarlyMinutes = 0;
 
+        // Tính tổng giờ làm việc, late minutes, early minutes (theo records)
         for (Attendance attendance : userAttendances) {
             String status = attendance.getAttendanceStatus();
             if (status == null) {
                 offDays++;
-            } else {
-                switch (status) {
-                    case "ON_TIME":
-                    case "APPROVED_PRESENT":
-                    case "APPROVED_LATE":
-                    case "APPROVED_EARLY_LEAVE":
-                        presentDays++;
-                        break;
-                    case "LATE":
-                        lateDays++;
-                        break;
-                    case "ABSENT":
-                        absentDays++;
-                        break;
-                    case "APPROVED_ABSENCE":
-                        leaveDays++;
-                        break;
-                    default:
-                        offDays++;
-                        break;
-                }
-            }
-
-            if (attendance.getCheckInTime() != null) {
-                actualWorkedDays++;
             }
 
             if (attendance.getLateMinutes() != null) {
@@ -292,13 +362,71 @@ public class AttendanceReportMapper {
             totalWorkHours = totalWorkHours.add(workHours);
         }
 
+        // Tính số ngày có present records (theo ngày unique)
+        // Một ngày có ít nhất một ca present = 1 presentDay
+        long presentDaysByDate = userAttendances.stream()
+                .filter(a -> {
+                    String status = a.getAttendanceStatus();
+                    return status != null && (
+                        "ON_TIME".equals(status) ||
+                        "APPROVED_PRESENT".equals(status) ||
+                        "APPROVED_LATE".equals(status) ||
+                        "APPROVED_EARLY_LEAVE".equals(status)
+                    );
+                })
+                .map(Attendance::getWorkDate)
+                .filter(java.util.Objects::nonNull)
+                .distinct()
+                .count();
+        
+        // Tính số ngày có LATE records (theo ngày unique)
+        // Một ngày có ít nhất một ca LATE (và không phải present) = 1 lateDay
+        // Lưu ý: LATE vẫn được coi là present, nhưng đếm riêng để thống kê
+        long lateDaysByDate = userAttendances.stream()
+                .filter(a -> "LATE".equals(a.getAttendanceStatus()))
+                .map(Attendance::getWorkDate)
+                .filter(java.util.Objects::nonNull)
+                .distinct()
+                .count();
+        
+        // Tính số ngày có leave records (theo ngày unique)
+        // Một ngày có ít nhất một ca APPROVED_ABSENCE = 1 leaveDay
+        long leaveDaysByDate = userAttendances.stream()
+                .filter(a -> "APPROVED_ABSENCE".equals(a.getAttendanceStatus()))
+                .map(Attendance::getWorkDate)
+                .filter(java.util.Objects::nonNull)
+                .distinct()
+                .count();
+        
+        // Tính số ngày có check-in (theo ngày unique)
+        // Một ngày có ít nhất một ca check-in = 1 actualWorkedDay
+        long actualWorkedDaysByDate = userAttendances.stream()
+                .filter(a -> a.getCheckInTime() != null)
+                .map(Attendance::getWorkDate)
+                .filter(java.util.Objects::nonNull)
+                .distinct()
+                .count();
+        
+        // Tính absentDays: workingDays - presentDaysByDate - leaveDaysByDate
+        // Nếu không có records nào (một tháng không check-in/check-out),
+        // thì nhân viên đó vắng cả tháng → absentDays = workingDays
+        int absentDays;
+        if (userAttendances.isEmpty() && workingDays > 0) {
+            absentDays = workingDays;
+        } else {
+            // Tính số ngày chưa có records hoặc không present/leave = workingDays - presentDaysByDate - leaveDaysByDate
+            // Những ngày này được coi là absent
+            long missingDays = workingDays - presentDaysByDate - leaveDaysByDate;
+            absentDays = (int) Math.max(0, missingDays);
+        }
+        
         item.setWorkingDays(workingDays);
-        item.setPresentDays(presentDays);
-        item.setLateDays(lateDays);
-        item.setAbsentDays(absentDays);
-        item.setLeaveDays(leaveDays);
+        item.setPresentDays((int) presentDaysByDate); // Đếm theo ngày unique
+        item.setLateDays((int) lateDaysByDate); // Đếm theo ngày unique
+        item.setAbsentDays(absentDays); // Tính từ workingDays - presentDays - leaveDays
+        item.setLeaveDays((int) leaveDaysByDate); // Đếm theo ngày unique
         item.setOffDays(offDays);
-        item.setActualWorkedDays(actualWorkedDays);
+        item.setActualWorkedDays((int) actualWorkedDaysByDate); // Đếm theo ngày unique
         item.setTotalLateMinutes(totalLateMinutes);
         item.setTotalEarlyMinutes(totalEarlyMinutes);
 

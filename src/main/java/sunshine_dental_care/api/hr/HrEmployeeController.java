@@ -22,6 +22,8 @@ import sunshine_dental_care.dto.hrDTO.EmployeeRequest;
 import sunshine_dental_care.dto.hrDTO.EmployeeResponse;
 import sunshine_dental_care.services.interfaces.hr.HrEmployeeService;
 import sunshine_dental_care.services.upload_file.AvatarStorageService;
+import sunshine_dental_care.services.hr.EmployeeCvDataService;
+import sunshine_dental_care.entities.EmployeeCvData;
 
 @RestController
 @RequestMapping("/api/hr/employees")
@@ -30,10 +32,13 @@ public class HrEmployeeController {
 
     private final HrEmployeeService hrEmployeeService;
     private final AvatarStorageService avatarStorageService;
+    private final EmployeeCvDataService employeeCvDataService;
 
-    public HrEmployeeController(HrEmployeeService hrEmployeeService, AvatarStorageService avatarStorageService) {
+    public HrEmployeeController(HrEmployeeService hrEmployeeService, AvatarStorageService avatarStorageService,
+                                EmployeeCvDataService employeeCvDataService) {
         this.hrEmployeeService = hrEmployeeService;
         this.avatarStorageService = avatarStorageService;
+        this.employeeCvDataService = employeeCvDataService;
     }
 
     // Tạo mới nhân viên
@@ -146,6 +151,88 @@ public class HrEmployeeController {
         String code = hrEmployeeService.previewEmployeeCode();
         Map<String, String> response = new java.util.HashMap<>();
         response.put("code", code);
+        return ResponseEntity.ok(response);
+    }
+
+    // Upload CV và extract text + images bằng Tesseract OCR
+    @PostMapping("/{id}/upload-cv")
+    @org.springframework.security.access.prepost.PreAuthorize("hasRole('HR')")
+    public ResponseEntity<Map<String, Object>> uploadCv(
+            @PathVariable Integer id,
+            @RequestParam("file") MultipartFile file) {
+        try {
+            log.info("Uploading CV for employee {}: {}", id, file.getOriginalFilename());
+            EmployeeCvData cvData = employeeCvDataService.uploadAndExtractCv(file, id);
+            
+            Map<String, Object> response = new java.util.HashMap<>();
+            response.put("id", cvData.getId());
+            response.put("userId", cvData.getUserId());
+            response.put("originalFileName", cvData.getOriginalFileName());
+            response.put("fileType", cvData.getFileType());
+            response.put("fileSize", cvData.getFileSize());
+            response.put("cvFileUrl", cvData.getCvFileUrl());
+            response.put("extractedText", cvData.getExtractedText());
+            response.put("extractedImages", employeeCvDataService.parseExtractedImages(cvData));
+            response.put("message", "CV uploaded and extracted successfully");
+            
+            return ResponseEntity.ok(response);
+        } catch (Exception ex) {
+            log.error("Failed to upload and extract CV: {}", ex.getMessage(), ex);
+            throw new RuntimeException("Failed to upload CV: " + ex.getMessage(), ex);
+        }
+    }
+
+    // Lấy CV data của nhân viên
+    @GetMapping("/{id}/cv")
+    @org.springframework.security.access.prepost.PreAuthorize("hasRole('HR')")
+    public ResponseEntity<Map<String, Object>> getCvData(@PathVariable Integer id) {
+        return employeeCvDataService.getCvDataByUserId(id)
+            .map(cvData -> {
+                Map<String, Object> response = new java.util.HashMap<>();
+                response.put("id", cvData.getId());
+                response.put("userId", cvData.getUserId());
+                response.put("originalFileName", cvData.getOriginalFileName());
+                response.put("fileType", cvData.getFileType());
+                response.put("fileSize", cvData.getFileSize());
+                response.put("cvFileUrl", cvData.getCvFileUrl());
+                response.put("extractedText", cvData.getExtractedText());
+                response.put("extractedImages", employeeCvDataService.parseExtractedImages(cvData));
+                response.put("createdAt", cvData.getCreatedAt());
+                response.put("updatedAt", cvData.getUpdatedAt());
+                return ResponseEntity.ok(response);
+            })
+            .orElse(ResponseEntity.notFound().build());
+    }
+
+    // Cập nhật extracted text của CV
+    @PutMapping("/{id}/cv/text")
+    @org.springframework.security.access.prepost.PreAuthorize("hasRole('HR')")
+    public ResponseEntity<Map<String, Object>> updateCvText(
+            @PathVariable Integer id,
+            @RequestBody Map<String, String> request) {
+        String extractedText = request.get("extractedText");
+        if (extractedText == null) {
+            throw new IllegalArgumentException("extractedText is required");
+        }
+        
+        EmployeeCvData cvData = employeeCvDataService.updateExtractedText(id, extractedText);
+        
+        Map<String, Object> response = new java.util.HashMap<>();
+        response.put("id", cvData.getId());
+        response.put("userId", cvData.getUserId());
+        response.put("extractedText", cvData.getExtractedText());
+        response.put("message", "CV text updated successfully");
+        
+        return ResponseEntity.ok(response);
+    }
+
+    // Xóa CV data của nhân viên
+    @DeleteMapping("/{id}/cv")
+    @org.springframework.security.access.prepost.PreAuthorize("hasRole('HR')")
+    public ResponseEntity<Map<String, String>> deleteCvData(@PathVariable Integer id) {
+        employeeCvDataService.deleteCvDataByUserId(id);
+        Map<String, String> response = new java.util.HashMap<>();
+        response.put("message", "CV data deleted successfully");
         return ResponseEntity.ok(response);
     }
 }

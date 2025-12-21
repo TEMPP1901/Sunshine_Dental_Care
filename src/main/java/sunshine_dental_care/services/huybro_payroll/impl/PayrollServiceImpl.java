@@ -1,29 +1,5 @@
 package sunshine_dental_care.services.huybro_payroll.impl;
 
-import jakarta.persistence.criteria.Predicate;
-import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
-import org.springframework.data.domain.Page;
-import org.springframework.data.domain.PageRequest;
-import org.springframework.data.domain.Pageable;
-import org.springframework.data.domain.Sort;
-import org.springframework.data.jpa.domain.Specification;
-import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
-import sunshine_dental_care.dto.huybro_payroll.*;
-import sunshine_dental_care.entities.Attendance;
-import sunshine_dental_care.entities.User;
-import sunshine_dental_care.entities.huybro_salary.*;
-import sunshine_dental_care.entities.huybro_salary.enums.AllowanceType;
-import sunshine_dental_care.entities.huybro_salary.enums.PeriodStatus;
-import sunshine_dental_care.entities.huybro_salary.enums.SalaryCalculationType;
-import sunshine_dental_care.entities.huybro_salary.enums.TaxType;
-import sunshine_dental_care.repositories.auth.UserRepo;
-import sunshine_dental_care.repositories.huybro_custom.UserCustomRepository;
-import sunshine_dental_care.repositories.huybro_payroll.*;
-import sunshine_dental_care.services.huybro_payroll.interfaces.PayrollService;
-import sunshine_dental_care.utils.huybro_utils.ExcelExportUtils;
-
 import java.io.ByteArrayInputStream;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
@@ -32,6 +8,48 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.stream.Collectors;
+
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
+import org.springframework.data.jpa.domain.Specification;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+import jakarta.persistence.criteria.Predicate;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import sunshine_dental_care.dto.huybro_payroll.ManualItemRequest;
+import sunshine_dental_care.dto.huybro_payroll.PayrollCalculationRequest;
+import sunshine_dental_care.dto.huybro_payroll.PayslipAllowanceDto;
+import sunshine_dental_care.dto.huybro_payroll.PayslipDetailResponse;
+import sunshine_dental_care.dto.huybro_payroll.PayslipSearchRequest;
+import sunshine_dental_care.dto.huybro_payroll.PayslipViewDto;
+import sunshine_dental_care.dto.huybro_payroll.SalaryProfileRequest;
+import sunshine_dental_care.dto.huybro_payroll.SalaryProfileResponse;
+import sunshine_dental_care.dto.huybro_payroll.UserSearchResponse;
+import sunshine_dental_care.entities.Attendance;
+import sunshine_dental_care.entities.User;
+import sunshine_dental_care.entities.huybro_salary.PayslipAllowance;
+import sunshine_dental_care.entities.huybro_salary.PayslipsSnapshot;
+import sunshine_dental_care.entities.huybro_salary.SalaryAllowance;
+import sunshine_dental_care.entities.huybro_salary.SalaryCycle;
+import sunshine_dental_care.entities.huybro_salary.SalaryProfile;
+import sunshine_dental_care.entities.huybro_salary.enums.AllowanceType;
+import sunshine_dental_care.entities.huybro_salary.enums.PeriodStatus;
+import sunshine_dental_care.entities.huybro_salary.enums.SalaryCalculationType;
+import sunshine_dental_care.entities.huybro_salary.enums.TaxType;
+import sunshine_dental_care.repositories.auth.UserRepo;
+import sunshine_dental_care.repositories.huybro_custom.UserCustomRepository;
+import sunshine_dental_care.repositories.huybro_payroll.PayrollAttendanceRepo;
+import sunshine_dental_care.repositories.huybro_payroll.PayslipAllowanceRepo;
+import sunshine_dental_care.repositories.huybro_payroll.PayslipsSnapshotRepo;
+import sunshine_dental_care.repositories.huybro_payroll.SalaryAllowanceRepo;
+import sunshine_dental_care.repositories.huybro_payroll.SalaryCycleRepo;
+import sunshine_dental_care.repositories.huybro_payroll.SalaryProfileRepo;
+import sunshine_dental_care.services.huybro_payroll.interfaces.PayrollService;
+import sunshine_dental_care.utils.huybro_utils.ExcelExportUtils;
 
 @Service
 @RequiredArgsConstructor
