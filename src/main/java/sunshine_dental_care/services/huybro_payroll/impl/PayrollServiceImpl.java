@@ -47,7 +47,9 @@ public class PayrollServiceImpl implements PayrollService {
     private final PayslipAllowanceRepo payslipAllowanceRepo;
     private final UserCustomRepository userCustomRepository;
     private static final BigDecimal SELF_RELIEF = new BigDecimal("11000000"); // 11 triệu
-    private static final BigDecimal DEPENDENT_RELIEF_UNIT = new BigDecimal("4400000"); // 4.4 triệu/người
+    private static final BigDecimal DEPENDENT_RELIEF_UNIT = new BigDecimal("4400000");
+    private static final BigDecimal MAX_BASE_BHXH_BHYT = new BigDecimal("46800000");
+    private static final BigDecimal MAX_BASE_BHTN = new BigDecimal("99200000"); // Mặc định Vùng I// 4.4 triệu/người
     // =================================================================================
     // 1. CẤU HÌNH LƯƠNG (PROFILE CONFIGURATION)
     // =================================================================================
@@ -292,11 +294,19 @@ public class PayrollServiceImpl implements PayrollService {
 
                 String itemDesc = item.getNote();
                 if (List.of("BHXH", "BHYT", "BHTN").contains(name)) {
+                    BigDecimal cap = name.equals("BHTN") ? MAX_BASE_BHTN : MAX_BASE_BHXH_BHYT;
                     BigDecimal percent = (profile != null) ? profile.getAllowances().stream()
                             .filter(a -> a.getAllowanceName().equalsIgnoreCase(name))
                             .map(a -> a.getAmount()).findFirst().orElse(BigDecimal.ZERO) : BigDecimal.ZERO;
 
-                    itemDesc = String.format("%s%% deduction based on Ins. Salary: %s", percent, formatMoney(insBase));
+                    // Nếu mức đóng thực tế vượt trần -> Hiện cảnh báo kịch trần
+                    if (insBase.compareTo(cap) > 0) {
+                        itemDesc = String.format("%s%% deduction based on regulatory CAP: %s (Contribution base %s exceeds cap)",
+                                percent, formatMoney(cap), formatMoney(insBase));
+                    } else {
+                        itemDesc = String.format("%s%% deduction based on insurance salary: %s",
+                                percent, formatMoney(insBase));
+                    }
                 }
 
                 PayslipDetailResponse.LineItem li = PayslipDetailResponse.LineItem.builder()
@@ -670,7 +680,7 @@ public class PayrollServiceImpl implements PayrollService {
 
     // Hàm này chịu trách nhiệm cộng tổng các dòng trong List và update vào Header
     private void recalculateTotals(PayslipsSnapshot slip, SalaryProfile profile) {
-        BigDecimal insBase = (profile.getInsuranceAmount() != null && profile.getInsuranceAmount().compareTo(BigDecimal.ZERO) > 0)
+        BigDecimal rawInsBase = (profile.getInsuranceAmount() != null && profile.getInsuranceAmount().compareTo(BigDecimal.ZERO) > 0)
                 ? profile.getInsuranceAmount() : profile.getBaseSalary();
 
         BigDecimal totalAllowancesIncome = BigDecimal.ZERO; // Tổng phụ cấp cộng vào lương
@@ -687,7 +697,12 @@ public class PayrollServiceImpl implements PayrollService {
             } else {
                 // Xử lý các khoản DEDUCTION
                 if (List.of("BHXH", "BHYT", "BHTN").contains(name)) {
-                    BigDecimal money = insBase.multiply(item.getAmount()).divide(new BigDecimal("100"), 0, RoundingMode.HALF_UP);
+                    // --- LOGIC CHẶN TRẦN ---
+                    BigDecimal cap = name.equals("BHTN") ? MAX_BASE_BHTN : MAX_BASE_BHXH_BHYT;
+                    BigDecimal effectiveBase = rawInsBase.min(cap); // Lấy số nhỏ hơn
+
+                    BigDecimal money = effectiveBase.multiply(item.getAmount())
+                            .divide(new BigDecimal("100"), 0, RoundingMode.HALF_UP);
                     item.setAmount(money);
                     totalInsuranceDeduction = totalInsuranceDeduction.add(money);
                 } else if (name.equals("DEPENDENTS")) {
