@@ -55,6 +55,8 @@ public class PayslipDetailResponse {
         private BigDecimal grossIncome;       // Tổng thu nhập
         private BigDecimal insuranceDeduction;// Trừ bảo hiểm
         private BigDecimal selfRelief;        // Giảm trừ gia cảnh (11tr)
+        private String reliefFormula; // VD: "11,000,000 + (2 người x 4,400,000)"
+        private Long dependentCount;  // Số người phụ thuộc (để hiển thị icon)
         private BigDecimal taxableIncome;     // Thu nhập tính thuế
         private BigDecimal taxAmount;         // Thuế phải đóng
         // [NEW] Thêm danh sách chi tiết từng bậc thuế

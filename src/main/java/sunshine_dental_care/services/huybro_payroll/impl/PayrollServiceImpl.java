@@ -64,7 +64,8 @@ public class PayrollServiceImpl implements PayrollService {
     private final PayrollAttendanceRepo attendanceRepo;
     private final PayslipAllowanceRepo payslipAllowanceRepo;
     private final UserCustomRepository userCustomRepository;
-
+    private static final BigDecimal SELF_RELIEF = new BigDecimal("11000000"); // 11 triệu
+    private static final BigDecimal DEPENDENT_RELIEF_UNIT = new BigDecimal("4400000"); // 4.4 triệu/người
     // =================================================================================
     // 1. CẤU HÌNH LƯƠNG (PROFILE CONFIGURATION)
     // =================================================================================
@@ -112,15 +113,17 @@ public class PayrollServiceImpl implements PayrollService {
     @Override
     @Transactional
     public SalaryProfileResponse createOrUpdateProfile(SalaryProfileRequest request) {
-        User user = userRepo.findById(request.getUserId())
-                .orElseThrow(() -> new RuntimeException("User not found"));
-
-        SalaryProfile profile = salaryProfileRepo.findByUserId(request.getUserId())
-                .orElse(new SalaryProfile());
+        User user = userRepo.findById(request.getUserId()).orElseThrow(() -> new RuntimeException("User not found"));
+        SalaryProfile profile = salaryProfileRepo.findByUserId(request.getUserId()).orElse(new SalaryProfile());
 
         profile.setUser(user);
         profile.setCalculationType(request.getCalculationType());
         profile.setBaseSalary(request.getBaseSalary());
+        profile.setInsuranceAmount(request.getInsuranceAmount()); // Mức lương đóng BH
+        profile.setOtRate(request.getOtRate()); // Lưu tỷ lệ % (VD: 150)
+        profile.setOverShiftRate(request.getOverShiftRate());
+        profile.setLateDeductionRate(request.getLateDeductionRate());
+        profile.setTaxType(TaxType.PROGRESSIVE);
 
         if (request.getCalculationType() == SalaryCalculationType.SHIFT_BASED) {
             profile.setStandardShifts(request.getStandardShifts());
@@ -130,17 +133,8 @@ public class PayrollServiceImpl implements PayrollService {
             profile.setStandardShifts(0);
         }
 
-        profile.setOtRate(request.getOtRate());
-        profile.setOverShiftRate(request.getOverShiftRate());
-        profile.setLateDeductionRate(request.getLateDeductionRate());
-        profile.setInsuranceAmount(request.getInsuranceAmount());
-        profile.setTaxType(TaxType.PROGRESSIVE);
-
-        if (profile.getAllowances() == null) {
-            profile.setAllowances(new ArrayList<>());
-        } else {
-            profile.getAllowances().clear();
-        }
+        if (profile.getAllowances() == null) profile.setAllowances(new ArrayList<>());
+        else profile.getAllowances().clear();
 
         if (request.getAllowances() != null) {
             for (SalaryProfileRequest.AllowanceDTO dto : request.getAllowances()) {
@@ -153,9 +147,7 @@ public class PayrollServiceImpl implements PayrollService {
                 profile.getAllowances().add(sa);
             }
         }
-
-        SalaryProfile savedProfile = salaryProfileRepo.save(profile);
-        return mapToProfileResponse(savedProfile);
+        return mapToProfileResponse(salaryProfileRepo.save(profile));
     }
 
     // =================================================================================
@@ -165,172 +157,159 @@ public class PayrollServiceImpl implements PayrollService {
     @Override
     @Transactional
     public List<PayslipViewDto> calculatePayroll(PayrollCalculationRequest request) {
-        log.info(">>> Calculating payroll for {}/{}", request.getMonth(), request.getYear());
-
-        // 1. Khởi tạo/Lấy kỳ lương
         SalaryCycle cycle = getOrCreateCycle(request.getMonth(), request.getYear());
-        if (cycle.getStatus() == PeriodStatus.FINALIZED) {
-            throw new RuntimeException("Kỳ lương đã CHỐT. Không thể tính lại!");
-        }
+        if (cycle.getStatus() == PeriodStatus.FINALIZED) throw new RuntimeException("Kỳ lương đã CHỐT!");
 
-        // 2. Lấy danh sách nhân viên cần tính
-        List<SalaryProfile> profiles;
-        if (request.getUserIds() != null && !request.getUserIds().isEmpty()) {
-            profiles = request.getUserIds().stream()
-                    .map(uid -> salaryProfileRepo.findByUserId(uid).orElse(null))
-                    .filter(p -> p != null)
-                    .collect(Collectors.toList());
-        } else {
-            List<String> ALLOWED_ROLES = List.of("HR", "DOCTOR", "RECEPTION", "ACCOUNTANT");
-            profiles = salaryProfileRepo.findAll().stream()
-                    .filter(p -> p.getUser().getUserRoles().stream()
-                            .anyMatch(ur -> ur.getIsActive() && ALLOWED_ROLES.contains(ur.getRole().getRoleName())))
-                    .collect(Collectors.toList());
-        }
+        // 1. Lấy Profiles (Giữ logic filter của bạn)
+        List<SalaryProfile> profiles = (request.getUserIds() != null && !request.getUserIds().isEmpty())
+                ? request.getUserIds().stream().map(uid -> salaryProfileRepo.findByUserId(uid).orElse(null)).filter(p -> p != null).collect(Collectors.toList())
+                : salaryProfileRepo.findAll().stream().filter(p -> p.getUser().getUserRoles().stream().anyMatch(ur -> ur.getIsActive() && List.of("HR", "DOCTOR", "RECEPTION", "ACCOUNTANT").contains(ur.getRole().getRoleName()))).collect(Collectors.toList());
 
         List<PayslipsSnapshot> results = new ArrayList<>();
 
-        // 3. Vòng lặp tính lương từng người
         for (SalaryProfile profile : profiles) {
-            // Lấy dữ liệu chấm công
-            List<Attendance> attendances = attendanceRepo.findByUserIdAndWorkDateBetween(
-                    profile.getUser().getId(), cycle.getStartDate(), cycle.getEndDate());
+            List<Attendance> attendances = attendanceRepo.findByUserIdAndWorkDateBetween(profile.getUser().getId(), cycle.getStartDate(), cycle.getEndDate());
+            PayslipsSnapshot slip = payslipRepo.findBySalaryCycleIdAndUserId(cycle.getId(), profile.getUser().getId()).orElse(new PayslipsSnapshot());
 
-            // Lấy hoặc tạo mới phiếu lương (Snapshot)
-            PayslipsSnapshot slip = payslipRepo.findBySalaryCycleIdAndUserId(cycle.getId(), profile.getUser().getId())
-                    .orElse(new PayslipsSnapshot());
-
-            // --- A. SNAPSHOT INFO (Lưu thông tin gốc) ---
-            slip.setSalaryCycle(cycle);
-            slip.setUser(profile.getUser());
+            // --- A. SNAPSHOT ---
+            slip.setSalaryCycle(cycle); slip.setUser(profile.getUser());
             slip.setBaseSalarySnapshot(profile.getBaseSalary());
             slip.setStandardWorkDaysSnapshot(profile.getStandardWorkDays());
             slip.setStandardShiftsSnapshot(profile.getStandardShifts());
 
-            // --- B. TÍNH LƯƠNG CƠ BẢN (WORK/SHIFT) ---
-            BigDecimal salaryAmount = BigDecimal.ZERO;
-            BigDecimal bonusAmount = BigDecimal.ZERO;
+            // --- B. TÍNH LƯƠNG CƠ BẢN (Giữ logic cũ của bạn) ---
+            calculateBaseSalaryAmount(slip, profile, attendances);
 
-            if (profile.getCalculationType() == SalaryCalculationType.MONTHLY) {
-                // Logic tính theo ngày công
-                long workDays = attendances.stream()
-                        .filter(a -> !Boolean.TRUE.equals(a.getIsOvertime()))
-                        .map(Attendance::getWorkDate).distinct().count();
-                slip.setActualWorkDays((double) workDays);
-
-                if (profile.getStandardWorkDays() != null && profile.getStandardWorkDays() > 0) {
-                    BigDecimal dailyRate = profile.getBaseSalary()
-                            .divide(BigDecimal.valueOf(profile.getStandardWorkDays()), 2, RoundingMode.HALF_UP);
-                    salaryAmount = dailyRate.multiply(BigDecimal.valueOf(workDays));
-                }
-            } else if (profile.getCalculationType() == SalaryCalculationType.SHIFT_BASED) {
-                // Logic tính theo ca (Bác sĩ)
-                long shiftCount = attendances.stream()
-                        .filter(a -> !Boolean.TRUE.equals(a.getIsOvertime()))
-                        .filter(a -> a.getShiftType() != null && (a.getShiftType().equals("MORNING") || a.getShiftType().equals("AFTERNOON")))
-                        .count();
-                slip.setActualShifts((int) shiftCount);
-                int stdShifts = profile.getStandardShifts() != null ? profile.getStandardShifts() : 0;
-
-                if (stdShifts > 0) {
-                    if (shiftCount <= stdShifts) {
-                        BigDecimal shiftRate = profile.getBaseSalary()
-                                .divide(BigDecimal.valueOf(stdShifts), 2, RoundingMode.HALF_UP);
-                        salaryAmount = shiftRate.multiply(BigDecimal.valueOf(shiftCount));
-                    } else {
-                        salaryAmount = profile.getBaseSalary();
-                        long extra = shiftCount - stdShifts;
-                        if (profile.getOverShiftRate() != null) {
-                            bonusAmount = profile.getOverShiftRate().multiply(BigDecimal.valueOf(extra));
-                        }
-                    }
-                }
-            }
-            slip.setSalaryAmount(salaryAmount);
-            slip.setBonusAmount(bonusAmount);
-
-            // --- C. TÍNH OT (OVERTIME) ---
-            BigDecimal otSalaryAmount = BigDecimal.ZERO;
-            double totalOtHours = attendances.stream()
-                    .filter(a -> Boolean.TRUE.equals(a.getIsOvertime()))
-                    .mapToDouble(a -> a.getActualWorkHours() != null ? a.getActualWorkHours().doubleValue() : 0.0)
-                    .sum();
-
+            // --- C. TÍNH OT (Cập nhật logic % ) ---
+            double totalOtHours = attendances.stream().filter(a -> Boolean.TRUE.equals(a.getIsOvertime())).mapToDouble(a -> a.getActualWorkHours() != null ? a.getActualWorkHours().doubleValue() : 0.0).sum();
             slip.setTotalOtHours(totalOtHours);
-
-            if (totalOtHours > 0 && profile.getOtRate() != null && profile.getOtRate().compareTo(BigDecimal.ZERO) > 0) {
-                BigDecimal standardDays = (profile.getStandardWorkDays() != null && profile.getStandardWorkDays() > 0)
-                        ? BigDecimal.valueOf(profile.getStandardWorkDays())
-                        : BigDecimal.valueOf(26);
-
-                BigDecimal hourlyRate = profile.getBaseSalary()
-                        .divide(standardDays, 2, RoundingMode.HALF_UP)
-                        .divide(BigDecimal.valueOf(8), 2, RoundingMode.HALF_UP);
-
-                otSalaryAmount = hourlyRate
-                        .multiply(BigDecimal.valueOf(totalOtHours))
-                        .multiply(profile.getOtRate());
+            if (totalOtHours > 0 && profile.getOtRate() != null) {
+                BigDecimal standardDays = (profile.getStandardWorkDays() != null && profile.getStandardWorkDays() > 0) ? BigDecimal.valueOf(profile.getStandardWorkDays()) : BigDecimal.valueOf(26);
+                BigDecimal hourlyRate = profile.getBaseSalary().divide(standardDays, 2, RoundingMode.HALF_UP).divide(BigDecimal.valueOf(8), 2, RoundingMode.HALF_UP);
+                // Lương OT = Giờ * LươngGiờ * (%OT / 100)
+                slip.setOtSalaryAmount(hourlyRate.multiply(BigDecimal.valueOf(totalOtHours)).multiply(profile.getOtRate().divide(new BigDecimal("100"), 2, RoundingMode.HALF_UP)));
             }
-            slip.setOtSalaryAmount(otSalaryAmount);
 
-            // --- D. TÍNH PHẠT (LATE PENALTY) ---
-            // [NOTE] Đưa lên trước để hàm recalculateTotals sử dụng
+            // --- D. LATE PENALTY & INITIAL VALUES ---
             int totalLate = attendances.stream().mapToInt(a -> a.getLateMinutes() != null ? a.getLateMinutes() : 0).sum();
             slip.setTotalLateMinutes(totalLate);
-            BigDecimal latePenalty = BigDecimal.ZERO;
-            if (profile.getLateDeductionRate() != null) {
-                latePenalty = profile.getLateDeductionRate().multiply(BigDecimal.valueOf(totalLate));
-            }
-            slip.setLatePenaltyAmount(latePenalty);
-
-            // --- E. BẢO HIỂM (INSURANCE) ---
-            // [NOTE] Đưa lên trước để hàm recalculateTotals sử dụng
-            BigDecimal insurance = profile.getInsuranceAmount() != null ? profile.getInsuranceAmount() : BigDecimal.ZERO;
-            slip.setInsuranceDeduction(insurance);
-
-            // Set Advance = 0 vì giờ ta dùng List Deduction động, không dùng cột cứng này
+            slip.setLatePenaltyAmount(profile.getLateDeductionRate() != null ? profile.getLateDeductionRate().multiply(BigDecimal.valueOf(totalLate)) : BigDecimal.ZERO);
             slip.setAdvancePayment(BigDecimal.ZERO);
 
-            // --- F. QUẢN LÝ LIST PHỤ CẤP (SYNC TỪ CONFIG) ---
-
-            // 1. Khởi tạo list nếu null
-            if (slip.getPeriodicAllowances() == null) {
-                slip.setPeriodicAllowances(new ArrayList<>());
-            }
-
-            // 2. Xóa các khoản "System Generated" cũ để tránh trùng lặp khi tính lại
-            // (Giữ lại các khoản nhập tay - Manual)
+            // --- E. SYNC ALLOWANCES ---
+            if (slip.getPeriodicAllowances() == null) slip.setPeriodicAllowances(new ArrayList<>());
             slip.getPeriodicAllowances().removeIf(PayslipAllowance::getIsSystemGenerated);
-
-            // 3. Copy lại từ Config (Salary Profile) vào List
             if (profile.getAllowances() != null) {
                 for (SalaryAllowance configItem : profile.getAllowances()) {
                     PayslipAllowance item = new PayslipAllowance();
-                    item.setPayslip(slip);
-                    item.setAllowanceName(configItem.getAllowanceName());
-                    item.setAmount(configItem.getAmount());
-                    item.setType(configItem.getType());
-                    item.setIsSystemGenerated(true); // Đánh dấu là từ Hợp đồng
-                    item.setNote("From Contract");
-
+                    item.setPayslip(slip); item.setAllowanceName(configItem.getAllowanceName());
+                    item.setAmount(configItem.getAmount()); item.setType(configItem.getType());
+                    item.setIsSystemGenerated(true); item.setNote("From Contract");
                     slip.getPeriodicAllowances().add(item);
                 }
             }
 
-            // --- G. TÍNH TOÁN TỔNG HỢP (FINAL CALCULATION) ---
-            // Hàm này sẽ tự động:
-            // 1. Cộng tổng List Income -> Update Gross
-            // 2. Tính Thuế
-            // 3. Cộng tổng List Deduction (bao gồm Ứng lương) + Phạt + BH -> Update Net
-            recalculateTotals(slip);
-
-            // --- H. LƯU DATABASE ---
+            // --- F. FINAL RECALCULATE ---
+            recalculateTotals(slip, profile);
             results.add(payslipRepo.save(slip));
         }
-
         return results.stream().map(this::mapToDto).collect(Collectors.toList());
     }
-
+    // Helper: Tính lương cứng (Tách ra cho gọn)
+    private void calculateBaseSalaryAmount(PayslipsSnapshot slip, SalaryProfile profile, List<Attendance> attendances) {
+        BigDecimal salaryAmount = BigDecimal.ZERO; BigDecimal bonusAmount = BigDecimal.ZERO;
+        if (profile.getCalculationType() == SalaryCalculationType.MONTHLY) {
+            // MONTHLY: Chỉ đếm ngày có check-in (giống attendance report)
+            long workDays = attendances.stream()
+                    .filter(a -> !Boolean.TRUE.equals(a.getIsOvertime()))
+                    .filter(a -> a.getCheckInTime() != null) // Chỉ đếm ngày có check-in
+                    .map(Attendance::getWorkDate)
+                    .distinct()
+                    .count();
+            slip.setActualWorkDays((double) workDays);
+            if (profile.getStandardWorkDays() > 0) salaryAmount = profile.getBaseSalary().divide(BigDecimal.valueOf(profile.getStandardWorkDays()), 2, RoundingMode.HALF_UP).multiply(BigDecimal.valueOf(workDays));
+        } else {
+            // SHIFT_BASED: Bám sát logic attendance report
+            // Chỉ đếm ca có STATUS PRESENT (giống AttendanceReportMapper)
+            java.util.Map<java.time.LocalDate, Long> presentShiftsByDate = attendances.stream()
+                    .filter(a -> !Boolean.TRUE.equals(a.getIsOvertime()))
+                    .filter(a -> {
+                        // Chỉ đếm ca có status present (giống AttendanceReportMapper)
+                        String status = a.getAttendanceStatus();
+                        return status != null && (
+                            "ON_TIME".equals(status) ||
+                            "APPROVED_PRESENT".equals(status) ||
+                            "APPROVED_LATE".equals(status) ||
+                            "APPROVED_EARLY_LEAVE".equals(status)
+                        );
+                    })
+                    .filter(a -> a.getWorkDate() != null)
+                    .collect(java.util.stream.Collectors.groupingBy(
+                        Attendance::getWorkDate,
+                        java.util.stream.Collectors.counting()
+                    ));
+            
+            // Tính số ngày present: 1 ca = 0.5 ngày, 2 ca = 1.0 ngày (giống AttendanceReportMapper)
+            double presentDays = presentShiftsByDate.values().stream()
+                    .mapToDouble(count -> count >= 2 ? 1.0 : 0.5)
+                    .sum();
+            
+            long totalPresentShifts = presentShiftsByDate.values().stream()
+                    .mapToLong(Long::longValue)
+                    .sum();
+            
+            slip.setActualShifts((int) totalPresentShifts);
+            slip.setActualWorkDays(presentDays);
+            
+            // Tính standardDays động theo workingDays trong tháng (trừ chủ nhật)
+            int workingDaysInMonth = 26; // Mặc định 26 ngày
+            if (slip.getSalaryCycle() != null) {
+                java.time.LocalDate startDate = slip.getSalaryCycle().getStartDate();
+                java.time.LocalDate endDate = slip.getSalaryCycle().getEndDate();
+                if (startDate != null && endDate != null) {
+                    workingDaysInMonth = calculateWorkingDaysInMonth(startDate, endDate);
+                }
+            }
+            
+            // standardDays = workingDays (mỗi ngày làm 2 ca, nhưng tính theo ngày)
+            double standardDays = workingDaysInMonth;
+            
+            // Tính lương dựa trên presentDays
+            if (presentDays <= standardDays) {
+                salaryAmount = profile.getBaseSalary()
+                        .divide(BigDecimal.valueOf(standardDays), 2, RoundingMode.HALF_UP)
+                        .multiply(BigDecimal.valueOf(presentDays));
+            } else {
+                // Vượt chuẩn: full lương + thưởng
+                salaryAmount = profile.getBaseSalary();
+                double extraDays = presentDays - standardDays;
+                if (extraDays > 0) {
+                    // Thưởng = số ngày vượt × lương/ngày
+                    BigDecimal dayRate = profile.getBaseSalary()
+                            .divide(BigDecimal.valueOf(standardDays), 2, RoundingMode.HALF_UP);
+                    bonusAmount = dayRate.multiply(BigDecimal.valueOf(extraDays));
+                }
+            }
+        }
+        slip.setSalaryAmount(salaryAmount); slip.setBonusAmount(bonusAmount);
+    }
+    
+    // Helper: Tính số ngày làm việc trong tháng (trừ chủ nhật)
+    private int calculateWorkingDaysInMonth(java.time.LocalDate startDate, java.time.LocalDate endDate) {
+        int workingDays = 0;
+        java.time.LocalDate current = startDate;
+        // Tính đến ngày hiện tại nếu tháng chưa kết thúc
+        java.time.LocalDate today = java.time.LocalDate.now();
+        java.time.LocalDate effectiveEndDate = today.isBefore(endDate) ? today : endDate;
+        
+        while (!current.isAfter(effectiveEndDate)) {
+            if (current.getDayOfWeek() != java.time.DayOfWeek.SUNDAY) {
+                workingDays++;
+            }
+            current = current.plusDays(1);
+        }
+        return workingDays;
+    }
     // =================================================================================
     // 3. HIỂN THỊ CHI TIẾT
     // =================================================================================
@@ -341,146 +320,138 @@ public class PayrollServiceImpl implements PayrollService {
                 .orElseThrow(() -> new RuntimeException("Payslip not found"));
         SalaryProfile profile = salaryProfileRepo.findByUserId(slip.getUser().getId()).orElse(null);
 
-        // --- A. INCOME ---
+        // Insurance base for explanation
+        BigDecimal insBase = (profile != null && profile.getInsuranceAmount() != null && profile.getInsuranceAmount().compareTo(BigDecimal.ZERO) > 0)
+                ? profile.getInsuranceAmount() : slip.getBaseSalarySnapshot();
+
+        // --- A. INCOMES ---
         List<PayslipDetailResponse.LineItem> incomes = new ArrayList<>();
-        // ... Logic tạo dòng thu nhập (Giữ nguyên như cũ) ...
-        String formula;
+
+        // 1. Standard Basic Salary
+        String baseFormula;
         if (slip.getStandardShiftsSnapshot() > 0) {
-            if (slip.getActualShifts() >= slip.getStandardShiftsSnapshot()) {
-                formula = String.format("Đã đạt định mức (%d/%d ca) \u2192 Nhận 100%% Lương cứng",
-                        slip.getActualShifts(), slip.getStandardShiftsSnapshot());
-            } else {
-                formula = String.format("(%s / %d ca) × %d ca thực tế",
-                        formatMoney(slip.getBaseSalarySnapshot()), slip.getStandardShiftsSnapshot(), slip.getActualShifts());
-            }
+            baseFormula = String.format("(%s / %d shifts) × %d actual shifts",
+                    formatMoney(slip.getBaseSalarySnapshot()),
+                    slip.getStandardShiftsSnapshot(),
+                    Math.min(slip.getActualShifts(), slip.getStandardShiftsSnapshot()));
         } else {
-            if (slip.getActualWorkDays() >= slip.getStandardWorkDaysSnapshot()) {
-                formula = String.format("Đã đủ ngày công (%.1f/%.1f) \u2192 Nhận 100%% Lương cứng",
-                        slip.getActualWorkDays(), slip.getStandardWorkDaysSnapshot());
-            } else {
-                formula = String.format("(%s / %.1f ngày) × %.1f ngày thực tế",
-                        formatMoney(slip.getBaseSalarySnapshot()), slip.getStandardWorkDaysSnapshot(), slip.getActualWorkDays());
-            }
+            double stdDays = slip.getStandardWorkDaysSnapshot() != null ? slip.getStandardWorkDaysSnapshot() : 26.0;
+            baseFormula = String.format("(%s / %.1f days) × %.1f actual days",
+                    formatMoney(slip.getBaseSalarySnapshot()),
+                    stdDays,
+                    Math.min(slip.getActualWorkDays(), stdDays));
         }
         incomes.add(PayslipDetailResponse.LineItem.builder()
-                .name("Standard Salary (Lương cơ bản)")
-                .amount(slip.getSalaryAmount()).description(formula).isHighlight(true).build());
+                .name("Standard Salary")
+                .amount(slip.getSalaryAmount())
+                .description(baseFormula).isHighlight(true).build());
 
-        if (slip.getOtSalaryAmount() != null && slip.getOtSalaryAmount().compareTo(BigDecimal.ZERO) > 0) {
-            BigDecimal multiplier = (profile != null && profile.getOtRate() != null) ? profile.getOtRate() : BigDecimal.ONE;
-            incomes.add(PayslipDetailResponse.LineItem.builder()
-                    .name("Overtime Pay (Lương làm thêm giờ)")
-                    .amount(slip.getOtSalaryAmount())
-                    .description(String.format("Tính theo hệ số nhân: x%s (Multiplier)", multiplier)).build());
-        }
-
+        // 2. Over-target Bonus
         if (slip.getBonusAmount() != null && slip.getBonusAmount().compareTo(BigDecimal.ZERO) > 0) {
-            BigDecimal rate = (profile != null && profile.getOverShiftRate() != null) ? profile.getOverShiftRate() : BigDecimal.ZERO;
-            long extra = 0;
-            if(slip.getStandardShiftsSnapshot() > 0 && slip.getActualShifts() > slip.getStandardShiftsSnapshot()) {
-                extra = slip.getActualShifts() - slip.getStandardShiftsSnapshot();
+            String bonusDesc = "";
+            if (slip.getStandardShiftsSnapshot() > 0 && slip.getActualShifts() > slip.getStandardShiftsSnapshot()) {
+                int extraShifts = slip.getActualShifts() - slip.getStandardShiftsSnapshot();
+                BigDecimal overShiftRate = (profile != null && profile.getOverShiftRate() != null) 
+                        ? profile.getOverShiftRate() 
+                        : BigDecimal.ZERO;
+                bonusDesc = String.format("Exceeded %d shifts (Unit price: %s/shift)",
+                        extraShifts, formatMoney(overShiftRate));
+            } else if (slip.getActualWorkDays() > slip.getStandardWorkDaysSnapshot()) {
+                double extraDays = slip.getActualWorkDays() - slip.getStandardWorkDaysSnapshot();
+                BigDecimal dayRate = slip.getBaseSalarySnapshot().divide(BigDecimal.valueOf(slip.getStandardWorkDaysSnapshot()), 0, RoundingMode.HALF_UP);
+                bonusDesc = String.format("Exceeded %.1f days (Unit price: %s/day)",
+                        extraDays, formatMoney(dayRate));
             }
             incomes.add(PayslipDetailResponse.LineItem.builder()
-                    .name("Over Shift Bonus (Thưởng vượt ca)")
-                    .amount(slip.getBonusAmount())
-                    .description(String.format("Dư %d ca × %s /ca", extra, formatMoney(rate))).build());
+                    .name("Over-target Bonus")
+                    .amount(slip.getBonusAmount()).description(bonusDesc).isHighlight(false).build());
         }
-        // --- B. DEDUCTION ---
+
+        // 3. Overtime Pay
+        if (slip.getOtSalaryAmount() != null && slip.getOtSalaryAmount().compareTo(BigDecimal.ZERO) > 0) {
+            BigDecimal otPercent = (profile != null && profile.getOtRate() != null) ? profile.getOtRate() : new BigDecimal("150");
+            incomes.add(PayslipDetailResponse.LineItem.builder()
+                    .name("Overtime Pay")
+                    .amount(slip.getOtSalaryAmount())
+                    .description(String.format("%.1f hours × Rate %s%%", slip.getTotalOtHours(), otPercent)).build());
+        }
+
+        // --- B. DEDUCTIONS & ALLOWANCES ---
         List<PayslipDetailResponse.LineItem> deductions = new ArrayList<>();
-        // ... Logic tạo dòng khấu trừ (Giữ nguyên như cũ) ...
-        if (slip.getLatePenaltyAmount().compareTo(BigDecimal.ZERO) > 0) {
-            BigDecimal rate = (profile != null && profile.getLateDeductionRate() != null) ? profile.getLateDeductionRate() : BigDecimal.ZERO;
-            deductions.add(PayslipDetailResponse.LineItem.builder()
-                    .name("Phạt đi muộn (Late Penalty)")
-                    .amount(slip.getLatePenaltyAmount())
-                    .description(String.format("Trễ tổng %d phút × %s /phút", slip.getTotalLateMinutes(), formatMoney(rate))).build());
-        }
-        if (slip.getInsuranceDeduction().compareTo(BigDecimal.ZERO) > 0) {
-            deductions.add(PayslipDetailResponse.LineItem.builder().name("Bảo hiểm (BHXH/BHYT)").amount(slip.getInsuranceDeduction()).description("Trừ cố định").build());
-        }
-       // --- XỬ LÝ LIST PHỤ CẤP (CHỈ LẤY BIẾN ĐỘNG / MANUAL) ---
+        long dependentCount = 0;
+
         if (slip.getPeriodicAllowances() != null) {
+            for (PayslipAllowance item : slip.getPeriodicAllowances()) {
+                String name = item.getAllowanceName().toUpperCase();
 
-            // A. Map INCOME
-            slip.getPeriodicAllowances().stream()
-                    .filter(item -> item.getType() == AllowanceType.INCOME)
-                    .forEach(item -> {
-                        incomes.add(PayslipDetailResponse.LineItem.builder()
-                                .name("Phụ cấp: " + item.getAllowanceName())
-                                .amount(item.getAmount())
-                                .description(item.getNote())
-                                .isHighlight(false)
-                                .build());
-                    });
+                if (name.equals("DEPENDENTS")) {
+                    dependentCount = item.getAmount().longValue();
+                    continue;
+                }
 
-            // B. Map DEDUCTION
-            slip.getPeriodicAllowances().stream()
-                    .filter(item -> item.getType() == AllowanceType.DEDUCTION)
-                    .forEach(item -> {
-                        deductions.add(PayslipDetailResponse.LineItem.builder()
-                                .name("Khấu trừ: " + item.getAllowanceName())
-                                .amount(item.getAmount())
-                                .description(item.getNote())
-                                .isHighlight(false)
-                                .build());
-                    });
-        }
-        if (slip.getAdvancePayment().compareTo(BigDecimal.ZERO) > 0) {
-            deductions.add(PayslipDetailResponse.LineItem.builder().name("Tạm ứng (Advance)").amount(slip.getAdvancePayment()).description("Đã ứng trước trong kỳ").build());
-        }
-        if (slip.getTaxDeduction().compareTo(BigDecimal.ZERO) > 0) {
-            deductions.add(PayslipDetailResponse.LineItem.builder()
-                    .name("Personal Income Tax (Thuế TNCN) ")
-                    .amount(slip.getTaxDeduction()).description("Xem chi tiết bên dưới").isHighlight(true).build());
+                String itemDesc = item.getNote();
+                if (List.of("BHXH", "BHYT", "BHTN").contains(name)) {
+                    BigDecimal percent = (profile != null) ? profile.getAllowances().stream()
+                            .filter(a -> a.getAllowanceName().equalsIgnoreCase(name))
+                            .map(a -> a.getAmount()).findFirst().orElse(BigDecimal.ZERO) : BigDecimal.ZERO;
+
+                    itemDesc = String.format("%s%% deduction based on Ins. Salary: %s", percent, formatMoney(insBase));
+                }
+
+                PayslipDetailResponse.LineItem li = PayslipDetailResponse.LineItem.builder()
+                        .name(item.getAllowanceName()) // Tên phụ cấp/khấu trừ thường lấy từ Config (đã là Tiếng Anh)
+                        .amount(item.getAmount())
+                        .description(itemDesc).build();
+
+                if (item.getType() == AllowanceType.INCOME) incomes.add(li);
+                else deductions.add(li);
+            }
         }
 
         // --- C. TAX BREAKDOWN ---
-        BigDecimal selfRelief = BigDecimal.ZERO;
-        BigDecimal taxableIncome = slip.getGrossSalary().subtract(slip.getInsuranceDeduction());
-        if (taxableIncome.compareTo(BigDecimal.ZERO) < 0) taxableIncome = BigDecimal.ZERO;
+        BigDecimal familyRelief = SELF_RELIEF.add(DEPENDENT_RELIEF_UNIT.multiply(BigDecimal.valueOf(dependentCount)));
+        String reliefDetail = String.format("Self-relief (11,000,000) + %d dependents (%d × 4,400,000)",
+                dependentCount, dependentCount);
 
-        // Lấy chi tiết thuế để hiển thị
-        List<PayslipDetailResponse.TaxTierDetail> taxDetails = getTaxDetails(taxableIncome);
-
-        // [VALIDATION] Mặc dù ta đã lưu thuế vào slip.taxDeduction, nhưng để hiển thị
-        // "Tax Payable" khớp 100% với danh sách details bên dưới, ta lấy tổng từ details.
-        // Điều này chỉ mang tính hiển thị, giá trị thực tế đã lưu trong DB từ hàm calculatePayroll.
-        BigDecimal taxSumFromDetails = taxDetails.stream()
-                .map(PayslipDetailResponse.TaxTierDetail::getAmount)
-                .reduce(BigDecimal.ZERO, BigDecimal::add);
+        BigDecimal taxableIncome = slip.getGrossSalary()
+                .subtract(slip.getInsuranceDeduction())
+                .subtract(familyRelief)
+                .max(BigDecimal.ZERO);
 
         PayslipDetailResponse.TaxBreakdown taxInfo = PayslipDetailResponse.TaxBreakdown.builder()
                 .grossIncome(slip.getGrossSalary())
                 .insuranceDeduction(slip.getInsuranceDeduction())
-                .selfRelief(selfRelief)
+                .selfRelief(familyRelief)
                 .taxableIncome(taxableIncome)
-                .taxAmount(taxSumFromDetails) // Dùng số này để khớp với details
-                .details(taxDetails)
+                .taxAmount(slip.getTaxDeduction())
+                .details(getTaxDetails(taxableIncome))
                 .build();
+
+        if (slip.getTaxDeduction().compareTo(BigDecimal.ZERO) > 0) {
+            deductions.add(PayslipDetailResponse.LineItem.builder()
+                    .name("Personal Income Tax (PIT)")
+                    .amount(slip.getTaxDeduction())
+                    .description("Detailed progressive calculation below").isHighlight(true).build());
+        }
 
         return PayslipDetailResponse.builder()
                 .id(slip.getId())
                 .userFullName(slip.getUser().getFullName())
                 .userCode(slip.getUser().getCode())
-                .userEmail(slip.getUser().getEmail())
-                .roleName(slip.getUser().getUserRoles().stream().findFirst().map(ur -> ur.getRole().getRoleName()).orElse("N/A"))
                 .month(slip.getSalaryCycle().getMonth())
                 .year(slip.getSalaryCycle().getYear())
                 .status(slip.getSalaryCycle().getStatus().name())
-                .createdAt(slip.getCreatedAt().toString())
-                .workType(slip.getStandardShiftsSnapshot() > 0 ? "SHIFT_BASED" : "MONTHLY")
-                .workActual(slip.getStandardShiftsSnapshot() > 0 ? slip.getActualShifts().toString() : slip.getActualWorkDays().toString())
-                .workStandard(slip.getStandardShiftsSnapshot() > 0 ? slip.getStandardShiftsSnapshot().toString() : slip.getStandardWorkDaysSnapshot().toString())
-                .workFormula(formula)
+                .workType(slip.getStandardShiftsSnapshot() > 0 ? "Shift-based" : "Monthly/Office-based")
+                .workActual(slip.getStandardShiftsSnapshot() > 0 ? slip.getActualShifts() + " shifts" : slip.getActualWorkDays() + " days")
+                .workStandard(slip.getStandardShiftsSnapshot() > 0 ? slip.getStandardShiftsSnapshot() + " shifts" : slip.getStandardWorkDaysSnapshot() + " days")
+                .workFormula(baseFormula)
                 .incomeItems(incomes)
                 .totalIncome(slip.getGrossSalary())
                 .deductionItems(deductions)
                 .totalDeduction(slip.getGrossSalary().subtract(slip.getNetSalary()))
                 .taxBreakdown(taxInfo)
                 .netSalary(slip.getNetSalary())
-                .note(slip.getNote())
-                .incomeItems(incomes)
-                .deductionItems(deductions)
+                .note(reliefDetail)
                 .build();
     }
     @Override
@@ -549,6 +520,7 @@ public class PayrollServiceImpl implements PayrollService {
             throw new RuntimeException("Cannot edit finalized payslip");
         }
 
+        // 1. Tạo item mới
         PayslipAllowance item = new PayslipAllowance();
         item.setPayslip(slip);
         item.setAllowanceName(request.getName());
@@ -557,12 +529,20 @@ public class PayrollServiceImpl implements PayrollService {
         item.setIsSystemGenerated(false); // Quan trọng: Đây là nhập tay
         item.setNote(request.getNote());
 
+        // 2. LƯU TRỰC TIẾP ITEM (Để tránh lỗi Cascade)
+        payslipAllowanceRepo.save(item);
+
+        // 3. Thêm vào list và tính toán lại
+        if (slip.getPeriodicAllowances() == null) slip.setPeriodicAllowances(new ArrayList<>());
         slip.getPeriodicAllowances().add(item);
 
-        // Tính lại số liệu
+        // 4. Tính lại Gross/Net dựa trên mảng allowances mới nhất
         recalculateTotals(slip);
 
+        // 5. Lưu Slip (để cập nhật GrossSalary, NetSalary snapshot)
         PayslipsSnapshot saved = payslipRepo.save(slip);
+
+        // Trả về DTO hoàn chỉnh đã có số mới
         return mapToDto(saved);
     }
 
@@ -788,44 +768,67 @@ public class PayrollServiceImpl implements PayrollService {
     }
 
     // Hàm này chịu trách nhiệm cộng tổng các dòng trong List và update vào Header
-    private void recalculateTotals(PayslipsSnapshot slip) {
-        // 1. Tính tổng Income từ List
-        BigDecimal totalIncomeAllowances = slip.getPeriodicAllowances().stream()
-                .filter(a -> a.getType() == AllowanceType.INCOME)
-                .map(PayslipAllowance::getAmount)
-                .reduce(BigDecimal.ZERO, BigDecimal::add);
-        slip.setAllowanceAmount(totalIncomeAllowances);
+    private void recalculateTotals(PayslipsSnapshot slip, SalaryProfile profile) {
+        BigDecimal insBase = (profile.getInsuranceAmount() != null && profile.getInsuranceAmount().compareTo(BigDecimal.ZERO) > 0)
+                ? profile.getInsuranceAmount() : profile.getBaseSalary();
 
-        // 2. Tính tổng Deduction từ List (Bao gồm cả Ứng lương, Phạt...)
-        BigDecimal totalDeductionAllowances = slip.getPeriodicAllowances().stream()
-                .filter(a -> a.getType() == AllowanceType.DEDUCTION)
-                .map(PayslipAllowance::getAmount)
-                .reduce(BigDecimal.ZERO, BigDecimal::add);
-        slip.setOtherDeductionAmount(totalDeductionAllowances);
+        BigDecimal totalAllowancesIncome = BigDecimal.ZERO; // Tổng phụ cấp cộng vào lương
+        BigDecimal totalInsuranceDeduction = BigDecimal.ZERO;
+        BigDecimal otherDeductions = BigDecimal.ZERO; // Các khoản trừ khác (bao gồm ứng lương nhập tay)
+        long dependents = 0;
 
-        // 3. Tính lại Gross
-        // Gross = Lương cứng + Bonus + OT + Phụ cấp (Income)
+        for (PayslipAllowance item : slip.getPeriodicAllowances()) {
+            String name = item.getAllowanceName().toUpperCase();
+
+            if (item.getType() == AllowanceType.INCOME) {
+                // Tất cả các khoản INCOME nhập tay hoặc config đều cộng vào đây
+                totalAllowancesIncome = totalAllowancesIncome.add(item.getAmount());
+            } else {
+                // Xử lý các khoản DEDUCTION
+                if (List.of("BHXH", "BHYT", "BHTN").contains(name)) {
+                    BigDecimal money = insBase.multiply(item.getAmount()).divide(new BigDecimal("100"), 0, RoundingMode.HALF_UP);
+                    item.setAmount(money);
+                    totalInsuranceDeduction = totalInsuranceDeduction.add(money);
+                } else if (name.equals("DEPENDENTS")) {
+                    dependents = item.getAmount().longValue();
+                } else {
+                    // Các khoản trừ nhập tay như "Ứng lương", "Phạt vi phạm" rơi vào đây
+                    otherDeductions = otherDeductions.add(item.getAmount());
+                }
+            }
+        }
+
+        // 1. Cập nhật các trường snapshot
+        slip.setAllowanceAmount(totalAllowancesIncome);
+        slip.setInsuranceDeduction(totalInsuranceDeduction);
+        slip.setOtherDeductionAmount(otherDeductions);
+
+        // 2. Tính Gross Salary (Tổng thu nhập trước thuế/BH)
         BigDecimal gross = slip.getSalaryAmount()
-                .add(slip.getBonusAmount() != null ? slip.getBonusAmount() : BigDecimal.ZERO)
-                .add(slip.getOtSalaryAmount() != null ? slip.getOtSalaryAmount() : BigDecimal.ZERO)
-                .add(totalIncomeAllowances);
+                .add(Optional.ofNullable(slip.getBonusAmount()).orElse(BigDecimal.ZERO))
+                .add(Optional.ofNullable(slip.getOtSalaryAmount()).orElse(BigDecimal.ZERO))
+                .add(totalAllowancesIncome);
         slip.setGrossSalary(gross);
 
-        // 4. Tính lại Thuế (Dựa trên Gross mới)
-        BigDecimal taxableIncome = gross.subtract(slip.getInsuranceDeduction());
-        if (taxableIncome.compareTo(BigDecimal.ZERO) < 0) taxableIncome = BigDecimal.ZERO;
-        BigDecimal tax = calculateProgressiveTax(taxableIncome);
-        slip.setTaxDeduction(tax);
+        // 3. Tính Thuế TNCN (Sau khi đã trừ BH và Giảm trừ gia cảnh)
+        BigDecimal relief = SELF_RELIEF.add(DEPENDENT_RELIEF_UNIT.multiply(BigDecimal.valueOf(dependents)));
+        BigDecimal taxableIncome = gross.subtract(totalInsuranceDeduction).subtract(relief);
+        slip.setTaxDeduction(calculateProgressiveTax(taxableIncome.max(BigDecimal.ZERO)));
 
-        // 5. Tính lại Net
-        // Net = Gross - (Bảo hiểm + Thuế + Phạt đi muộn + Các khoản trừ khác trong List)
-        // Lưu ý: advancePayment cũ coi như bỏ (hoặc cộng vào nếu chưa migration data cũ)
-        BigDecimal totalDeductions = slip.getInsuranceDeduction()
-                .add(tax)
-                .add(slip.getLatePenaltyAmount())
-                .add(totalDeductionAllowances); // List Deduction đã bao gồm Ứng lương
+        // 4. Tính Net Salary (Thực lĩnh cuối cùng)
+        // Công thức: Gross - Bảo hiểm - Thuế - Phạt đi muộn - Các khoản trừ khác (Ứng lương) - Tạm ứng (nếu có trường riêng)
+        BigDecimal totalDeductions = totalInsuranceDeduction
+                .add(slip.getTaxDeduction())
+                .add(Optional.ofNullable(slip.getLatePenaltyAmount()).orElse(BigDecimal.ZERO))
+                .add(otherDeductions)
+                .add(Optional.ofNullable(slip.getAdvancePayment()).orElse(BigDecimal.ZERO));
 
         slip.setNetSalary(gross.subtract(totalDeductions));
+    }
+
+    private void recalculateTotals(PayslipsSnapshot slip) {
+        SalaryProfile profile = salaryProfileRepo.findByUserId(slip.getUser().getId()).orElse(null);
+        if (profile != null) recalculateTotals(slip, profile);
     }
 
     private String formatMoney(BigDecimal amount) {
