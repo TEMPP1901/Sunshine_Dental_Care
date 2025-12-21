@@ -6,5 +6,4 @@ import sunshine_dental_care.entities.huybro_salary.SalaryAllowance;
 
 @Repository
 public interface SalaryAllowanceRepo extends JpaRepository<SalaryAllowance, Integer> {
-    void deleteAllBySalaryProfileId(Integer salaryProfileId);
 }
