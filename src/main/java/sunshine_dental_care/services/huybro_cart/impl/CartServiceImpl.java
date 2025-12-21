@@ -16,6 +16,7 @@ import sunshine_dental_care.dto.huybro_cart.UpdateCartItemRequestDto;
 import sunshine_dental_care.entities.huybro_products.Product;
 import sunshine_dental_care.entities.huybro_products.ProductImage;
 import sunshine_dental_care.repositories.huybro_products.ProductImageRepository;
+import sunshine_dental_care.repositories.huybro_products.ProductInventoryRepository; // [IMPORT MỚI]
 import sunshine_dental_care.repositories.huybro_products.ProductRepository;
 import sunshine_dental_care.security.CurrentUser;
 import sunshine_dental_care.services.huybro_cart.interfaces.CartService;
@@ -36,29 +37,30 @@ import java.util.Map;
 public class CartServiceImpl implements CartService {
 
     private static final String CART_SESSION_KEY = "SUNSHINE_CART_ITEMS";
-    private static final String CART_INVOICE_CODE_KEY = "SUNSHINE_INVOICE_CODE"; // Key mới để lưu code
+    private static final String CART_INVOICE_CODE_KEY = "SUNSHINE_INVOICE_CODE";
 
     private final ProductRepository productRepository;
     private final ProductImageRepository productImageRepository;
+    private final ProductInventoryRepository productInventoryRepository; // [FIELD MỚI]
     private final FormatCurrencyCart formatCurrencyCart;
     private final UserCartStoreService userCartStore;
 
+    // Constructor Injection
     public CartServiceImpl(ProductRepository productRepository,
                            ProductImageRepository productImageRepository,
+                           ProductInventoryRepository productInventoryRepository, // [INJECT]
                            FormatCurrencyCart formatCurrencyCart,
                            UserCartStoreService userCartStore) {
         this.productRepository = productRepository;
         this.productImageRepository = productImageRepository;
+        this.productInventoryRepository = productInventoryRepository;
         this.formatCurrencyCart = formatCurrencyCart;
         this.userCartStore = userCartStore;
     }
 
-    // --- HELPER MỚI: Lấy hoặc tạo Invoice Code cố định ---
     private String resolveInvoiceCode(HttpSession session) {
         Integer userId = getCurrentUserIdOrNull();
-
         if (userId != null) {
-            // Logic cho User đã đăng nhập
             String code = userCartStore.getInvoiceCode(userId);
             if (code == null) {
                 code = generateInvoiceCode();
@@ -66,7 +68,6 @@ public class CartServiceImpl implements CartService {
             }
             return code;
         } else {
-            // Logic cho Guest (Session)
             String code = (String) session.getAttribute(CART_INVOICE_CODE_KEY);
             if (code == null) {
                 code = generateInvoiceCode();
@@ -79,7 +80,7 @@ public class CartServiceImpl implements CartService {
     @Override
     public CartViewDto getCartDetail(HttpSession session) {
         Map<Integer, CartItemDto> items = getCartMap(session);
-        String invoiceCode = resolveInvoiceCode(session); // Lấy code cố định
+        String invoiceCode = resolveInvoiceCode(session);
         return buildCartView(items, invoiceCode);
     }
 
@@ -91,7 +92,7 @@ public class CartServiceImpl implements CartService {
         Product product = productRepository.findById(request.getProductId())
                 .orElseThrow(() -> new IllegalArgumentException("Product not found"));
 
-        if (product.getIsActive() != null && !product.getIsActive()) {
+        if (Boolean.FALSE.equals(product.getIsActive())) {
             throw new IllegalArgumentException("Product is inactive");
         }
 
@@ -100,9 +101,8 @@ public class CartServiceImpl implements CartService {
                 : 0;
         int newQty = currentQty + request.getQuantity();
 
-        if (product.getUnit() == null || product.getUnit() < newQty) {
-            throw new IllegalArgumentException("Not enough quantity in stock");
-        }
+        // [LOGIC MỚI]: Check tổng tồn kho (Q1 + Q9) thay vì check product.getUnit()
+        checkGlobalStock(product.getId(), newQty);
 
         CartItemDto item = mapProductToCartItem(product, newQty);
         items.put(product.getId(), item);
@@ -131,9 +131,8 @@ public class CartServiceImpl implements CartService {
         Product product = productRepository.findById(request.getProductId())
                 .orElseThrow(() -> new IllegalArgumentException("Product not found"));
 
-        if (product.getUnit() == null || product.getUnit() < request.getQuantity()) {
-            throw new IllegalArgumentException("Not enough quantity in stock");
-        }
+        // [LOGIC MỚI]: Check tổng tồn kho
+        checkGlobalStock(request.getProductId(), request.getQuantity());
 
         CartItemDto item = mapProductToCartItem(product, request.getQuantity());
         items.put(product.getId(), item);
@@ -148,7 +147,6 @@ public class CartServiceImpl implements CartService {
         Map<Integer, CartItemDto> items = getCartMap(session);
         items.remove(productId);
         session.setAttribute(CART_SESSION_KEY, items);
-
         String invoiceCode = resolveInvoiceCode(session);
         return buildCartView(items, invoiceCode);
     }
@@ -161,28 +159,26 @@ public class CartServiceImpl implements CartService {
             userCartStore.clearCart(userId);
         } else {
             session.removeAttribute(CART_SESSION_KEY);
-            session.removeAttribute(CART_INVOICE_CODE_KEY); // Xóa luôn Invoice Code cũ
+            session.removeAttribute(CART_INVOICE_CODE_KEY);
         }
     }
 
     @Override
     public CartViewDto getCartPreviewByCurrency(HttpSession session, String targetCurrency) {
         Map<Integer, CartItemDto> items = getCartMap(session);
-        String invoiceCode = resolveInvoiceCode(session); // Lấy code cố định
+        String invoiceCode = resolveInvoiceCode(session);
 
         String normalizedTarget = (targetCurrency == null || targetCurrency.isBlank())
-                ? "USD"
-                : targetCurrency.toUpperCase();
+                ? "USD" : targetCurrency.toUpperCase();
 
         if (items.isEmpty()) {
             CartTotalsDto totals = new CartTotalsDto();
             totals.setSubTotalBeforeTax(BigDecimal.ZERO);
             totals.setTotalAfterTax(BigDecimal.ZERO);
-
             CartViewDto view = new CartViewDto();
             view.setItems(List.of());
             view.setTotals(totals);
-            view.setInvoiceCode(invoiceCode); // Code cố định
+            view.setInvoiceCode(invoiceCode);
             view.setCurrency(normalizedTarget);
             if ("VND".equals(normalizedTarget)) {
                 view.setExchangeRateToVnd(formatCurrencyCart.getRate("USD", "VND"));
@@ -205,8 +201,7 @@ public class CartServiceImpl implements CartService {
         BigDecimal totalAfterTax = BigDecimal.ZERO;
 
         for (CartItemDto item : convertedItems) {
-            BigDecimal lineBeforeTax = item.getUnitPriceBeforeTax()
-                    .multiply(BigDecimal.valueOf(item.getQuantity()));
+            BigDecimal lineBeforeTax = item.getUnitPriceBeforeTax().multiply(BigDecimal.valueOf(item.getQuantity()));
             subTotal = subTotal.add(lineBeforeTax);
             totalAfterTax = totalAfterTax.add(item.getLineTotalAmount());
         }
@@ -217,26 +212,32 @@ public class CartServiceImpl implements CartService {
         CartViewDto view = new CartViewDto();
         view.setItems(convertedItems);
         view.setTotals(totals);
-        view.setInvoiceCode(invoiceCode); // Code cố định
+        view.setInvoiceCode(invoiceCode);
         view.setCurrency(normalizedTarget);
-
         if ("VND".equals(normalizedTarget)) {
             view.setExchangeRateToVnd(usdToVndRate);
         }
-
         return view;
     }
 
-    // --- Các hàm Private cũ giữ nguyên, chỉ sửa buildCartView ---
+    // --- PRIVATE HELPERS ---
+
+    // [HELPER MỚI]: Check tổng tồn kho (Q1 + Q9)
+    private void checkGlobalStock(Integer productId, int requestedQty) {
+        Integer totalAvailable = productInventoryRepository.sumTotalQuantityByProductId(productId);
+        if (totalAvailable == null) totalAvailable = 0;
+
+        if (totalAvailable < requestedQty) {
+            throw new IllegalArgumentException("Sorry, we only have " + totalAvailable + " items in stock (Total).");
+        }
+    }
 
     @SuppressWarnings("unchecked")
     private Map<Integer, CartItemDto> getCartMap(HttpSession session) {
         Integer userId = getCurrentUserIdOrNull();
-
         if (userId != null) {
             return userCartStore.getOrCreateCart(userId);
         }
-
         Object attr = session.getAttribute(CART_SESSION_KEY);
         if (attr instanceof Map<?, ?> map) {
             return (Map<Integer, CartItemDto>) map;
@@ -277,7 +278,6 @@ public class CartServiceImpl implements CartService {
         dto.setLineTotalAmount(lineTotalAfterTax);
         dto.setCurrency(product.getCurrency());
         dto.setMainImageUrl(resolveMainImageUrl(product.getId()));
-
         return dto;
     }
 
@@ -290,50 +290,36 @@ public class CartServiceImpl implements CartService {
         return "/api/products/images/" + fileName;
     }
 
-    // SỬA: Thêm tham số invoiceCode vào hàm build
     private CartViewDto buildCartView(Map<Integer, CartItemDto> items, String invoiceCode) {
         CartTotalsDto totals = new CartTotalsDto();
-
         BigDecimal subTotal = BigDecimal.ZERO;
         BigDecimal totalAfterTax = BigDecimal.ZERO;
-
         for (CartItemDto item : items.values()) {
-            BigDecimal lineBeforeTax = item.getUnitPriceBeforeTax()
-                    .multiply(BigDecimal.valueOf(item.getQuantity()));
+            BigDecimal lineBeforeTax = item.getUnitPriceBeforeTax().multiply(BigDecimal.valueOf(item.getQuantity()));
             subTotal = subTotal.add(lineBeforeTax);
             totalAfterTax = totalAfterTax.add(item.getLineTotalAmount());
         }
-
         totals.setSubTotalBeforeTax(subTotal);
         totals.setTotalAfterTax(totalAfterTax);
-
         CartViewDto view = new CartViewDto();
         view.setItems(List.copyOf(items.values()));
         view.setTotals(totals);
-        view.setInvoiceCode(invoiceCode); // Dùng code được truyền vào
-
+        view.setInvoiceCode(invoiceCode);
         return view;
     }
 
     private String generateInvoiceCode() {
-        String datetimePart = LocalDateTime.now()
-                .format(DateTimeFormatter.ofPattern("HHmmss-ddMMyyyy"));
+        String datetimePart = LocalDateTime.now().format(DateTimeFormatter.ofPattern("HHmmss-ddMMyyyy"));
         String randomPart = RandomStringUtils.randomAlphanumeric(6).toUpperCase();
         return "INV-" + datetimePart + "-" + randomPart;
     }
 
     private CartItemDto convertItemCurrency(CartItemDto item, String targetCurrency, BigDecimal usdToVndRate) {
         String fromCurrency = item.getCurrency();
-        if (fromCurrency == null || fromCurrency.equalsIgnoreCase(targetCurrency)) {
-            return item;
-        }
-
+        if (fromCurrency == null || fromCurrency.equalsIgnoreCase(targetCurrency)) return item;
         BigDecimal rateToUse;
-        if ("USD".equalsIgnoreCase(fromCurrency) && "VND".equalsIgnoreCase(targetCurrency)) {
-            rateToUse = usdToVndRate;
-        } else {
-            rateToUse = formatCurrencyCart.getRate(fromCurrency, targetCurrency);
-        }
+        if ("USD".equalsIgnoreCase(fromCurrency) && "VND".equalsIgnoreCase(targetCurrency)) rateToUse = usdToVndRate;
+        else rateToUse = formatCurrencyCart.getRate(fromCurrency, targetCurrency);
 
         CartItemDto converted = new CartItemDto();
         converted.setProductId(item.getProductId());
@@ -343,12 +329,10 @@ public class CartServiceImpl implements CartService {
         converted.setMainImageUrl(item.getMainImageUrl());
         converted.setQuantity(item.getQuantity());
         converted.setTaxRatePercent(item.getTaxRatePercent());
-
         converted.setUnitPriceBeforeTax(formatCurrencyCart.convert(item.getUnitPriceBeforeTax(), rateToUse, fromCurrency, targetCurrency));
         converted.setTaxAmount(formatCurrencyCart.convert(item.getTaxAmount(), rateToUse, fromCurrency, targetCurrency));
         converted.setUnitPriceAfterTax(formatCurrencyCart.convert(item.getUnitPriceAfterTax(), rateToUse, fromCurrency, targetCurrency));
         converted.setLineTotalAmount(formatCurrencyCart.convert(item.getLineTotalAmount(), rateToUse, fromCurrency, targetCurrency));
-
         converted.setCurrency(targetCurrency);
         return converted;
     }

@@ -20,7 +20,6 @@ import sunshine_dental_care.dto.hrDTO.AttendanceExplanationResponse;
 import sunshine_dental_care.dto.notificationDTO.NotificationRequest;
 import sunshine_dental_care.entities.Attendance;
 import sunshine_dental_care.entities.Clinic;
-import sunshine_dental_care.entities.DoctorSchedule;
 import sunshine_dental_care.entities.User;
 import sunshine_dental_care.exceptions.hr.AttendanceExceptions.AttendanceNotFoundException;
 import sunshine_dental_care.exceptions.hr.AttendanceExceptions.AttendanceValidationException;
@@ -28,7 +27,6 @@ import sunshine_dental_care.repositories.auth.ClinicRepo;
 import sunshine_dental_care.repositories.auth.UserRepo;
 import sunshine_dental_care.repositories.auth.UserRoleRepo;
 import sunshine_dental_care.repositories.hr.AttendanceRepository;
-import sunshine_dental_care.repositories.hr.DoctorScheduleRepo;
 import sunshine_dental_care.services.impl.notification.NotificationService;
 import sunshine_dental_care.services.interfaces.hr.ShiftService;
 import sunshine_dental_care.utils.WorkHoursConstants;
@@ -45,93 +43,21 @@ public class AttendanceExplanationHelper {
     private final UserRoleRepo userRoleRepo;
     private final ShiftService shiftService;
     private final AttendanceCalculationHelper calculationHelper;
-    private final DoctorScheduleRepo doctorScheduleRepo;
-    private final sunshine_dental_care.services.impl.hr.attend.AttendanceStatusCalculator attendanceStatusCalculator;
 
     // Lấy danh sách các attendance cần giải trình cho user (chỉ tháng hiện tại)
-    // Bao gồm cả từ attendance records và từ schedules
+    // CHỈ LẤY TỪ ATTENDANCE RECORDS (không lấy từ schedules nữa)
     public List<AttendanceExplanationResponse> getAttendanceNeedingExplanation(Integer userId) {
         LocalDate endDate = LocalDate.now();
         // Chỉ lấy từ đầu tháng hiện tại
         LocalDate startDate = endDate.withDayOfMonth(1);
         
-        // 1. Lấy explanations từ attendance records đã có
+        // Lấy explanations từ attendance records đã có
         List<Attendance> attendances = attendanceRepo.findByUserIdAndWorkDateBetweenOrderByWorkDateDesc(
                 userId, startDate, endDate);
-        List<AttendanceExplanationResponse> fromAttendances = attendances.stream()
+        
+        return attendances.stream()
                 .filter(this::needsExplanation)
                 .map(this::mapToExplanationResponse)
-                .collect(Collectors.toList());
-        
-        // 2. Lấy explanations từ schedules (chỉ cho bác sĩ có schedule nhưng chưa check-in)
-        // Kiểm tra xem user có phải là bác sĩ không
-        boolean isDoctor = false;
-        try {
-            List<sunshine_dental_care.entities.UserRole> userRoles = userRoleRepo.findActiveByUserId(userId);
-            if (userRoles != null && !userRoles.isEmpty()) {
-                isDoctor = userRoles.stream()
-                        .anyMatch(ur -> attendanceStatusCalculator.isDoctorRole(ur));
-            }
-        } catch (Exception e) {
-            log.warn("Error checking if user {} is doctor: {}", userId, e.getMessage());
-        }
-        
-        List<AttendanceExplanationResponse> fromSchedules = new java.util.ArrayList<>();
-        if (isDoctor) {
-            // Chỉ lấy từ schedules nếu là bác sĩ
-            List<DoctorSchedule> schedules = doctorScheduleRepo.findByDoctorIdAndDateRange(userId, startDate, endDate);
-            fromSchedules = schedules.stream()
-                .filter(schedule -> {
-                    // Chỉ lấy schedule ACTIVE
-                    if (schedule.getStatus() == null || !"ACTIVE".equals(schedule.getStatus())) {
-                        return false;
-                    }
-                    // Kiểm tra xem đã có attendance record chưa
-                    String shiftType = WorkHoursConstants.determineShiftType(schedule.getStartTime());
-                    java.util.Optional<Attendance> existing = attendanceRepo.findByUserIdAndClinicIdAndWorkDateAndShiftType(
-                            userId, schedule.getClinic().getId(), schedule.getWorkDate(), shiftType);
-                    // Chỉ lấy nếu chưa có attendance record
-                    return existing.isEmpty();
-                })
-                .filter(schedule -> {
-                    // Kiểm tra xem đã qua giờ bắt đầu ca chưa
-                    LocalDate workDate = schedule.getWorkDate();
-                    LocalDate today = LocalDate.now();
-                    LocalTime currentTime = LocalTime.now(WorkHoursConstants.VN_TIMEZONE);
-                    LocalTime startTime = schedule.getStartTime();
-                    
-                    // Nếu là ngày hôm nay và chưa đến giờ bắt đầu ca → không hiển thị
-                    if (workDate.equals(today) && currentTime.isBefore(startTime)) {
-                        return false;
-                    }
-                    // Nếu là ngày trong quá khứ → hiển thị
-                    if (workDate.isBefore(today)) {
-                        return true;
-                    }
-                    // Nếu là ngày hôm nay và đã qua giờ bắt đầu ca → hiển thị
-                    return workDate.equals(today) && !currentTime.isBefore(startTime);
-                })
-                .map(this::mapScheduleToExplanationResponse)
-                .collect(Collectors.toList());
-        }
-        // Nhân viên không có schedule, chỉ lấy từ attendance records
-        
-        // 3. Merge và loại bỏ trùng lặp (theo workDate + shiftType)
-        java.util.Map<String, AttendanceExplanationResponse> merged = new java.util.HashMap<>();
-        fromAttendances.forEach(exp -> {
-            String key = exp.getWorkDate() + "_" + exp.getShiftType();
-            merged.put(key, exp);
-        });
-        fromSchedules.forEach(exp -> {
-            String key = exp.getWorkDate() + "_" + exp.getShiftType();
-            // Chỉ thêm nếu chưa có trong attendance records
-            if (!merged.containsKey(key)) {
-                merged.put(key, exp);
-            }
-        });
-        
-        // 4. Sắp xếp theo ngày giảm dần
-        return merged.values().stream()
                 .sorted((a, b) -> {
                     if (a.getWorkDate() == null && b.getWorkDate() == null) return 0;
                     if (a.getWorkDate() == null) return 1;
@@ -141,13 +67,19 @@ public class AttendanceExplanationHelper {
                 .collect(Collectors.toList());
     }
 
-    // Nộp giải trình: tạo mới hoặc cập nhật bản ghi attendance với note giải trình
+    // Nộp giải trình: CHỈ HỖ TRỢ MISSING_CHECK_OUT (quên check out)
     public Attendance submitExplanation(AttendanceExplanationRequest request, Integer userId) {
+        // Validation: CHỈ CHẤP NHẬN MISSING_CHECK_OUT
+        if (!"MISSING_CHECK_OUT".equalsIgnoreCase(request.getExplanationType())) {
+            throw new AttendanceValidationException(
+                    "Invalid explanation type. Only MISSING_CHECK_OUT is supported.");
+        }
+        
         Attendance attendance;
         if (request.getAttendanceId() == null || request.getAttendanceId() == 0) {
             if (request.getClinicId() == null || request.getWorkDate() == null || request.getShiftType() == null) {
                 throw new AttendanceValidationException(
-                        "Missing required information to create attendance: clinicId, workDate, and shiftType are required when attendanceId is 0");
+                        "Missing required information: clinicId, workDate, and shiftType are required when attendanceId is 0");
             }
             java.util.Optional<Attendance> existing = attendanceRepo
                     .findByUserIdAndClinicIdAndWorkDateAndShiftType(
@@ -156,16 +88,9 @@ public class AttendanceExplanationHelper {
             if (existing.isPresent()) {
                 attendance = existing.get();
             } else {
-                attendance = new Attendance();
-                attendance.setUserId(userId);
-                attendance.setClinicId(request.getClinicId());
-                attendance.setWorkDate(request.getWorkDate());
-                attendance.setShiftType(request.getShiftType());
-                attendance.setAttendanceStatus("ABSENT");
-                attendance = attendanceRepo.save(attendance);
-                log.info(
-                        "Created new attendance record (id={}) for explanation submission: userId={}, clinicId={}, workDate={}, shiftType={}",
-                        attendance.getId(), userId, request.getClinicId(), request.getWorkDate(), request.getShiftType());
+                // MISSING_CHECK_OUT yêu cầu phải có check-in, không nên tạo attendance mới
+                throw new AttendanceValidationException(
+                        "Cannot submit MISSING_CHECK_OUT explanation: no attendance record found. Please check-in first.");
             }
         } else {
             attendance = attendanceRepo.findById(request.getAttendanceId())
@@ -173,10 +98,15 @@ public class AttendanceExplanationHelper {
         }
 
         // Validation: Không cho phép gửi giải trình MISSING_CHECK_OUT nếu đã có checkOutTime
-        if ("MISSING_CHECK_OUT".equalsIgnoreCase(request.getExplanationType()) 
-                && attendance.getCheckOutTime() != null) {
+        if (attendance.getCheckOutTime() != null) {
             throw new AttendanceValidationException(
                     "Cannot submit MISSING_CHECK_OUT explanation: check-out time already exists");
+        }
+        
+        // Validation: Phải có check-in trước khi gửi giải trình MISSING_CHECK_OUT
+        if (attendance.getCheckInTime() == null) {
+            throw new AttendanceValidationException(
+                    "Cannot submit MISSING_CHECK_OUT explanation: no check-in time found");
         }
 
         String note = String.format("[EXPLANATION_REQUEST:%s] %s",
@@ -196,7 +126,8 @@ public class AttendanceExplanationHelper {
             Clinic clinic = clinicRepo.findById(attendance.getClinicId()).orElse(null);
             String clinicName = clinic != null && clinic.getClinicName() != null ? clinic.getClinicName() : "";
 
-            String message = String.format("%s đã gửi giải trình cho ngày %s",
+            // quên check out)
+            String message = String.format("%s đã gửi giải trình quên chấm ra cho ngày %s",
                     employeeName, attendance.getWorkDate());
             if (!clinicName.isEmpty()) {
                 message += String.format(" tại %s", clinicName);
@@ -213,7 +144,7 @@ public class AttendanceExplanationHelper {
                             .userId(hrUserId)
                             .type("EXPLANATION_SUBMITTED")
                             .priority("MEDIUM")
-                            .title("Giải trình mới cần xử lý")
+                            .title("Giải trình quên chấm ra cần xử lý")
                             .message(message)
                             .relatedEntityType("ATTENDANCE")
                             .relatedEntityId(attendance.getId())
@@ -292,6 +223,11 @@ public class AttendanceExplanationHelper {
     // Duyệt giải trình HR: cập nhật trạng thái, tính lại giờ công, gửi thông báo
     private void processApproval(Attendance attendance, String note, String explanationType,
                                 String employeeReason, String hrUserName, String adminNote, LocalTime customTime) {
+        // Đảm bảo explanationType không null (nếu null, mặc định là MISSING_CHECK_OUT)
+        if (explanationType == null || explanationType.trim().isEmpty()) {
+            explanationType = "MISSING_CHECK_OUT";
+        }
+        
         String approvedNote = String.format("[APPROVED] %s", employeeReason);
         if (adminNote != null && !adminNote.trim().isEmpty()) {
             approvedNote += String.format(" | [HR: %s] %s", hrUserName, adminNote);
@@ -307,54 +243,40 @@ public class AttendanceExplanationHelper {
         }
 
         boolean hasRecalculated = false;
-        // Duyệt giải trình đi trễ: cộng lại số phút đi trễ
-        if ("LATE".equalsIgnoreCase(explanationType) && "APPROVED_LATE".equals(newStatus)) {
-            Integer oldLateMinutes = attendance.getLateMinutes();
-            long credit = oldLateMinutes != null ? oldLateMinutes : 0;
-            attendance.setLateMinutes(0);
-            if (attendance.getCheckInTime() != null && attendance.getCheckOutTime() != null) {
-                recalculateWorkHoursWithCredit(attendance, credit);
-                hasRecalculated = true;
-            }
-        }
-        // Duyệt giải trình về sớm: cộng lại số phút về sớm
-        if ("EARLY_CHECKOUT".equalsIgnoreCase(explanationType) && "APPROVED_EARLY_LEAVE".equals(newStatus)) {
-            Integer oldEarlyMinutes = attendance.getEarlyMinutes();
-            long credit = oldEarlyMinutes != null ? oldEarlyMinutes : 0;
-            attendance.setEarlyMinutes(0);
-            if (attendance.getCheckInTime() != null && attendance.getCheckOutTime() != null) {
-                recalculateWorkHoursWithCredit(attendance, credit);
-                hasRecalculated = true;
-            }
-        }
-        // Nếu duyệt thiếu CI-CO, tự động gán giờ checkout nếu cần
+        // CHỈ XỬ LÝ LOẠI GIẢI TRÌNH: MISSING_CHECK_OUT (quên check out)
+        // Quên check-out nghĩa là KHÔNG CÓ giờ check-out (null)
+        // Khi admin duyệt giải trình quên check-out:
+        // - Nếu admin nhập customTime: dùng thời gian đó
+        // - Nếu không có customTime: set về giờ mặc định
+        //   + Nhân viên: 18:00
+        //   + Bác sĩ: tùy ca (ca sáng: 11:00, ca chiều: 18:00)
         if ("MISSING_CHECK_OUT".equalsIgnoreCase(explanationType) && attendance.getCheckInTime() != null) {
-            if (attendance.getCheckOutTime() == null) {
-                LocalDate workDate = attendance.getWorkDate();
-                LocalTime checkOutLocalTime;
-                if (customTime != null) {
-                    checkOutLocalTime = customTime;
+            LocalDate workDate = attendance.getWorkDate();
+            LocalTime checkOutLocalTime;
+            if (customTime != null) {
+                // Admin nhập customTime: dùng thời gian đó
+                checkOutLocalTime = customTime;
+            } else {
+                // Không có customTime: set về giờ mặc định
+                String shiftType = attendance.getShiftType();
+                boolean isDoctor = shiftType != null &&
+                        (WorkHoursConstants.SHIFT_TYPE_MORNING.equals(shiftType) ||
+                         WorkHoursConstants.SHIFT_TYPE_AFTERNOON.equals(shiftType));
+                if (isDoctor && shiftType != null) {
+                    // Bác sĩ: tùy ca (ca sáng: 11:00, ca chiều: 18:00)
+                    java.util.Optional<sunshine_dental_care.entities.DoctorSchedule> matchedSchedule = shiftService.findMatchingSchedule(
+                            attendance.getUserId(), attendance.getClinicId(), attendance.getWorkDate(), shiftType);
+                    sunshine_dental_care.entities.DoctorSchedule schedule = matchedSchedule.orElse(null);
+                    checkOutLocalTime = shiftService.getExpectedEndTime(shiftType, schedule);
                 } else {
-                    // Lấy expectedEndTime theo ca của bác sĩ (MORNING: 11:00, AFTERNOON: 18:00)
-                    String shiftType = attendance.getShiftType();
-                    boolean isDoctor = shiftType != null &&
-                            (WorkHoursConstants.SHIFT_TYPE_MORNING.equals(shiftType) ||
-                             WorkHoursConstants.SHIFT_TYPE_AFTERNOON.equals(shiftType));
-                    if (isDoctor && shiftType != null) {
-                        java.util.Optional<sunshine_dental_care.entities.DoctorSchedule> matchedSchedule = shiftService.findMatchingSchedule(
-                                attendance.getUserId(), attendance.getClinicId(), attendance.getWorkDate(), shiftType);
-                        sunshine_dental_care.entities.DoctorSchedule schedule = matchedSchedule.orElse(null);
-                        checkOutLocalTime = shiftService.getExpectedEndTime(shiftType, schedule);
-                    } else {
-                        // Nhân viên: dùng giờ kết thúc mặc định
-                        checkOutLocalTime = WorkHoursConstants.EMPLOYEE_END_TIME;
-                    }
+                    // Nhân viên: 18:00
+                    checkOutLocalTime = WorkHoursConstants.EMPLOYEE_END_TIME;
                 }
-                Instant checkOutTime = workDate.atTime(checkOutLocalTime)
-                        .atZone(WorkHoursConstants.VN_TIMEZONE)
-                        .toInstant();
-                attendance.setCheckOutTime(checkOutTime);
             }
+            Instant checkOutTime = workDate.atTime(checkOutLocalTime)
+                    .atZone(WorkHoursConstants.VN_TIMEZONE)
+                    .toInstant();
+            attendance.setCheckOutTime(checkOutTime);
             String finalStatus = attendance.getAttendanceStatus();
             if ("APPROVED_LATE".equals(finalStatus)) {
                 Integer oldLateMinutes = attendance.getLateMinutes();
@@ -386,16 +308,17 @@ public class AttendanceExplanationHelper {
             log.info("Sending approval notification to userId={} for attendanceId={}, workDate={}, shiftType={}",
                     attendance.getUserId(), attendance.getId(), attendance.getWorkDate(), attendance.getShiftType());
 
-            NotificationRequest notiRequest = NotificationRequest.builder()
-                    .userId(attendance.getUserId())
-                    .type("EXPLANATION_APPROVED")
-                    .priority("MEDIUM")
-                    .title("Explanation Approved")
-                    .message(String.format("Your explanation for %s has been approved by %s.",
-                            attendance.getWorkDate(), hrUserName))
-                    .relatedEntityType("ATTENDANCE")
-                    .relatedEntityId(attendance.getId())
-                    .build();
+                    // CHỈ CÒN LOẠI: MISSING_CHECK_OUT (quên check out)
+                    NotificationRequest notiRequest = NotificationRequest.builder()
+                            .userId(attendance.getUserId())
+                            .type("EXPLANATION_APPROVED")
+                            .priority("MEDIUM")
+                            .title("Giải trình quên chấm ra đã được duyệt")
+                            .message(String.format("Giải trình quên chấm ra cho ngày %s đã được %s duyệt.",
+                                    attendance.getWorkDate(), hrUserName))
+                            .relatedEntityType("ATTENDANCE")
+                            .relatedEntityId(attendance.getId())
+                            .build();
             notificationService.sendNotification(notiRequest);
         } catch (Exception e) {
             log.error("Failed to send approval notification for attendanceId={}, userId={}: {}",
@@ -532,16 +455,9 @@ public class AttendanceExplanationHelper {
     }
 
     // Xác định trạng thái attendance sau khi HR duyệt giải trình dựa theo loại giải trình
+    // CHỈ CÒN LOẠI: MISSING_CHECK_OUT (quên check out)
     private String determineApprovedStatus(String explanationType, String oldStatus) {
-        if ("LATE".equalsIgnoreCase(explanationType)) {
-            return "APPROVED_LATE";
-        } else if ("EARLY_CHECKOUT".equalsIgnoreCase(explanationType)) {
-            return "APPROVED_EARLY_LEAVE";
-        } else if ("ABSENT".equalsIgnoreCase(explanationType)) {
-            return "APPROVED_ABSENCE";
-        } else if ("MISSING_CHECK_IN".equalsIgnoreCase(explanationType)) {
-            return "APPROVED_PRESENT";
-        } else if ("MISSING_CHECK_OUT".equalsIgnoreCase(explanationType)) {
+        if ("MISSING_CHECK_OUT".equalsIgnoreCase(explanationType)) {
             if ("LATE".equalsIgnoreCase(oldStatus)) {
                 return "APPROVED_LATE";
             } else if ("ON_TIME".equalsIgnoreCase(oldStatus)) {
@@ -570,12 +486,13 @@ public class AttendanceExplanationHelper {
             log.info("Sending rejection notification to userId={} for attendanceId={}, workDate={}, shiftType={}",
                     attendance.getUserId(), attendance.getId(), attendance.getWorkDate(), attendance.getShiftType());
 
+            // CHỈ CÒN LOẠI: MISSING_CHECK_OUT (quên check out)
             NotificationRequest notiRequest = NotificationRequest.builder()
                     .userId(attendance.getUserId())
                     .type("EXPLANATION_REJECTED")
                     .priority("MEDIUM")
-                    .title("Explanation Rejected")
-                    .message(String.format("Your explanation for %s has been rejected by %s.",
+                    .title("Giải trình quên chấm ra bị từ chối")
+                    .message(String.format("Giải trình quên chấm ra cho ngày %s đã bị %s từ chối.",
                             attendance.getWorkDate(), hrUserName))
                     .relatedEntityType("ATTENDANCE")
                     .relatedEntityId(attendance.getId())
@@ -588,57 +505,21 @@ public class AttendanceExplanationHelper {
     }
 
     // Kiểm tra attendance có cần giải trình không
+    // CHỈ BẮT GIẢI TRÌNH CHO TRƯỜNG HỢP: QUÊN CHECK OUT (có check-in nhưng không có check-out)
     public boolean needsExplanation(Attendance att) {
         if (hasPendingExplanation(att)) {
             return false;
         }
 
-        String status = att.getAttendanceStatus();
         boolean hasCheckIn = att.getCheckInTime() != null;
         boolean hasCheckOut = att.getCheckOutTime() != null;
 
         LocalDate today = LocalDate.now();
         boolean isToday = att.getWorkDate() != null && att.getWorkDate().equals(today);
-        LocalTime currentTime = LocalTime.now(WorkHoursConstants.VN_TIMEZONE);
-
-        // Nếu là ngày hôm nay và chưa đến giờ bắt đầu ca thì không hiển thị giải trình
-        // (trừ trường hợp LATE vì đã check-in rồi)
-        if (isToday && !"LATE".equals(status)) {
-            String shiftType = att.getShiftType();
-            LocalTime shiftStartTime = null;
-            
-            // Xác định giờ bắt đầu ca
-            if (WorkHoursConstants.SHIFT_TYPE_MORNING.equals(shiftType)) {
-                // Bác sĩ ca sáng: 8:00
-                shiftStartTime = WorkHoursConstants.MORNING_SHIFT_START;
-            } else if (WorkHoursConstants.SHIFT_TYPE_AFTERNOON.equals(shiftType)) {
-                // Bác sĩ ca chiều: 13:00
-                shiftStartTime = WorkHoursConstants.AFTERNOON_SHIFT_START;
-            } else if (WorkHoursConstants.SHIFT_TYPE_FULL_DAY.equals(shiftType) || shiftType == null) {
-                // Nhân viên làm cả ngày: 8:00
-                shiftStartTime = WorkHoursConstants.EMPLOYEE_START_TIME;
-            }
-            
-            // Nếu chưa đến giờ bắt đầu ca → không hiển thị giải trình
-            // (kể cả khi status = ABSENT, vì chưa đến giờ ca nên chưa thể xác định vắng mặt)
-            if (shiftStartTime != null && currentTime.isBefore(shiftStartTime)) {
-                return false;
-            }
-        }
 
         // Không bắt giải trình nếu là ngày hiện tại và đã checkin nhưng chưa checkout
         if (isToday && hasCheckIn && !hasCheckOut) {
             return false;
-        }
-
-        // Trường hợp đặc biệt: cho phép tạo giải trình MISSING_CHECK_OUT sau khi đã có APPROVED_LATE và đã xử lý (APPROVED/REJECTED)
-        boolean isApprovedLate = "APPROVED_LATE".equals(status);
-        boolean needsMissingCheckOut = hasCheckIn && !hasCheckOut;
-
-        if (isApprovedLate && needsMissingCheckOut) {
-            if (hasProcessedExplanation(att)) {
-                return true;
-            }
         }
 
         // Nếu đã có giải trình đã xử lý --> không cho tạo giải trình mới
@@ -646,10 +527,8 @@ public class AttendanceExplanationHelper {
             return false;
         }
 
-        return "LATE".equals(status) ||
-                "ABSENT".equals(status) ||
-                (hasCheckIn && !hasCheckOut) ||
-                (!hasCheckIn && hasCheckOut);
+        // CHỈ BẮT GIẢI TRÌNH CHO TRƯỜNG HỢP: có check-in nhưng không có check-out (quên check out)
+        return hasCheckIn && !hasCheckOut;
     }
     
     // Kiểm tra attendance đang ở trạng thái chờ giải trình (chưa HR xử lý)
@@ -665,13 +544,21 @@ public class AttendanceExplanationHelper {
     }
 
     // Trích xuất loại giải trình từ note trên attendance
+    // Có thể extract từ [EXPLANATION_REQUEST:...] hoặc từ [APPROVED]/[REJECTED] (nếu đã được xử lý)
     public String extractExplanationType(String note) {
         if (note == null)
             return null;
+        // Tìm trong [EXPLANATION_REQUEST:...] (trường hợp chưa xử lý)
         Pattern pattern = Pattern.compile("\\[EXPLANATION_REQUEST:([^\\]]+)\\]");
         Matcher matcher = pattern.matcher(note);
         if (matcher.find()) {
             return matcher.group(1);
+        }
+        // Nếu đã được duyệt/từ chối, và note có [APPROVED] hoặc [REJECTED]
+        // Vì hiện tại CHỈ CÒN loại MISSING_CHECK_OUT, nên nếu có [APPROVED] hoặc [REJECTED] 
+        // thì mặc định là MISSING_CHECK_OUT
+        if (note.contains("[APPROVED]") || note.contains("[REJECTED]")) {
+            return "MISSING_CHECK_OUT";
         }
         return null;
     }
@@ -680,10 +567,17 @@ public class AttendanceExplanationHelper {
     public String extractEmployeeReason(String note) {
         if (note == null)
             return null;
-        Pattern pattern = Pattern.compile("\\[EXPLANATION_REQUEST:[^\\]]+\\]\\s*(.*?)(?:\\s*\\|\\s*\\[Admin:.*)?$");
+        // Tìm lý do từ [EXPLANATION_REQUEST:...] (trường hợp chưa xử lý)
+        Pattern pattern = Pattern.compile("\\[EXPLANATION_REQUEST:[^\\]]+\\]\\s*(.*?)(?:\\s*\\|\\s*\\[HR:.*)?$");
         Matcher matcher = pattern.matcher(note);
         if (matcher.find()) {
             return matcher.group(1).trim();
+        }
+        // Nếu đã được duyệt/từ chối, tìm lý do từ [APPROVED] hoặc [REJECTED]
+        Pattern approvedPattern = Pattern.compile("\\[(APPROVED|REJECTED)\\]\\s*(.*?)(?:\\s*\\|\\s*\\[HR:.*)?$");
+        Matcher approvedMatcher = approvedPattern.matcher(note);
+        if (approvedMatcher.find()) {
+            return approvedMatcher.group(2).trim();
         }
         return note;
     }
@@ -736,47 +630,11 @@ public class AttendanceExplanationHelper {
     }
 
     // Suy luận loại giải trình dựa vào trạng thái nếu chưa có note giải trình
+    // CHỈ CÒN LOẠI: MISSING_CHECK_OUT (quên check out)
     private void setExplanationTypeFromStatus(AttendanceExplanationResponse response, Attendance attendance) {
-        if ("LATE".equals(attendance.getAttendanceStatus())) {
-            response.setExplanationType("LATE");
-        } else if ("ABSENT".equals(attendance.getAttendanceStatus())) {
-            response.setExplanationType("ABSENT");
-        } else if (attendance.getCheckInTime() != null && attendance.getCheckOutTime() == null) {
+        if (attendance.getCheckInTime() != null && attendance.getCheckOutTime() == null) {
             response.setExplanationType("MISSING_CHECK_OUT");
-        } else if (attendance.getCheckInTime() == null && attendance.getCheckOutTime() != null) {
-            response.setExplanationType("MISSING_CHECK_IN");
         }
     }
 
-    // Mapping schedule sang DTO phản hồi (cho trường hợp có schedule nhưng chưa check-in)
-    private AttendanceExplanationResponse mapScheduleToExplanationResponse(DoctorSchedule schedule) {
-        AttendanceExplanationResponse response = new AttendanceExplanationResponse();
-        response.setAttendanceId(0); // Chưa có attendance record
-        response.setUserId(schedule.getDoctor().getId());
-        response.setClinicId(schedule.getClinic().getId());
-        response.setWorkDate(schedule.getWorkDate());
-        response.setCheckInTime(null); // Chưa check-in
-        response.setCheckOutTime(null); // Chưa check-out
-        response.setAttendanceStatus("ABSENT"); // Mặc định là ABSENT vì chưa check-in
-        response.setNote(null);
-        
-        // Xác định shiftType từ startTime
-        String shiftType = WorkHoursConstants.determineShiftType(schedule.getStartTime());
-        response.setShiftType(shiftType);
-        
-        // Set explanation type là ABSENT
-        response.setExplanationType("ABSENT");
-        response.setExplanationStatus("PENDING");
-        response.setEmployeeReason(null);
-        
-        // Set user và clinic name
-        if (schedule.getDoctor() != null) {
-            response.setUserName(schedule.getDoctor().getFullName());
-        }
-        if (schedule.getClinic() != null) {
-            response.setClinicName(schedule.getClinic().getClinicName());
-        }
-        
-        return response;
-    }
 }

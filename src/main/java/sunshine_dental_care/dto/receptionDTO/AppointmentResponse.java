@@ -39,4 +39,8 @@ public class AppointmentResponse {
     private String clinicName;
 
     private String paymentStatus;
+
+    private String invoiceCode;
+    private java.math.BigDecimal totalAmount;
+    private java.math.BigDecimal subTotal;
 }

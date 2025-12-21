@@ -17,7 +17,7 @@ public class AttendanceExplanationResponse {
     private Instant checkOutTime;
     private String attendanceStatus; // LATE, ABSENT, etc.
 
-    private String explanationType; // LATE, ABSENT, MISSING_CHECK_IN, MISSING_CHECK_OUT
+    private String explanationType; // CHỈ CÒN: MISSING_CHECK_OUT (quên check out)
     private String employeeReason; // employee's explanation reason (from note)
     private String explanationStatus; // PENDING, APPROVED, REJECTED
     private String adminNote; // admin's note (if any)

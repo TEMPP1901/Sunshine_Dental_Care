@@ -768,6 +768,19 @@ public class LeaveRequestServiceImpl implements LeaveRequestService {
                 leaveRequest.getUser().getId(), currentYear, currentMonth);
         response.setLeaveBalance(leaveDaysThisMonth != null ? leaveDaysThisMonth.intValue() : 0);
 
+        // Tính nghỉ phép năm: Tổng 12 ngày, đã dùng, còn lại
+        int annualLeaveTotal = 12; // Tổng số phép năm
+        Integer annualLeaveUsed = leaveRequestRepo.countApprovedLeaveDays(
+                leaveRequest.getUser().getId(), currentYear);
+        if (annualLeaveUsed == null) {
+            annualLeaveUsed = 0;
+        }
+        int annualLeaveRemaining = Math.max(0, annualLeaveTotal - annualLeaveUsed);
+        
+        response.setAnnualLeaveTotal(annualLeaveTotal);
+        response.setAnnualLeaveUsed(annualLeaveUsed);
+        response.setAnnualLeaveRemaining(annualLeaveRemaining);
+
         // Tìm người thay thế tiềm năng (bác sĩ khác cùng ca)
         findPotentialReplacements(leaveRequest, response);
 

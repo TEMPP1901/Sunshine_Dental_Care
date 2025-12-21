@@ -41,10 +41,10 @@ public class Product {
     @Column(name = "unit", nullable = false)
     private Integer unit;
 
-    @Column(name = "defaultRetailPrice", nullable = false, precision = 18, scale = 2)
+    @Column(name = "defaultRetailPrice", precision = 18, scale = 2)
     private BigDecimal defaultRetailPrice;
 
-    @Column(name = "currency", nullable = false, length = 3)
+    @Column(name = "currency", length = 3)
     private String currency;
 
     @Column(name = "isTaxable")

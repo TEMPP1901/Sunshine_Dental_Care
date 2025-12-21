@@ -8,7 +8,7 @@ public class AttendanceExplanationRequest {
     // Attendance ID - có thể là 0 nếu chưa có attendance record (sẽ tự động tạo)
     private Integer attendanceId;
 
-    // Loại giải trình: LATE, ABSENT, MISSING_CHECK_IN, MISSING_CHECK_OUT
+    // Loại giải trình: CHỈ CÓ MISSING_CHECK_OUT (quên check out)
     @NotBlank(message = "Explanation type is required")
     private String explanationType;
 

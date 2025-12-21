@@ -3,6 +3,7 @@ package sunshine_dental_care.repositories.reception;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.List;
+import java.util.Optional;
 
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
@@ -44,7 +45,7 @@ public interface AppointmentRepo extends JpaRepository<Appointment, Integer> {
      */
     @Query("SELECT a FROM Appointment a " +
             "WHERE a.doctor.id = :doctorId " +
-            "AND a.status IN ('CONFIRMED', 'SCHEDULED', 'PENDING') " +
+            "AND a.status IN ('SCHEDULED', 'PENDING', 'IN-PROGRESS') " +
             "AND CAST(a.startDateTime AS date) = :date")
     List<Appointment> findBusySlotsByDoctorAndDate(
             @Param("doctorId") Integer doctorId,
@@ -143,5 +144,71 @@ public interface AppointmentRepo extends JpaRepository<Appointment, Integer> {
     List<Appointment> findByStatusInAndStartDateTimeBetween(
             @Param("start") Instant start,
             @Param("end") Instant end
+    );
+
+    /**
+     * Tìm kiếm hóa đơn (Lịch hẹn đã có invoiceCode)
+     * Hỗ trợ tìm theo: Mã HĐ, Tên BN, SĐT BN, Mã BN
+     */
+    @Query("SELECT a FROM Appointment a " +
+            "WHERE a.clinic.id = :clinicId " +
+            "AND a.invoiceCode IS NOT NULL " +
+            "AND (:keyword IS NULL OR :keyword = '' OR " +
+            "    LOWER(a.invoiceCode) LIKE LOWER(CONCAT('%', :keyword, '%')) OR " +
+            "    LOWER(a.patient.fullName) LIKE LOWER(CONCAT('%', :keyword, '%')) OR " +
+            "    a.patient.phone LIKE CONCAT('%', :keyword, '%') OR " +
+            "    a.patient.patientCode LIKE CONCAT('%', :keyword, '%') " +
+            ") " +
+            "AND (:fromDate IS NULL OR a.startDateTime >= :fromDate) " +
+            "AND (:toDate IS NULL OR a.startDateTime <= :toDate) " +
+            "AND (:paymentStatus IS NULL OR :paymentStatus = '' OR a.paymentStatus = :paymentStatus)")
+    Page<Appointment> searchInvoices(
+            @Param("clinicId") Integer clinicId,
+            @Param("keyword") String keyword,
+            @Param("fromDate") Instant fromDate,
+            @Param("toDate") Instant toDate,
+            @Param("paymentStatus") String paymentStatus,
+            Pageable pageable
+    );
+
+    // Hàm tiện ích: Tìm nhanh theo mã hóa đơn chính xác (để check trùng hoặc scan QR)
+    Optional<Appointment> findByInvoiceCode(String invoiceCode);
+
+    // --- 6. PHẦN ADMIN DASHBOARD: Thống kê appointments ---
+    
+    // Đếm số appointments trong khoảng thời gian
+    @Query("SELECT COUNT(a) FROM Appointment a WHERE a.startDateTime >= :start AND a.startDateTime < :end")
+    long countByStartDateTimeBetween(
+            @Param("start") Instant start,
+            @Param("end") Instant end
+    );
+    
+    // Đếm số appointments trong khoảng thời gian với status cụ thể
+    @Query("SELECT COUNT(a) FROM Appointment a WHERE a.startDateTime >= :start AND a.startDateTime < :end AND a.status = :status")
+    long countByStartDateTimeBetweenAndStatus(
+            @Param("start") Instant start,
+            @Param("end") Instant end,
+            @Param("status") String status
+    );
+    
+    // Lấy danh sách appointments trong khoảng thời gian (để thống kê theo status)
+    @Query("SELECT a FROM Appointment a WHERE a.startDateTime >= :start AND a.startDateTime < :end")
+    List<Appointment> findByStartDateTimeBetween(
+            @Param("start") Instant start,
+            @Param("end") Instant end
+    );
+    
+    // Tính tổng doanh thu từ appointments (tất cả appointments đã thanh toán)
+    @Query("""
+            SELECT COALESCE(SUM(a.totalAmount), 0) FROM Appointment a
+            WHERE a.startDateTime >= :startInstant
+              AND a.startDateTime < :endInstant
+              AND a.paymentStatus = 'PAID'
+              AND a.status = 'COMPLETED'
+              AND a.totalAmount IS NOT NULL
+            """)
+    java.math.BigDecimal sumRevenueFromAppointments(
+            @Param("startInstant") Instant startInstant,
+            @Param("endInstant") Instant endInstant
     );
 }

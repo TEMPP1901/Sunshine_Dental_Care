@@ -26,17 +26,11 @@ public class ProductUpdateDto {
     @Size(min = 10, max = 1000, message = "Product description must be between 10 and 1000 characters")
     private String productDescription;
 
-    @NotNull(message = "Unit must not be null")
-    @Positive(message = "Unit must be greater than 0")
     private Integer unit;
 
-    @NotNull(message = "Price must not be null")
-    @DecimalMin(value = "0.0", inclusive = false, message = "Price must be greater than 0")
     private BigDecimal defaultRetailPrice;
 
-    @NotBlank(message = "Currency must not be empty")
-    @Pattern(regexp = "USD|VND", message = "Currency must be USD or VND")
-    private String currency = "USD";
+    private String currency;
 
     private Boolean isTaxable = true;
 

@@ -57,6 +57,9 @@ public class AppointmentMapper {
         response.setEndDateTime(appointment.getEndDateTime());
         response.setStatus(appointment.getStatus());
         response.setPaymentStatus(appointment.getPaymentStatus());
+        response.setInvoiceCode(appointment.getInvoiceCode());
+        response.setTotalAmount(appointment.getTotalAmount());
+        response.setSubTotal(appointment.getSubTotal());
         response.setChannel(appointment.getChannel());
         response.setNote(appointment.getNote());
 

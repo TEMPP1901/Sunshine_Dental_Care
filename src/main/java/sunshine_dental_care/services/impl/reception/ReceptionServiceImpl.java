@@ -337,6 +337,11 @@ public class ReceptionServiceImpl implements ReceptionService {
         appointment.setStartDateTime(newStart);
         appointment.setEndDateTime(newEnd);
 
+        // đổi status lịch khám sau khi drag and drop từ PENDING -> RESCHEDULED
+        if (request.getStatus() != null && !request.getStatus().isEmpty()) {
+            appointment.setStatus(request.getStatus());
+        }
+
         // Nếu đổi bác sĩ thì reset room
         if (originalDoctor == null || !targetDoctor.getId().equals(originalDoctor.getId())) {
             appointment.setRoom(null);
@@ -471,6 +476,10 @@ public class ReceptionServiceImpl implements ReceptionService {
         // Cập nhật trạng thái nếu có
         if (newStatus != null && !newStatus.isEmpty()) {
             appointment.setStatus(newStatus);
+            // Logic giải phóng phòng thành trống nếu lịch completed hoặc hủy
+            if ("COMPLETED".equalsIgnoreCase(newStatus) || "CANCELLED".equalsIgnoreCase(newStatus)) {
+                appointment.setRoom(null);
+            }
         }
 
         // Cập nhật ghi chú nếu có
@@ -482,7 +491,7 @@ public class ReceptionServiceImpl implements ReceptionService {
 
         // Gửi thông báo cho patient khi reception xác nhận hoặc hủy lịch
         if (newStatus != null && !newStatus.equals(oldStatus)) {
-            if ("CONFIRMED".equalsIgnoreCase(newStatus) || "CANCELLED".equalsIgnoreCase(newStatus)) {
+            if ("SCHEDULED".equalsIgnoreCase(newStatus) || "CANCELLED".equalsIgnoreCase(newStatus)) {
                 sendAppointmentStatusNotification(savedAppointment, newStatus);
             }
         }
@@ -571,12 +580,12 @@ public class ReceptionServiceImpl implements ReceptionService {
             String notificationType;
             String priority = "MEDIUM";
 
-            if ("CONFIRMED".equalsIgnoreCase(status)) {
+            if ("SCHEDULED".equalsIgnoreCase(status)) {
                 title = "Lịch hẹn đã được xác nhận";
                 message = String.format(
                     "Lịch hẹn của bạn tại %s vào lúc %s đã được xác nhận. Vui lòng đến đúng giờ.",
                     clinicName, timeStr);
-                notificationType = "APPOINTMENT_CONFIRMED";
+                notificationType = "APPOINTMENT_SCHEDULED";
             } else if ("CANCELLED".equalsIgnoreCase(status)) {
                 title = "Lịch hẹn đã bị hủy";
                 message = String.format(
@@ -616,7 +625,19 @@ public class ReceptionServiceImpl implements ReceptionService {
         // 1. Lấy thông tin lịch hẹn
         Appointment appt = appointmentRepo.findById(appointmentId)
                 .orElseThrow(() -> new ResourceNotFoundException("Appointment not found"));
+        // VỚI LỊCH HẸN ĐÃ HOÀN THÀNH, HỦY HOẶC ĐANG TIẾN HÀNH THÌ KHÔNG ĐƯỢC XẾP PHÒNG
+        String status = appt.getStatus();
+        if ("COMPLETED".equalsIgnoreCase(status) ||
+                "CANCELLED".equalsIgnoreCase(status) ||
+                "IN_PROGRESS".equalsIgnoreCase(status)) {
+            throw new ValidationException("Lỗi: Không thể xếp phòng cho lịch hẹn đã " + status);
+        }
 
+        // LOGIC RESET: Nếu roomId là null, nghĩa là muốn reset phòng
+        if (roomId == null) {
+            appt.setRoom(null);
+            return appointmentMapper.mapToAppointmentResponse(appointmentRepo.save(appt));
+        }
         // 2. Lấy thông tin phòng
         Room room = roomRepo.findById(roomId)
                 .orElseThrow(() -> new ResourceNotFoundException("Room not found"));
@@ -705,10 +726,22 @@ public class ReceptionServiceImpl implements ReceptionService {
         java.math.BigDecimal totalPaid = isDepositPaid ? bookingFee : java.math.BigDecimal.ZERO;
         java.math.BigDecimal remaining = grandTotal.subtract(totalPaid);
 
+        // === [LOGIC MỚI] XỬ LÝ MÃ HÓA ĐƠN ===
+        String displayInvoiceCode;
+        if (appt.getInvoiceCode() != null) {
+            // Ưu tiên lấy mã thật từ DB (nếu đã thanh toán)
+            displayInvoiceCode = appt.getInvoiceCode();
+        } else {
+            // Nếu chưa có, hiển thị mã tạm (Draft)
+            displayInvoiceCode = "INV-" + String.format("%06d", appt.getId());
+        }
+        // ====================================
+
         return BillInvoiceDTO.builder()
                 .clinicName(appt.getClinic().getClinicName())
                 .clinicAddress(appt.getClinic().getAddress())
-                .invoiceId("INV-" + String.format("%06d", appt.getId()))
+                // .invoiceId("INV-" + String.format("%06d", appt.getId())) <-- CODE CŨ
+                .invoiceId(displayInvoiceCode) // <-- CODE MỚI
                 .createdDate(java.time.LocalDateTime.now())
                 .patientName(appt.getPatient().getFullName())
                 .patientPhone(appt.getPatient().getPhone())
@@ -753,10 +786,23 @@ public class ReceptionServiceImpl implements ReceptionService {
         appt.setDiscountAmount(discountAmount);
         appt.setTotalAmount(finalTotal);
 
+        // === [NEW] LOGIC SINH MÃ HÓA ĐƠN & LƯU DB ===
+        // Chỉ sinh mã nếu chưa có (để tránh bị đổi mã khi bấm xác nhận nhiều lần)
+        if (appt.getInvoiceCode() == null) {
+            // Format: INV + Năm + ID (Ví dụ: INV-2025-000502)
+            // Bạn có thể tùy chỉnh format này theo ý muốn
+            String code = "INV-" + java.time.Year.now().getValue() + "-" + String.format("%06d", appt.getId());
+            appt.setInvoiceCode(code);
+        }
+        // ============================================
+
         appt.setPaymentStatus("PAID");
         appt.setStatus("COMPLETED");
 
-        appointmentRepo.save(appt);
+        // Sau khi thanh toán xong sẽ cập nhật lại room thành trống
+        appt.setRoom(null);
+
+        appointmentRepo.save(appt); // Lúc này invoiceCode sẽ được lưu cứng vào DB
 
         // 3. TÍCH ĐIỂM & CẬP NHẬT RANK CHO BỆNH NHÂN
         Patient patient = appt.getPatient();
@@ -783,19 +829,20 @@ public class ReceptionServiceImpl implements ReceptionService {
 
             String msg = "Xác nhận thanh toán lịch hẹn #" + appointmentId
                     + ". Tổng tiền: " + finalTotal
-                    + ". Rank mới: " + newRank;
+                    + ". Rank mới: " + newRank
+                    + ". Mã HĐ: " + appt.getInvoiceCode(); // Ghi thêm mã HĐ vào log cho xịn
             paymentLog.setMessage(msg);
 
             // 2. CÁC TRƯỜNG BỔ SUNG
             paymentLog.setAction("CONFIRM_PAYMENT");
             paymentLog.setRecordId(appointmentId);
             paymentLog.setTableName("Appointments");
-            paymentLog.setAfterData("Paid: " + finalTotal + ", Rank: " + newRank);
+            paymentLog.setAfterData("Paid: " + finalTotal + ", Rank: " + newRank + ", Invoice: " + appt.getInvoiceCode());
 
             // Set user từ CurrentUser (bắt buộc vì userId không được null)
             User user = userRepo.getReferenceById(currentUser.userId());
             paymentLog.setUser(user);
-            
+
             // Set clinic từ appointment
             if (appt.getClinic() != null) {
                 paymentLog.setClinic(appt.getClinic());
@@ -910,5 +957,41 @@ public class ReceptionServiceImpl implements ReceptionService {
                 // 3. Sắp xếp: Mới nhất lên đầu
                 .sorted(java.util.Comparator.comparing(PatientHistoryDTO::getVisitDate).reversed())
                 .collect(Collectors.toList());
+    }
+
+
+    @Override
+    @Transactional(readOnly = true)
+    public Page<AppointmentResponse> getInvoiceList(CurrentUser currentUser, String keyword, LocalDate fromDate, LocalDate toDate, String paymentStatus, int page, int size) {
+        // 1. Lấy Clinic ID của Lễ tân
+        Integer clinicId = getReceptionistClinicId(currentUser);
+
+        // 2. Tạo PageRequest (Sắp xếp mới nhất lên đầu)
+        PageRequest pageRequest = PageRequest.of(page, size, Sort.by("startDateTime").descending());
+
+        // 3. Convert LocalDate -> Instant (Đầu ngày / Cuối ngày)
+        // Lưu ý: DB lưu UTC hoặc Local Time, ở đây giả sử lưu Instant chuẩn UTC
+        java.time.ZoneId zoneId = java.time.ZoneId.of("Asia/Ho_Chi_Minh");
+
+        Instant from = (fromDate != null)
+                ? fromDate.atStartOfDay(zoneId).toInstant()
+                : null;
+
+        Instant to = (toDate != null)
+                ? toDate.plusDays(1).atStartOfDay(zoneId).toInstant() // +1 ngày để lấy hết 23:59:59 của ngày toDate
+                : null;
+
+        // 4. Gọi Repository (Hàm searchInvoices mới thêm)
+        Page<Appointment> invoicePage = appointmentRepo.searchInvoices(
+                clinicId,
+                keyword,
+                from,
+                to,
+                paymentStatus,
+                pageRequest
+        );
+
+        // 5. Map sang DTO
+        return invoicePage.map(appointmentMapper::mapToAppointmentResponse);
     }
 }

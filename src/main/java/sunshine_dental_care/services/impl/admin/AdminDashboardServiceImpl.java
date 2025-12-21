@@ -19,13 +19,14 @@ import lombok.extern.slf4j.Slf4j;
 import sunshine_dental_care.dto.adminDTO.DailyRevenueDto;
 import sunshine_dental_care.dto.adminDTO.DashboardStatisticsDto;
 import sunshine_dental_care.dto.adminDTO.TopDoctorPerformanceDto;
+import sunshine_dental_care.entities.Appointment;
 import sunshine_dental_care.repositories.admin.AdminInvoiceStatsRepository;
 import sunshine_dental_care.repositories.admin.AdminPatientStatsRepository;
 import sunshine_dental_care.repositories.auth.ClinicRepo;
 import sunshine_dental_care.repositories.auth.UserRepo;
 import sunshine_dental_care.repositories.hr.LeaveRequestRepo;
+import sunshine_dental_care.repositories.reception.AppointmentRepo;
 import sunshine_dental_care.services.interfaces.admin.AdminDashboardService;
-import sunshine_dental_care.services.interfaces.hr.AttendanceService;
 import sunshine_dental_care.utils.WorkHoursConstants;
 
 @Service
@@ -39,10 +40,10 @@ public class AdminDashboardServiceImpl implements AdminDashboardService {
         private final UserRepo userRepo;
         private final ClinicRepo clinicRepo;
         private final LeaveRequestRepo leaveRequestRepo;
-        private final AttendanceService attendanceService;
         private final AdminInvoiceStatsRepository adminInvoiceStatsRepository;
         private final AdminPatientStatsRepository adminPatientStatsRepository;
         private final sunshine_dental_care.repositories.hr.AttendanceRepository attendanceRepo;
+        private final AppointmentRepo appointmentRepo;
 
         @Override
         @Transactional(readOnly = true)
@@ -78,17 +79,49 @@ public class AdminDashboardServiceImpl implements AdminDashboardService {
                         Double monthOverMonthGrowth = 0.0;
                         List<DailyRevenueDto> last7DaysRevenue = new ArrayList<>();
                         try {
-                                // Tính doanh số (tất cả hóa đơn)
-                                todayTotalSales = adminInvoiceStatsRepository.sumTotalSalesBetween(today, today);
-                                weekTotalSales = adminInvoiceStatsRepository.sumTotalSalesBetween(weekStart, today);
-                                monthTotalSales = adminInvoiceStatsRepository.sumTotalSalesBetween(monthStart, today);
-                                prevMonthTotalSales = adminInvoiceStatsRepository.sumTotalSalesBetween(prevMonthStart, prevMonthEnd);
+                                // Tính doanh số từ ProductInvoice (tất cả hóa đơn)
+                                BigDecimal todayProductSales = adminInvoiceStatsRepository.sumTotalSalesBetween(today, today);
+                                BigDecimal weekProductSales = adminInvoiceStatsRepository.sumTotalSalesBetween(weekStart, today);
+                                BigDecimal monthProductSales = adminInvoiceStatsRepository.sumTotalSalesBetween(monthStart, today);
+                                BigDecimal prevMonthProductSales = adminInvoiceStatsRepository.sumTotalSalesBetween(prevMonthStart, prevMonthEnd);
                                 
-                                // Tính tiền thực thu (chỉ đã thanh toán)
-                                todayRevenue = adminInvoiceStatsRepository.sumRevenueBetween(today, today);
-                                weekRevenue = adminInvoiceStatsRepository.sumRevenueBetween(weekStart, today);
-                                monthRevenue = adminInvoiceStatsRepository.sumRevenueBetween(monthStart, today);
-                                prevMonthRevenue = adminInvoiceStatsRepository.sumRevenueBetween(prevMonthStart, prevMonthEnd);
+                                // Tính doanh số từ Appointments (dịch vụ khám) - chuyển LocalDate sang Instant
+                                Instant todayStartInstant = today.atStartOfDay(VN_TIMEZONE).toInstant();
+                                Instant todayEndInstant = today.plusDays(1).atStartOfDay(VN_TIMEZONE).toInstant();
+                                Instant weekStartInstant = weekStart.atStartOfDay(VN_TIMEZONE).toInstant();
+                                Instant monthStartInstant = monthStart.atStartOfDay(VN_TIMEZONE).toInstant();
+                                Instant todayInstant = LocalDate.now(VN_TIMEZONE).atStartOfDay(VN_TIMEZONE).plusDays(1).toInstant();
+                                Instant prevMonthStartInstant = prevMonthStart.atStartOfDay(VN_TIMEZONE).toInstant();
+                                Instant prevMonthEndInstant = prevMonthEnd.plusDays(1).atStartOfDay(VN_TIMEZONE).toInstant();
+                                
+                                BigDecimal todayAppointmentSales = appointmentRepo.sumRevenueFromAppointments(todayStartInstant, todayEndInstant);
+                                BigDecimal weekAppointmentSales = appointmentRepo.sumRevenueFromAppointments(weekStartInstant, todayInstant);
+                                BigDecimal monthAppointmentSales = appointmentRepo.sumRevenueFromAppointments(monthStartInstant, todayInstant);
+                                BigDecimal prevMonthAppointmentSales = appointmentRepo.sumRevenueFromAppointments(prevMonthStartInstant, prevMonthEndInstant);
+                                
+                                // Tổng doanh số = ProductInvoice + Appointments
+                                todayTotalSales = todayProductSales.add(todayAppointmentSales);
+                                weekTotalSales = weekProductSales.add(weekAppointmentSales);
+                                monthTotalSales = monthProductSales.add(monthAppointmentSales);
+                                prevMonthTotalSales = prevMonthProductSales.add(prevMonthAppointmentSales);
+                                
+                                // Tính tiền thực thu từ ProductInvoice (chỉ đã thanh toán)
+                                BigDecimal todayProductRevenue = adminInvoiceStatsRepository.sumRevenueBetween(today, today);
+                                BigDecimal weekProductRevenue = adminInvoiceStatsRepository.sumRevenueBetween(weekStart, today);
+                                BigDecimal monthProductRevenue = adminInvoiceStatsRepository.sumRevenueBetween(monthStart, today);
+                                BigDecimal prevMonthProductRevenue = adminInvoiceStatsRepository.sumRevenueBetween(prevMonthStart, prevMonthEnd);
+                                
+                                // Tính tiền thực thu từ Appointments (đã thanh toán) - dùng cùng Instant như trên
+                                BigDecimal todayAppointmentRevenue = appointmentRepo.sumRevenueFromAppointments(todayStartInstant, todayEndInstant);
+                                BigDecimal weekAppointmentRevenue = appointmentRepo.sumRevenueFromAppointments(weekStartInstant, todayInstant);
+                                BigDecimal monthAppointmentRevenue = appointmentRepo.sumRevenueFromAppointments(monthStartInstant, todayInstant);
+                                BigDecimal prevMonthAppointmentRevenue = appointmentRepo.sumRevenueFromAppointments(prevMonthStartInstant, prevMonthEndInstant);
+                                
+                                // Tổng thực thu = ProductInvoice + Appointments
+                                todayRevenue = todayProductRevenue.add(todayAppointmentRevenue);
+                                weekRevenue = weekProductRevenue.add(weekAppointmentRevenue);
+                                monthRevenue = monthProductRevenue.add(monthAppointmentRevenue);
+                                prevMonthRevenue = prevMonthProductRevenue.add(prevMonthAppointmentRevenue);
                                 
                                 totalExpenses = calculateExpenses(monthStart, today);
                                 // Module chi phí chưa được implement, expensesSupported = false
@@ -116,12 +149,78 @@ public class AdminDashboardServiceImpl implements AdminDashboardService {
                                 // Các giá trị sẽ giữ nguyên = 0 (đã khởi tạo ở trên)
                         }
 
-                        // Thống kê lịch hẹn - Đã xóa khỏi admin
+                        // Thống kê lịch hẹn
                         Long todayAppointments = 0L;
                         Long weekAppointments = 0L;
                         Long monthAppointments = 0L;
                         Long todayCancelledAppointments = 0L;
                         Map<String, Long> appointmentsByStatus = new HashMap<>();
+                        try {
+                                // Đếm appointments hôm nay (theo startDateTime)
+                                todayAppointments = appointmentRepo.countByStartDateTimeBetween(dayStart, dayEnd);
+                                
+                                // Đếm appointments trong tuần
+                                weekAppointments = appointmentRepo.countByStartDateTimeBetween(weekRangeStart, weekEnd);
+                                
+                                // Đếm appointments trong tháng
+                                monthAppointments = appointmentRepo.countByStartDateTimeBetween(monthRangeStart, monthRangeEnd);
+                                
+                                // Đếm appointments đã hủy hôm nay
+                                todayCancelledAppointments = appointmentRepo.countByStartDateTimeBetweenAndStatus(
+                                        dayStart, dayEnd, "CANCELLED");
+                                
+                                // Thống kê appointments theo status
+                                List<Appointment> allAppointments = appointmentRepo.findByStartDateTimeBetween(monthRangeStart, monthRangeEnd);
+                                appointmentsByStatus = allAppointments.stream()
+                                        .collect(Collectors.groupingBy(
+                                                Appointment::getStatus,
+                                                Collectors.counting()
+                                        ));
+                        } catch (Exception e) {
+                                log.error("Lỗi khi tính thống kê lịch hẹn. Các giá trị appointments có thể không chính xác. " +
+                                        "Error: {}", e.getMessage(), e);
+                        }
+
+                        // Tính toán sourceBreakdown: đếm số lượng unique patients theo channel trong tháng
+                        Map<String, Long> sourceBreakdown = new HashMap<>();
+                        try {
+                                // Query lại appointments trong tháng để tính sourceBreakdown
+                                List<Appointment> monthAppointmentsForSource = appointmentRepo.findByStartDateTimeBetween(monthRangeStart, monthRangeEnd);
+                                
+                                sourceBreakdown = monthAppointmentsForSource.stream()
+                                                .filter(a -> a.getPatient() != null) // Đảm bảo có patient
+                                                .collect(Collectors.groupingBy(
+                                                                a -> {
+                                                                        // Normalize channel: trim, uppercase, và xử lý null/empty
+                                                                        String channel = a.getChannel();
+                                                                        if (channel == null || channel.trim().isEmpty()) {
+                                                                                return "WALK_IN"; // Default cho appointments cũ không có channel
+                                                                        }
+                                                                        return channel.trim().toUpperCase();
+                                                                },
+                                                                Collectors.mapping(
+                                                                                a -> a.getPatient().getId(),
+                                                                                Collectors.collectingAndThen(
+                                                                                                Collectors.toSet(),
+                                                                                                set -> (long) set.size()
+                                                                                )
+                                                                )
+                                                ));
+                                
+                                // Đảm bảo các channel chính có trong map (nếu không có thì = 0)
+                                String[] mainChannels = {"WEB_BOOKING", "WALK_IN", "PHONE"};
+                                for (String channel : mainChannels) {
+                                        sourceBreakdown.putIfAbsent(channel, 0L);
+                                }
+                        } catch (Exception e) {
+                                log.error("❌ Lỗi khi tính thống kê nguồn khách. sourceBreakdown có thể trống. " +
+                                                "Error: {}", e.getMessage(), e);
+                                // Đảm bảo vẫn có các channel chính ngay cả khi có lỗi
+                                String[] mainChannels = {"WEB_BOOKING", "WALK_IN", "PHONE"};
+                                for (String channel : mainChannels) {
+                                        sourceBreakdown.putIfAbsent(channel, 0L);
+                                }
+                        }
 
                         // Thống kê khách hàng
                         Long totalPatients = 0L;
@@ -132,7 +231,7 @@ public class AdminDashboardServiceImpl implements AdminDashboardService {
                                 totalPatients = adminPatientStatsRepository.countAllPatients();
                                 todayNewPatients = adminPatientStatsRepository.countCreatedBetween(dayStart, dayEnd);
                                 weekNewPatients = adminPatientStatsRepository.countCreatedBetween(weekRangeStart, weekEnd);
-                                monthNewPatients = adminPatientStatsRepository.countCreatedBetween(monthRangeStart, weekEnd);
+                                monthNewPatients = adminPatientStatsRepository.countCreatedBetween(monthRangeStart, monthRangeEnd);
                         } catch (Exception e) {
                                 log.error("Lỗi nghiêm trọng khi đếm bệnh nhân. Các giá trị patients có thể không chính xác. " +
                                         "Error: {}", e.getMessage(), e);
@@ -169,11 +268,47 @@ public class AdminDashboardServiceImpl implements AdminDashboardService {
                                         "Error: {}", e.getMessage(), e);
                         }
 
-                        // Tỷ lệ quay lại khám/thống kê nguồn khách của bệnh nhân trong tháng - Đã xóa khỏi admin
+                        // Tỷ lệ quay lại khám/thống kê nguồn khách của bệnh nhân trong tháng
                         double retentionRate = 0.0;
                         long returningPatients = 0L;
                         long patientsThisMonth = 0L;
-                        Map<String, Long> sourceBreakdown = new HashMap<>();
+                        try {
+                                // Lấy tất cả appointments trong tháng hiện tại
+                                List<Appointment> monthAppointmentsForRetention = appointmentRepo.findByStartDateTimeBetween(monthRangeStart, monthRangeEnd);
+                                
+                                // Tính số unique patients trong tháng này
+                                java.util.Set<Integer> patientsInThisMonth = monthAppointmentsForRetention.stream()
+                                                .filter(a -> a.getPatient() != null)
+                                                .map(a -> a.getPatient().getId())
+                                                .collect(Collectors.toSet());
+                                patientsThisMonth = patientsInThisMonth.size();
+                                
+                                if (patientsThisMonth > 0) {
+                                        // Tính số patients đã từng khám TRƯỚC tháng này
+                                        // Lấy tất cả appointments trước tháng này
+                                        Instant beforeMonthStart = toStartOfDay(monthStart.minusDays(1));
+                                        List<Appointment> previousAppointments = appointmentRepo.findByStartDateTimeBetween(
+                                                        Instant.ofEpochMilli(0), // Từ đầu
+                                                        beforeMonthStart
+                                        );
+                                        
+                                        java.util.Set<Integer> patientsBeforeThisMonth = previousAppointments.stream()
+                                                        .filter(a -> a.getPatient() != null)
+                                                        .map(a -> a.getPatient().getId())
+                                                        .collect(Collectors.toSet());
+                                        
+                                        // Returning patients = patients có trong tháng này VÀ đã từng khám trước đó
+                                        returningPatients = patientsInThisMonth.stream()
+                                                        .filter(patientsBeforeThisMonth::contains)
+                                                        .count();
+                                        
+                                        // Tính retention rate
+                                        retentionRate = (returningPatients * 100.0) / patientsThisMonth;
+                                }
+                        } catch (Exception e) {
+                                log.error("❌ Lỗi khi tính retention rate. Các giá trị retention có thể không chính xác. " +
+                                                "Error: {}", e.getMessage(), e);
+                        }
 
                         // Top 5 bác sĩ có doanh thu cao nhất tháng này
                         List<TopDoctorPerformanceDto> topDoctors = new ArrayList<>();
@@ -302,7 +437,6 @@ public class AdminDashboardServiceImpl implements AdminDashboardService {
         }
 
         // Hàm tính tổng chi phí (hiện tại chưa có module chi phí)
-        // TODO: Implement khi có module quản lý chi phí
         private BigDecimal calculateExpenses(LocalDate startDate, LocalDate endDate) {
                 // Log warning rõ ràng thay vì return 0 im lặng
                 log.warn("Module quản lý chi phí chưa được triển khai. Expenses sẽ trả về 0. " +
