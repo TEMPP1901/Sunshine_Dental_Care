@@ -23,6 +23,7 @@ import sunshine_dental_care.repositories.auth.RoleRepo;
 import sunshine_dental_care.repositories.hr.DepartmentRepo;
 import sunshine_dental_care.repositories.hr.RoomRepo;
 import sunshine_dental_care.services.interfaces.hr.HRManagementService;
+import sunshine_dental_care.services.interfaces.system.SystemConfigService;
 
 @Service
 @RequiredArgsConstructor
@@ -33,10 +34,11 @@ public class HRManagementServiceImpl implements HRManagementService {
     private final ClinicRepo clinicRepo;
     private final RoleRepo roleRepo;
     private final RoomRepo roomRepo;
+    private final SystemConfigService systemConfigService;
+    private final sunshine_dental_care.repositories.system.HolidayRepo holidayRepo;
 
     @Override
     @Transactional(readOnly = true)
-    // Lấy danh sách tất cả phòng ban theo thứ tự tên
     public List<DepartmentResponse> getAllDepartments() {
         log.info("Get all departments (ordered by name)");
         try {
@@ -59,18 +61,20 @@ public class HRManagementServiceImpl implements HRManagementService {
 
     @Override
     @Transactional(readOnly = true)
-    // Lấy danh sách tất cả clinic đang active
     public List<ClinicResponse> getAllClinics() {
         log.info("Get all active clinics");
         try {
+            // Tự động restore trạng thái phòng khám nếu holiday đã hết
+            systemConfigService.restoreClinicsAfterHolidayEnded();
             List<Clinic> clinics = clinicRepo.findAll();
             if (clinics == null || clinics.isEmpty()) {
                 log.warn("No clinics found");
                 return List.of();
             }
+            // chỉ lấy clinic đang active
             return clinics.stream()
                 .filter(c -> c.getIsActive() != null && c.getIsActive())
-                .map(c -> new ClinicResponse(c.getId(), c.getClinicName()))
+                .map(c -> new ClinicResponse(c.getId(), c.getClinicName(), c.getIsActive()))
                 .collect(Collectors.toList());
         } catch (DataAccessException ex) {
             log.error("Error while fetching clinics: {}", ex.getMessage(), ex);
@@ -83,7 +87,6 @@ public class HRManagementServiceImpl implements HRManagementService {
 
     @Override
     @Transactional(readOnly = true)
-    // Lấy tất cả role (trừ ADMIN và USER)
     public List<RoleResponse> getAllRoles() {
         log.info("Get all roles (excluding ADMIN and USER)");
         try {
@@ -92,6 +95,7 @@ public class HRManagementServiceImpl implements HRManagementService {
                 log.warn("No roles found");
                 return List.of();
             }
+            // loại trừ ADMIN và USER
             return roles.stream()
                 .filter(r -> {
                     if (r.getRoleName() == null) {
@@ -113,7 +117,6 @@ public class HRManagementServiceImpl implements HRManagementService {
 
     @Override
     @Transactional(readOnly = true)
-    // Lấy tất cả phòng khám đang active, trả cả tên và thông tin clinic liên kết với phòng 
     public List<RoomResponse> getAllRooms() {
         log.info("Get all active rooms, include related clinic info");
         try {
@@ -122,6 +125,7 @@ public class HRManagementServiceImpl implements HRManagementService {
                 log.warn("No active rooms found");
                 return List.of();
             }
+            // trả về phòng và thông tin phòng khám liên kết
             return rooms.stream()
                 .map(r -> {
                     Integer clinicId = null;
@@ -144,6 +148,22 @@ public class HRManagementServiceImpl implements HRManagementService {
         } catch (Exception ex) {
             log.error("Unexpected error while fetching rooms: {}", ex.getMessage(), ex);
             throw new DataLoadException("Failed to fetch rooms: " + ex.getMessage(), ex);
+        }
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<sunshine_dental_care.entities.Holiday> getAllHolidays() {
+        log.info("Get all holidays for HR");
+        try {
+            // HR chỉ được xem holiday, không cho sửa/xóa ở đây
+            return holidayRepo.findAll();
+        } catch (DataAccessException ex) {
+            log.error("Error while fetching holidays: {}", ex.getMessage(), ex);
+            throw new DataLoadException("holidays", ex);
+        } catch (Exception ex) {
+            log.error("Unexpected error while fetching holidays: {}", ex.getMessage(), ex);
+            throw new DataLoadException("Failed to fetch holidays: " + ex.getMessage(), ex);
         }
     }
 }

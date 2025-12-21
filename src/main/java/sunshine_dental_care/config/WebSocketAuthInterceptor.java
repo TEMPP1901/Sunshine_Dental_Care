@@ -14,6 +14,7 @@ import org.springframework.security.authentication.UsernamePasswordAuthenticatio
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.stereotype.Component;
 
+import io.jsonwebtoken.ExpiredJwtException;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import sunshine_dental_care.security.CurrentUser;
@@ -27,18 +28,19 @@ public class WebSocketAuthInterceptor implements ChannelInterceptor {
 
     private final JwtService jwtService;
 
-    // Xác thực người dùng khi kết nối WebSocket
+    // Hàm xác thực người dùng khi kết nối websocket
     @Override
     public Message<?> preSend(Message<?> message, MessageChannel channel) {
         StompHeaderAccessor accessor = MessageHeaderAccessor.getAccessor(message, StompHeaderAccessor.class);
-        
+
+        // Kiểm tra CONNECT frame từ client
         if (accessor != null && StompCommand.CONNECT.equals(accessor.getCommand())) {
             log.info("[WebSocket] Received CONNECT command");
-            
-            // Lấy Authorization header từ frame CONNECT (STOMP)
+
             String authHeader = accessor.getFirstNativeHeader("Authorization");
             log.debug("[WebSocket] Authorization header present: {}", authHeader != null);
-            
+
+            // Kiểm tra header Authorization
             if (authHeader != null && authHeader.startsWith("Bearer ")) {
                 String token = authHeader.substring(7);
                 try {
@@ -62,16 +64,18 @@ public class WebSocketAuthInterceptor implements ChannelInterceptor {
 
                     accessor.setUser(auth);
 
-                    // Đăng nhập WebSocket thành công: in thông tin user (dùng cho theo dõi/log)
+                    // In ra thông tin user sau khi xác thực thành công
                     log.info("[WebSocket] Authenticated user: {} (userId: {})", email, userId);
+                } catch (ExpiredJwtException e) {
+                    // JWT hết hạn, cần refresh token từ client
+                    log.warn("[WebSocket] JWT token expired. User needs to refresh token. Expired at: {}, Current time: {}",
+                            e.getClaims().getExpiration(), new java.util.Date());
                 } catch (Exception e) {
-                    // Lỗi xác thực WebSocket - log chi tiết nhưng không reject connection
-                    // để tránh đóng connection ngay lập tức
+                    // Lỗi xác thực khác (token sai, định dạng lỗi...)
                     log.error("[WebSocket] Failed to authenticate WebSocket connection: {}", e.getMessage(), e);
-                    // Không reject connection ở đây - để client có thể retry hoặc handle gracefully
                 }
             } else {
-                // Không có Authorization header - log warning nhưng không reject
+                // Không có Authorization header (không truyền token)
                 log.warn("[WebSocket] No Authorization header found in CONNECT frame. Connection may be rejected by client.");
             }
         }

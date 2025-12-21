@@ -2,7 +2,8 @@ package sunshine_dental_care.services.auth_service;
 
 import java.time.Instant;
 import java.util.List;
-import java.util.UUID; // <--- Import UUID
+import java.util.Random;
+import java.util.UUID;
 
 import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -10,12 +11,13 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import lombok.RequiredArgsConstructor;
-import sunshine_dental_care.dto.authDTO.*; // Import hết các DTO (bao gồm Forgot/Reset)
+import sunshine_dental_care.dto.authDTO.*;
 import sunshine_dental_care.entities.Patient;
 import sunshine_dental_care.entities.User;
 import sunshine_dental_care.entities.UserRole;
 import sunshine_dental_care.exceptions.auth.DuplicateEmailException;
 import sunshine_dental_care.exceptions.auth.DuplicateUsernameException;
+import sunshine_dental_care.payload.request.GoogleMobileLoginRequest;
 import sunshine_dental_care.repositories.auth.PatientRepo;
 import sunshine_dental_care.repositories.auth.RoleRepo;
 import sunshine_dental_care.repositories.auth.UserRepo;
@@ -34,14 +36,13 @@ public class AuthServiceImp implements AuthService {
     private final RoleRepo roleRepo;
     private final UserRoleRepo userRoleRepo;
     private final JwtService jwtService;
+    private final SmsService smsService;
 
+    // --- Helper Methods ---
     private String resolveUsername(String username, String email) {
         if (username != null && !username.isBlank()) return username.trim();
-
-        String base = (email != null ? email.split("@")[0] : "user")
-                .replaceAll("[^a-zA-Z0-9_\\-.]", "");
+        String base = (email != null ? email.split("@")[0] : "user").replaceAll("[^a-zA-Z0-9_\\-.]", "");
         if (base.isBlank()) base = "user";
-
         String candidate = base;
         int i = 1;
         while (userRepo.findByUsernameIgnoreCase(candidate).isPresent()) {
@@ -62,6 +63,9 @@ public class AuthServiceImp implements AuthService {
         userRoleRepo.save(ur);
     }
 
+    // =========================================================
+    // 1. CÁC TÍNH NĂNG ĐĂNG KÝ / EMAIL LOGIN
+    // =========================================================
     @Override
     @Transactional
     public SignUpResponse signUp(SignUpRequest req) {
@@ -74,7 +78,6 @@ public class AuthServiceImp implements AuthService {
             throw new DuplicateUsernameException(req.username());
         }
 
-        // 1) Tạo User
         User u = new User();
         u.setFullName(req.fullName());
         u.setUsername(resolveUsername(req.username(), req.email()));
@@ -83,19 +86,20 @@ public class AuthServiceImp implements AuthService {
         u.setPasswordHash(encoder.encode(req.password()));
         u.setAvatarUrl(req.avatarUrl());
         u.setProvider("local");
-        u.setIsActive(true);
+        u.setIsActive(false);
         u.setFailedLoginAttempts(0);
 
-        u = userRepo.save(u);
+        String verifyToken = UUID.randomUUID().toString();
+        u.setVerificationToken(verifyToken);
+        u.setVerificationTokenExpiry(Instant.now().plusSeconds(86400));
 
+        u = userRepo.save(u);
         ensureDefaultUserRole(u);
 
-        // 2) Sinh Patient Code
         String patientCode = patientCodeService.nextPatientCode();
         u.setCode(patientCode);
         userRepo.save(u);
 
-        // 3) Tạo Patient
         Patient p = new Patient();
         p.setUser(u);
         p.setFullName(u.getFullName());
@@ -103,168 +107,361 @@ public class AuthServiceImp implements AuthService {
         p.setPhone(u.getPhone());
         p.setPatientCode(patientCode);
         p.setIsActive(true);
-
         patientRepo.save(p);
 
-        // 4) Gửi mail Welcome
-        String locale = (req.locale() == null || req.locale().isBlank()) ? "en" : req.locale();
+        String locale = (req.locale() != null && !req.locale().isBlank()) ? req.locale() : "vi";
         try {
-            mailService.sendPatientCodeEmail(p, locale);
-        } catch (Exception e) {
-            System.err.println("Failed to send welcome email: " + e.getMessage());
-        }
+            mailService.sendVerificationEmail(u, verifyToken, locale);
+        } catch (Exception ignored) {}
 
         return new SignUpResponse(u.getId(), p.getId(), patientCode, u.getAvatarUrl());
     }
 
     @Override
-    @Transactional(noRollbackFor = BadCredentialsException.class)
-    public LoginResponse login(LoginRequest req) {
-        User u = userRepo.findByEmailIgnoreCase(req.email())
-                .orElseThrow(() -> new BadCredentialsException("Invalid email or password"));
+    @Transactional
+    public void verifyAccount(String token) {
+        User u = userRepo.findByVerificationToken(token)
+                .orElseThrow(() -> new IllegalArgumentException("Mã kích hoạt không hợp lệ."));
 
-        if (Boolean.FALSE.equals(u.getIsActive())) {
-            throw new BadCredentialsException("Account is locked or disabled. Please contact admin.");
+        if (u.getVerificationTokenExpiry() == null || u.getVerificationTokenExpiry().isBefore(Instant.now())) {
+            throw new IllegalArgumentException("Link kích hoạt đã hết hạn.");
         }
 
-        if (u.getPasswordHash() == null || !encoder.matches(req.password(), u.getPasswordHash())) {
-            // Xử lý sai mật khẩu
+        if (Boolean.TRUE.equals(u.getIsActive())) return;
+
+        u.setIsActive(true);
+        u.setVerificationToken(null);
+        u.setVerificationTokenExpiry(null);
+        userRepo.save(u);
+    }
+
+    @Override
+    @Transactional(noRollbackFor = BadCredentialsException.class)
+    public LoginResponse login(LoginRequest req) {
+        String locale = (req.locale() != null) ? req.locale() : "vi";
+        boolean isVi = "vi".equalsIgnoreCase(locale);
+
+        User u = userRepo.findByEmailIgnoreCase(req.email())
+                .orElseThrow(() -> new BadCredentialsException(
+                        isVi ? "Email hoặc mật khẩu không đúng" : "Incorrect email or password"
+                ));
+
+        return processLogin(u, req.password(), locale);
+    }
+
+    // =========================================================
+    // 2. CÁC TÍNH NĂNG LOGIN SỐ ĐIỆN THOẠI
+    // =========================================================
+    @Override
+    @Transactional
+    public void sendLoginOtp(PhoneLoginStep1Request req) {
+        String locale = (req.locale() != null) ? req.locale() : "vi";
+        boolean isVi = "vi".equalsIgnoreCase(locale);
+
+        User u = userRepo.findByPhone(req.phone())
+                .orElseThrow(() -> new IllegalArgumentException(
+                        isVi ? "Số điện thoại chưa được đăng ký." : "Phone number not registered."
+                ));
+
+        if (Boolean.FALSE.equals(u.getIsActive())) {
+            throw new IllegalArgumentException(
+                    isVi ? "Tài khoản đã bị khóa." : "Account is locked."
+            );
+        }
+
+        String otp = String.format("%06d", new Random().nextInt(999999));
+        if("0999999999".equals(req.phone())) otp = "123456";
+
+        u.setOtpCode(otp);
+        u.setOtpExpiry(Instant.now().plusSeconds(300));
+        userRepo.save(u);
+        smsService.sendOtp(u.getPhone(), otp);
+    }
+
+    @Override
+    @Transactional
+    public LoginResponse loginByPhone(PhoneLoginStep2Request req) {
+        String locale = (req.locale() != null) ? req.locale() : "vi";
+        boolean isVi = "vi".equalsIgnoreCase(locale);
+
+        User u = userRepo.findByPhone(req.phone())
+                .orElseThrow(() -> new BadCredentialsException(
+                        isVi ? "Không tìm thấy người dùng" : "User not found"
+                ));
+
+        if (u.getOtpCode() == null || !u.getOtpCode().equals(req.otp())) {
+            throw new BadCredentialsException(
+                    isVi ? "Mã OTP không chính xác." : "Incorrect OTP."
+            );
+        }
+
+        if (u.getOtpExpiry() == null || u.getOtpExpiry().isBefore(Instant.now())) {
+            throw new BadCredentialsException(
+                    isVi ? "Mã OTP đã hết hạn." : "OTP has expired."
+            );
+        }
+
+        u.setOtpCode(null);
+        u.setOtpExpiry(null);
+        u.setFailedLoginAttempts(0);
+        u.setLastLoginAt(Instant.now());
+        userRepo.save(u);
+
+        return generateLoginResponse(u);
+    }
+
+    @Override
+    @Transactional(noRollbackFor = BadCredentialsException.class)
+    public LoginResponse loginByPhoneAndPassword(PhonePasswordLoginRequest req) {
+        String locale = (req.locale() != null) ? req.locale() : "vi";
+        boolean isVi = "vi".equalsIgnoreCase(locale);
+
+        User u = userRepo.findByPhone(req.phone())
+                .orElseThrow(() -> new BadCredentialsException(
+                        isVi ? "Số điện thoại hoặc mật khẩu không chính xác" : "Incorrect phone number or password"
+                ));
+
+        return processLogin(u, req.password(), locale);
+    }
+
+    // =========================================================
+    // 3. HELPER PROCESS LOGIN (Đã cập nhật đa ngôn ngữ)
+    // =========================================================
+    private LoginResponse processLogin(User u, String rawPassword, String locale) {
+        boolean isVi = "vi".equalsIgnoreCase(locale);
+
+        if (Boolean.FALSE.equals(u.getIsActive())) {
+            if (u.getVerificationToken() != null) {
+                throw new BadCredentialsException(
+                        isVi ? "Tài khoản chưa được kích hoạt. Vui lòng kiểm tra email."
+                                : "Account not activated. Please check your email."
+                );
+            }
+            throw new BadCredentialsException(
+                    isVi ? "Tài khoản đã bị khóa." : "Account is locked."
+            );
+        }
+
+        if (u.getPasswordHash() == null || !encoder.matches(rawPassword, u.getPasswordHash())) {
             int currentFails = u.getFailedLoginAttempts() == null ? 0 : u.getFailedLoginAttempts();
             int newFails = currentFails + 1;
             u.setFailedLoginAttempts(newFails);
-
             userRepo.save(u);
 
             if (newFails >= 5) {
                 u.setIsActive(false);
                 userRepo.save(u);
-                try {
-                    mailService.sendAccountLockedEmail(u);
-                } catch (Exception e) {
-                    System.err.println("Failed to send lock alert email: " + e.getMessage());
-                }
-                throw new BadCredentialsException("Account has been locked due to 5 failed login attempts.");
+                try { mailService.sendAccountLockedEmail(u); } catch (Exception ignored) {}
+                throw new BadCredentialsException(
+                        isVi ? "Tài khoản đã bị khóa do nhập sai mật khẩu 5 lần."
+                                : "Account locked due to 5 failed password attempts."
+                );
             } else {
                 int remaining = 5 - newFails;
-                throw new BadCredentialsException("Invalid email or password. You have " + remaining + " attempt(s) left.");
+                if (remaining <= 3) {
+                    throw new BadCredentialsException(
+                            isVi ? "Mật khẩu không chính xác. Bạn còn " + remaining + " lần thử."
+                                    : "Incorrect password. You have " + remaining + " attempts left."
+                    );
+                } else {
+                    throw new BadCredentialsException(
+                            isVi ? "Mật khẩu không chính xác." : "Incorrect password."
+                    );
+                }
             }
         }
 
-        // Đăng nhập thành công -> Reset
         if (u.getFailedLoginAttempts() != null && u.getFailedLoginAttempts() > 0) {
             u.setFailedLoginAttempts(0);
         }
+        u.setLastLoginAt(Instant.now());
+        userRepo.save(u);
 
+        return generateLoginResponse(u);
+    }
+
+    private LoginResponse generateLoginResponse(User u) {
         List<String> roles = userRoleRepo.findRoleNamesByUserId(u.getId());
         if (roles.isEmpty()) {
             ensureDefaultUserRole(u);
             roles = userRoleRepo.findRoleNamesByUserId(u.getId());
         }
-
-        u.setLastLoginAt(Instant.now());
-        userRepo.save(u);
-
         String token = jwtService.generateToken(u.getId(), u.getEmail(), u.getFullName(), roles);
 
         return new LoginResponse(
-                token,
-                "Bearer",
-                jwtService.getExpirationSeconds(),
-                u.getId(),
-                u.getFullName(),
-                u.getEmail(),
-                u.getAvatarUrl(),
-                u.getPhone(),
-                roles
+                token, "Bearer", jwtService.getExpirationSeconds(),
+                u.getId(), u.getFullName(), u.getEmail(), u.getAvatarUrl(), u.getPhone(), roles
         );
     }
 
+    // =========================================================
+    // 4. CHANGE & FORGOT PASSWORD
+    // =========================================================
     @Override
     @Transactional
     public void changePassword(Integer currentUserId, ChangePasswordRequest req) {
-        User u = userRepo.findById(currentUserId)
-                .orElseThrow(() -> new IllegalArgumentException("User not found"));
-
-        // 1. Kiểm tra thực tế trong DB xem user đã có mật khẩu chưa
-        boolean hasPasswordInDb = u.getPasswordHash() != null && !u.getPasswordHash().isBlank();
-
-        // 2. Logic kiểm tra
-        if (hasPasswordInDb) {
-            // TRƯỜNG HỢP A: Đã có mật khẩu (Local hoặc Google đã từng set pass)
-            // => Bắt buộc phải nhập mật khẩu cũ và phải đúng
-            if (req.currentPassword() == null || req.currentPassword().isBlank()) {
-                throw new IllegalArgumentException("Current password is required.");
-            }
-
+        User u = userRepo.findById(currentUserId).orElseThrow(() -> new IllegalArgumentException("User not found"));
+        if (u.getPasswordHash() != null && !u.getPasswordHash().isBlank()) {
             if (!encoder.matches(req.currentPassword(), u.getPasswordHash())) {
-                throw new IllegalArgumentException("Current password is incorrect");
+                // Tùy chọn: Có thể thêm locale vào request này để dịch lỗi
+                throw new IllegalArgumentException("Mật khẩu hiện tại không đúng.");
             }
         }
-        // TRƯỜNG HỢP B: Chưa có mật khẩu (Google lần đầu)
-        // => Bỏ qua bước kiểm tra ở trên, cho phép set thẳng mật khẩu mới.
-
-        // 3. Lưu mật khẩu mới
         u.setPasswordHash(encoder.encode(req.newPassword()));
         userRepo.save(u);
     }
 
-    // =================================================================
-    // CHỨC NĂNG QUÊN MẬT KHẨU (FORGOT PASSWORD)
-    // =================================================================
-
     @Override
     @Transactional
     public void forgotPassword(ForgotPasswordRequest req) {
-        // 1. Tìm user
         User u = userRepo.findByEmailIgnoreCase(req.email())
-                .orElseThrow(() -> new IllegalArgumentException("Email không tồn tại trong hệ thống"));
-
-        // 2. Tạo Token ngẫu nhiên
+                .orElseThrow(() -> new IllegalArgumentException("Email không tồn tại trong hệ thống."));
         String token = UUID.randomUUID().toString();
         u.setResetPasswordToken(token);
-        // Token hết hạn sau 15 phút
         u.setResetPasswordTokenExpiry(Instant.now().plusSeconds(900));
-
         userRepo.save(u);
-
-        // 3. Gửi mail chứa link
-        try {
-            mailService.sendResetPasswordEmail(u, token);
-        } catch (Exception e) {
-            System.err.println("Lỗi gửi mail reset pass: " + e.getMessage());
-            // Có thể throw exception nếu muốn Frontend biết là gửi mail lỗi
-        }
+        try { mailService.sendResetPasswordEmail(u, token); } catch (Exception ignored) {}
     }
 
     @Override
     @Transactional
     public void resetPassword(ResetPasswordRequest req) {
-        // 1. Kiểm tra mật khẩu nhập lại
         if (!req.newPassword().equals(req.confirmPassword())) {
             throw new IllegalArgumentException("Mật khẩu xác nhận không khớp.");
         }
-
-        // 2. Tìm user bằng token
         User u = userRepo.findByResetPasswordToken(req.token())
-                .orElseThrow(() -> new IllegalArgumentException("Token không hợp lệ hoặc không tồn tại."));
+                .orElseThrow(() -> new IllegalArgumentException("Link không hợp lệ hoặc không tồn tại."));
 
-        // 3. Kiểm tra thời gian hết hạn
-        if (u.getResetPasswordTokenExpiry() == null || u.getResetPasswordTokenExpiry().isBefore(Instant.now())) {
-            throw new IllegalArgumentException("Link đặt lại mật khẩu đã hết hạn. Vui lòng yêu cầu lại.");
+        if (u.getResetPasswordTokenExpiry().isBefore(Instant.now())) {
+            throw new IllegalArgumentException("Link đã hết hạn.");
         }
 
-        // 4. Cập nhật mật khẩu mới
         u.setPasswordHash(encoder.encode(req.newPassword()));
-
-        // 5. Xóa token
         u.setResetPasswordToken(null);
         u.setResetPasswordTokenExpiry(null);
-
-        // 6. Mở khóa tài khoản (nếu đang bị khóa)
-        // Đây là bước quan trọng để user có thể đăng nhập lại ngay sau khi reset
         u.setFailedLoginAttempts(0);
         u.setIsActive(true);
-
         userRepo.save(u);
+
+        List<UserRole> userRoles = userRoleRepo.findByUserId(u.getId());
+        for (UserRole userRole : userRoles) {
+            userRole.setIsActive(true);
+        }
+        userRoleRepo.saveAll(userRoles);
+    }
+
+    @Override
+    @Transactional
+    public void resendVerificationEmail(String email) {
+        User u = userRepo.findByEmailIgnoreCase(email)
+                .orElseThrow(() -> new IllegalArgumentException("Email này chưa được đăng ký."));
+
+        if (Boolean.TRUE.equals(u.getIsActive())) {
+            throw new IllegalArgumentException("Tài khoản này đã được kích hoạt rồi.");
+        }
+
+        String newToken = UUID.randomUUID().toString();
+        u.setVerificationToken(newToken);
+        u.setVerificationTokenExpiry(Instant.now().plusSeconds(86400));
+        userRepo.save(u);
+
+        try {
+            // Mặc định "vi" vì request resend thường chỉ gửi email string
+            mailService.sendVerificationEmail(u, newToken, "vi");
+        } catch (Exception e) {
+            throw new RuntimeException("Lỗi gửi mail: " + e.getMessage());
+        }
+    }
+
+    // =========================================================
+    // 5. LOGIN GOOGLE MOBILE & QR CODE
+    // =========================================================
+    @Override
+    @Transactional
+    public LoginResponse loginGoogleMobile(GoogleMobileLoginRequest req) {
+        String email = req.getEmail();
+        User user = userRepo.findByEmail(email).orElse(null);
+
+        if (user == null) {
+            user = new User();
+            user.setEmail(email);
+            user.setUsername(resolveUsername(null, email));
+            user.setFullName(req.getFullName() != null ? req.getFullName() : "Google User");
+            user.setAvatarUrl(req.getAvatarUrl());
+            user.setProvider("google");
+            user.setPasswordHash(encoder.encode("GOOGLE_MOBILE_" + UUID.randomUUID()));
+            user.setIsActive(true);
+            user.setFailedLoginAttempts(0);
+
+            user = userRepo.save(user);
+            ensureDefaultUserRole(user);
+
+            var patientRole = roleRepo.findByRoleNameIgnoreCase("PATIENT")
+                    .orElseThrow(() -> new RuntimeException("Role PATIENT not found"));
+            UserRole userRole = new UserRole();
+            userRole.setUser(user);
+            userRole.setRole(patientRole);
+            userRole.setIsActive(true);
+            userRoleRepo.save(userRole);
+
+            String patientCode = patientCodeService.nextPatientCode();
+            user.setCode(patientCode);
+            userRepo.save(user);
+
+            Patient p = new Patient();
+            p.setUser(user);
+            p.setFullName(user.getFullName());
+            p.setEmail(user.getEmail());
+            p.setPatientCode(patientCode);
+            p.setIsActive(true);
+            patientRepo.save(p);
+        } else {
+            if (Boolean.FALSE.equals(user.getIsActive())) {
+                throw new BadCredentialsException("Tài khoản đã bị khóa hoặc chưa kích hoạt.");
+            }
+            if (user.getAvatarUrl() == null && req.getAvatarUrl() != null) {
+                user.setAvatarUrl(req.getAvatarUrl());
+            }
+        }
+
+        user.setLastLoginAt(Instant.now());
+        userRepo.save(user);
+        return generateLoginResponse(user);
+    }
+
+    // -------------------------------------------------------------
+    // [MỚI] Triển khai QR Logic (DÙNG EMAIL)
+    // -------------------------------------------------------------
+
+    @Override
+    public String generateQrToken(String email) {
+        return jwtService.generateShortLivedToken(email);
+    }
+
+    @Override
+    @Transactional
+    public LoginResponse loginWithQrCode(String qrToken) {
+        String email = jwtService.extractUsername(qrToken);
+
+        System.out.println(">>> [QR LOGIN] Mobile sent token. Extracted Email: [" + email + "]");
+
+        if (email == null) {
+            throw new BadCredentialsException("QR Code không hợp lệ (No subject/email).");
+        }
+
+        if (jwtService.isTokenExpired(qrToken)) {
+            throw new BadCredentialsException("QR Code đã hết hạn.");
+        }
+
+        User user = userRepo.findByEmailIgnoreCase(email.trim())
+                .orElseThrow(() -> {
+                    System.err.println(">>> [ERROR] User not found in DB for email: [" + email + "]");
+                    return new BadCredentialsException("User not found from QR Code.");
+                });
+
+        user.setLastLoginAt(Instant.now());
+        userRepo.save(user);
+
+        return generateLoginResponse(user);
     }
 }

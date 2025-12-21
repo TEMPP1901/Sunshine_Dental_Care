@@ -43,9 +43,39 @@ public class CloudinaryImageStorageService implements ImageStorageService {
     }
 
     @Override
+    public ImageUploadResult uploadRaw(MultipartFile file, String folder) throws Exception {
+        if (file == null || file.isEmpty()) {
+            throw new IllegalArgumentException("File is empty");
+        }
+
+        String targetFolder = (folder == null || folder.isBlank())
+                ? rootFolder
+                : rootFolder + "/" + folder;
+
+        // Upload as raw file (for PDF, DOC, DOCX, etc.)
+        Map<?, ?> res = cloudinary.uploader().upload(
+                file.getBytes(),
+                ObjectUtils.asMap(
+                        "folder", targetFolder,
+                        "resource_type", "raw",  // Use "raw" for documents
+                        "overwrite", true
+                )
+        );
+        String url = (String) res.get("secure_url");
+        String publicId = (String) res.get("public_id");
+        return new ImageUploadResult(url, publicId);
+    }
+
+    @Override
     public void delete(String publicId) throws Exception {
         if (publicId == null || publicId.isBlank()) return;
         cloudinary.uploader().destroy(publicId, ObjectUtils.asMap("resource_type", "image"));
+    }
+
+    @Override
+    public void deleteRaw(String publicId) throws Exception {
+        if (publicId == null || publicId.isBlank()) return;
+        cloudinary.uploader().destroy(publicId, ObjectUtils.asMap("resource_type", "raw"));
     }
 }
 

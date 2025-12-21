@@ -27,6 +27,7 @@ import sunshine_dental_care.services.interfaces.hr.HrService;
 @RestController
 @RequestMapping("/api/hr/schedules")
 @RequiredArgsConstructor
+@org.springframework.security.access.prepost.PreAuthorize("hasRole('HR')")
 public class HrController {
 
     private final HrService hrService;
@@ -88,7 +89,7 @@ public class HrController {
             CreateWeeklyScheduleRequest generatedRequest = aiScheduleGenerationService
                     .generateScheduleFromDescription(weekStart, description);
 
-            // ✅ Lớp 3: Trả về warnings nếu có (để frontend hiển thị)
+            // Lớp 3: Trả về warnings nếu có (để frontend hiển thị)
             // Note: Warnings được log trong service, nhưng có thể thêm vào response nếu cần
             // Hiện tại trả về schedule, frontend có thể gọi validate endpoint để lấy
             // warnings
@@ -185,6 +186,7 @@ public class HrController {
 
     // 7. XEM LỊCH CỦA TÔI (MY SCHEDULE)
     @GetMapping("/my-schedule/{weekStart}")
+    @org.springframework.security.access.prepost.PreAuthorize("hasAnyRole('DOCTOR', 'HR', 'RECEPTION', 'ACCOUNTANT')")
     public ResponseEntity<List<DoctorScheduleDto>> getMySchedule(
             @PathVariable @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate weekStart) {
         Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
@@ -194,5 +196,24 @@ public class HrController {
         CurrentUser currentUser = (CurrentUser) authentication.getPrincipal();
         List<DoctorScheduleDto> schedules = hrService.getMySchedule(currentUser.userId(), weekStart);
         return ResponseEntity.ok(schedules);
+    }
+
+    // 8. XEM LỊCH CỦA TÔI THEO NGÀY CỤ THỂ (MY SCHEDULE BY DATE)
+    @GetMapping("/my-schedule/date/{date}")
+    @org.springframework.security.access.prepost.PreAuthorize("hasAnyRole('DOCTOR', 'HR', 'RECEPTION', 'ACCOUNTANT')")
+    public ResponseEntity<List<DoctorScheduleDto>> getMyScheduleByDate(
+            @PathVariable @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate date) {
+        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+        if (authentication == null || !(authentication.getPrincipal() instanceof CurrentUser)) {
+            return ResponseEntity.status(401).build();
+        }
+        CurrentUser currentUser = (CurrentUser) authentication.getPrincipal();
+        // Lấy tất cả schedule của ngày đó, sau đó filter theo userId
+        List<DoctorScheduleDto> allSchedules = hrService.getScheduleByDate(date);
+        List<DoctorScheduleDto> mySchedules = allSchedules.stream()
+                .filter(schedule -> schedule.getDoctor() != null && 
+                       schedule.getDoctor().getId().equals(currentUser.userId()))
+                .toList();
+        return ResponseEntity.ok(mySchedules);
     }
 }

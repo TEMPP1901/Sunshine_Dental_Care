@@ -27,8 +27,11 @@ import sunshine_dental_care.repositories.auth.UserRepo;
 import sunshine_dental_care.repositories.auth.UserRoleRepo;
 import sunshine_dental_care.repositories.hr.DoctorScheduleRepo;
 import sunshine_dental_care.repositories.hr.LeaveRequestRepo;
+import sunshine_dental_care.services.auth_service.MailService;
+import sunshine_dental_care.services.impl.hr.attend.AttendanceStatusCalculator;
 import sunshine_dental_care.services.impl.notification.NotificationService;
 import sunshine_dental_care.services.interfaces.hr.LeaveRequestService;
+import sunshine_dental_care.utils.WorkHoursConstants;
 
 @Service
 @RequiredArgsConstructor
@@ -44,24 +47,22 @@ public class LeaveRequestServiceImpl implements LeaveRequestService {
     private final sunshine_dental_care.repositories.hr.AttendanceRepository attendanceRepository;
     private final ClinicResolutionService clinicResolutionService;
     private final NotificationService notificationService;
+    private final MailService mailService;
 
     @Override
     @Transactional
     public LeaveRequestResponse createLeaveRequest(Integer userId, LeaveRequestRequest request) {
-        log.info("Creating leave request for user {}: {} to {}", userId, request.getStartDate(), request.getEndDate());
-
+        // Kiểm tra ngày bắt đầu và kết thúc hợp lệ
         if (request.getStartDate().isAfter(request.getEndDate())) {
             throw new IllegalArgumentException("Start date must be before or equal to end date");
         }
-
         if (request.getStartDate().isBefore(LocalDate.now())) {
             throw new IllegalArgumentException("Cannot create leave request for past dates");
         }
 
         User user = userRepo.findById(userId)
                 .orElseThrow(() -> new RuntimeException("User not found"));
-        
-        // Tự động resolve clinicId nếu không được cung cấp
+
         Integer clinicId = clinicResolutionService.resolveClinicId(userId, request.getClinicId());
         Clinic clinic = clinicRepo.findById(clinicId)
                 .orElseThrow(() -> new RuntimeException("Clinic not found"));
@@ -70,18 +71,14 @@ public class LeaveRequestServiceImpl implements LeaveRequestService {
         boolean isDoctor = userRoles != null && userRoles.stream()
                 .anyMatch(ur -> attendanceStatusCalculator.isDoctorRole(ur));
 
-        // Validate shiftType for doctors
         String shiftType = request.getShiftType();
         if (isDoctor && shiftType != null && !shiftType.trim().isEmpty()) {
             shiftType = shiftType.toUpperCase().trim();
             if (!"MORNING".equals(shiftType) && !"AFTERNOON".equals(shiftType) && !"FULL_DAY".equals(shiftType)) {
-                throw new IllegalArgumentException("Invalid shiftType for doctor. Must be MORNING, AFTERNOON, or FULL_DAY");
+                throw new IllegalArgumentException(
+                        "Invalid shiftType for doctor. Must be MORNING, AFTERNOON, or FULL_DAY");
             }
-        } else if (isDoctor) {
-            // Default to FULL_DAY if not specified for doctors
-            shiftType = "FULL_DAY";
         } else {
-            // Non-doctors always have FULL_DAY
             shiftType = "FULL_DAY";
         }
 
@@ -99,16 +96,17 @@ public class LeaveRequestServiceImpl implements LeaveRequestService {
 
         leaveRequest = leaveRequestRepo.save(leaveRequest);
 
-        // Không update doctor schedule ở bước tạo đơn (chỉ update khi duyệt)
-        log.info("Leave request created for user {} (doctor: {}) from {} to {} - status: PENDING",
-                userId, isDoctor, request.getStartDate(), request.getEndDate());
-
+        // Gửi thông báo cho HR khi có đơn nghỉ mới
         try {
+            long startHr = System.currentTimeMillis();
             List<Integer> hrUserIds = getHrUserIds();
-            String dateRange = request.getStartDate().equals(request.getEndDate()) 
-                ? request.getStartDate().toString()
-                : request.getStartDate() + " to " + request.getEndDate();
-            
+            long hrDuration = System.currentTimeMillis() - startHr;
+            log.info("Performance: getHrUserIds took {} ms", hrDuration);
+
+            String dateRange = request.getStartDate().equals(request.getEndDate())
+                    ? request.getStartDate().toString()
+                    : request.getStartDate() + " to " + request.getEndDate();
+
             for (Integer hrUserId : hrUserIds) {
                 try {
                     NotificationRequest notiRequest = NotificationRequest.builder()
@@ -116,13 +114,18 @@ public class LeaveRequestServiceImpl implements LeaveRequestService {
                             .type("LEAVE_REQUEST_CREATED")
                             .priority("MEDIUM")
                             .title("New Leave Request")
-                            .message(String.format("%s has submitted a leave request from %s. Type: %s", 
+                            .message(String.format("%s has submitted a leave request from %s. Type: %s",
                                     user.getFullName(), dateRange, request.getType()))
                             .relatedEntityType("LEAVE_REQUEST")
                             .relatedEntityId(leaveRequest.getId())
                             .build();
+
+                    long startSend = System.currentTimeMillis();
                     notificationService.sendNotification(notiRequest);
-                    log.info("Notification sent to HR user {} about new leave request {}", hrUserId, leaveRequest.getId());
+                    long sendDuration = System.currentTimeMillis() - startSend;
+
+                    log.info("Notification sent to HR user {} about new leave request {}", hrUserId,
+                            leaveRequest.getId());
                 } catch (Exception e) {
                     log.error("Failed to send notification to HR user {}: {}", hrUserId, e.getMessage());
                 }
@@ -148,20 +151,21 @@ public class LeaveRequestServiceImpl implements LeaveRequestService {
     public Page<LeaveRequestResponse> getMyLeaveRequests(Integer userId, int page, int size) {
         Pageable pageable = PageRequest.of(page, size);
         Page<LeaveRequest> leaveRequests = leaveRequestRepo.findByUserIdOrderByCreatedAtDesc(userId, pageable);
-        // Force load relationships để tránh lazy loading exception
+
+        // Ép load entity liên quan để tránh lazy
         leaveRequests.getContent().forEach(lr -> {
             if (lr.getUser() != null) {
-                lr.getUser().getId(); // Trigger lazy load
-                lr.getUser().getUsername(); // Trigger lazy load
-                lr.getUser().getFullName(); // Trigger lazy load
+                lr.getUser().getId();
+                lr.getUser().getUsername();
+                lr.getUser().getFullName();
             }
             if (lr.getClinic() != null) {
-                lr.getClinic().getId(); // Trigger lazy load
-                lr.getClinic().getClinicName(); // Trigger lazy load
+                lr.getClinic().getId();
+                lr.getClinic().getClinicName();
             }
             if (lr.getApprovedBy() != null) {
-                lr.getApprovedBy().getId(); // Trigger lazy load
-                lr.getApprovedBy().getFullName(); // Trigger lazy load
+                lr.getApprovedBy().getId();
+                lr.getApprovedBy().getFullName();
             }
         });
         return leaveRequests.map(this::mapToResponse);
@@ -173,10 +177,10 @@ public class LeaveRequestServiceImpl implements LeaveRequestService {
         LeaveRequest leaveRequest = leaveRequestRepo.findById(leaveRequestId)
                 .orElseThrow(() -> new RuntimeException("Leave request not found"));
 
+        // Chỉ lấy đơn của chính mình
         if (!leaveRequest.getUser().getId().equals(userId)) {
             throw new RuntimeException("Access denied: You can only view your own leave requests");
         }
-
         return mapToResponse(leaveRequest);
     }
 
@@ -186,10 +190,12 @@ public class LeaveRequestServiceImpl implements LeaveRequestService {
         LeaveRequest leaveRequest = leaveRequestRepo.findById(leaveRequestId)
                 .orElseThrow(() -> new RuntimeException("Leave request not found"));
 
+        // Chỉ hủy đơn của chính mình
         if (!leaveRequest.getUser().getId().equals(userId)) {
             throw new RuntimeException("Access denied: You can only cancel your own leave requests");
         }
 
+        // Đơn chưa duyệt mới được hủy
         if (!"PENDING".equals(leaveRequest.getStatus())) {
             throw new RuntimeException("Cannot cancel leave request with status: " + leaveRequest.getStatus());
         }
@@ -198,19 +204,20 @@ public class LeaveRequestServiceImpl implements LeaveRequestService {
         boolean isDoctor = userRoles != null && userRoles.stream()
                 .anyMatch(ur -> attendanceStatusCalculator.isDoctorRole(ur));
 
-        // Nếu là bác sĩ và đơn đã được duyệt thì khôi phục schedule về ACTIVE
+        // Nếu là bác sĩ và đơn đã được duyệt thì set lại trạng thái lịch làm việc sang ACTIVE (dự phòng)
         if (isDoctor && "APPROVED".equals(leaveRequest.getStatus())) {
             updateScheduleStatusForLeave(leaveRequest, "ACTIVE");
             log.info("Restored schedules to ACTIVE for doctor {} after canceling approved leave request",
                     userId);
         }
 
+        // Thông báo HR về việc hủy đơn
         try {
             List<Integer> hrUserIds = getHrUserIds();
-            String dateRange = leaveRequest.getStartDate().equals(leaveRequest.getEndDate()) 
-                ? leaveRequest.getStartDate().toString()
-                : leaveRequest.getStartDate() + " to " + leaveRequest.getEndDate();
-            
+            String dateRange = leaveRequest.getStartDate().equals(leaveRequest.getEndDate())
+                    ? leaveRequest.getStartDate().toString()
+                    : leaveRequest.getStartDate() + " to " + leaveRequest.getEndDate();
+
             for (Integer hrUserId : hrUserIds) {
                 try {
                     NotificationRequest notiRequest = NotificationRequest.builder()
@@ -218,13 +225,13 @@ public class LeaveRequestServiceImpl implements LeaveRequestService {
                             .type("LEAVE_REQUEST_CANCELLED")
                             .priority("LOW")
                             .title("Leave Request Cancelled")
-                            .message(String.format("%s has cancelled their leave request from %s.", 
+                            .message(String.format("%s has cancelled their leave request from %s.",
                                     leaveRequest.getUser().getFullName(), dateRange))
                             .relatedEntityType("LEAVE_REQUEST")
                             .relatedEntityId(leaveRequest.getId())
                             .build();
                     notificationService.sendNotification(notiRequest);
-                    log.info("Notification sent to HR user {} about cancelled leave request {}", 
+                    log.info("Notification sent to HR user {} about cancelled leave request {}",
                             hrUserId, leaveRequestId);
                 } catch (Exception e) {
                     log.error("Failed to send notification to HR user {}: {}", hrUserId, e.getMessage());
@@ -249,6 +256,24 @@ public class LeaveRequestServiceImpl implements LeaveRequestService {
 
     @Override
     @Transactional(readOnly = true)
+    public List<LeaveRequestResponse> getAllPendingAdminLeaveRequests() {
+        List<LeaveRequest> leaveRequests = leaveRequestRepo.findAllPendingAdmin();
+        return leaveRequests.stream()
+                .map(this::mapToResponse)
+                .collect(Collectors.toList());
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public java.util.Map<String, Long> getLeaveRequestCounts() {
+        java.util.Map<String, Long> counts = new java.util.HashMap<>();
+        counts.put("PENDING", leaveRequestRepo.countByStatus("PENDING"));
+        counts.put("PENDING_ADMIN", leaveRequestRepo.countByStatus("PENDING_ADMIN"));
+        return counts;
+    }
+
+    @Override
+    @Transactional(readOnly = true)
     public Page<LeaveRequestResponse> getAllLeaveRequests(String status, int page, int size) {
         Pageable pageable = PageRequest.of(page, size);
         Page<LeaveRequest> leaveRequests;
@@ -264,86 +289,198 @@ public class LeaveRequestServiceImpl implements LeaveRequestService {
 
     @Override
     @Transactional
-    public LeaveRequestResponse processLeaveRequest(Integer hrUserId, LeaveRequestRequest request) {
-        log.info("Processing leave request {} with action {} by HR user {}",
-                request.getLeaveRequestId(), request.getAction(), hrUserId);
-
+    public LeaveRequestResponse processLeaveRequest(Integer approverId, LeaveRequestRequest request) {
+        // Xử lý phê duyệt hoặc từ chối đơn nghỉ
         LeaveRequest leaveRequest = leaveRequestRepo.findById(request.getLeaveRequestId())
                 .orElseThrow(() -> new RuntimeException("Leave request not found"));
 
-        if (!"PENDING".equals(leaveRequest.getStatus())) {
-            throw new RuntimeException("Cannot process leave request with status: " + leaveRequest.getStatus());
-        }
+        User approver = userRepo.findById(approverId)
+                .orElseThrow(() -> new RuntimeException("Approver user not found"));
 
-        User hrUser = userRepo.findById(hrUserId)
-                .orElseThrow(() -> new RuntimeException("HR user not found"));
+        List<UserRole> approverRoles = userRoleRepo.findActiveByUserId(approverId);
+        boolean isHr = approverRoles.stream().anyMatch(r -> r.getRole().getRoleName().equals("HR"));
+        boolean isAdmin = approverRoles.stream().anyMatch(r -> r.getRole().getRoleName().equals("ADMIN"));
 
         String action = request.getAction().toUpperCase();
         if (!"APPROVE".equals(action) && !"REJECT".equals(action)) {
             throw new IllegalArgumentException("Action must be APPROVE or REJECT");
         }
 
-        leaveRequest.setStatus(action.equals("APPROVE") ? "APPROVED" : "REJECTED");
-        leaveRequest.setApprovedBy(hrUser);
+        String currentStatus = leaveRequest.getStatus();
+
+        if ("PENDING".equals(currentStatus)) {
+            // HR hoặc Admin xác nhận bước đầu
+            if (!isHr && !isAdmin) {
+                throw new RuntimeException("Only HR or Admin can process PENDING requests");
+            }
+
+            if ("APPROVE".equals(action)) {
+                leaveRequest.setStatus("PENDING_ADMIN");
+                notifyAdminsOfPendingRequest(leaveRequest);
+            } else {
+                leaveRequest.setStatus("REJECTED");
+                leaveRequest.setApprovedBy(approver);
+                notifyUserOfResult(leaveRequest, approver, request.getComment());
+            }
+
+        } else if ("PENDING_ADMIN".equals(currentStatus)) {
+            // Admin duyệt cuối
+            if (!isAdmin) {
+                throw new RuntimeException("Only Admin can process PENDING_ADMIN requests");
+            }
+
+            if ("APPROVE".equals(action)) {
+                leaveRequest.setStatus("APPROVED");
+                leaveRequest.setApprovedBy(approver);
+
+                // Khi duyệt, cập nhật lịch và chấm công...
+                finalizeApprovedLeave(leaveRequest);
+                notifyUserOfResult(leaveRequest, approver, request.getComment());
+                notifyHrsOfAdminResult(leaveRequest, approver, request.getComment());
+            } else {
+                leaveRequest.setStatus("REJECTED");
+                leaveRequest.setApprovedBy(approver);
+                notifyUserOfResult(leaveRequest, approver, request.getComment());
+                notifyHrsOfAdminResult(leaveRequest, approver, request.getComment());
+            }
+        } else {
+            throw new RuntimeException("Cannot process leave request with status: " + currentStatus);
+        }
+
         leaveRequest.setUpdatedAt(Instant.now());
 
+        // Nếu có comment của người duyệt, lưu lại kèm lý do đơn
         if (request.getComment() != null && !request.getComment().trim().isEmpty()) {
             String originalReason = leaveRequest.getReason();
-            leaveRequest.setReason(originalReason + " [HR Comment: " + request.getComment() + "]");
+            leaveRequest.setReason(
+                    originalReason + " [" + approver.getFullName() + " Comment: " + request.getComment() + "]");
         }
 
         leaveRequest = leaveRequestRepo.save(leaveRequest);
+        return mapToResponse(leaveRequest);
+    }
 
+    // Duyệt đơn nghỉ: cập nhật lịch làm việc, chấm công nếu là bác sĩ, đồng thời nếu là đơn nghỉ việc thì khóa tài khoản
+    private void finalizeApprovedLeave(LeaveRequest leaveRequest) {
         Integer userId = leaveRequest.getUser().getId();
         List<UserRole> userRoles = userRoleRepo.findActiveByUserId(userId);
         boolean isDoctor = userRoles != null && userRoles.stream()
                 .anyMatch(ur -> attendanceStatusCalculator.isDoctorRole(ur));
 
-        // Nếu là bác sĩ thì update schedule tương ứng với quyết định approve/reject
         if (isDoctor) {
-            if ("APPROVED".equals(leaveRequest.getStatus())) {
-                updateScheduleStatusForLeave(leaveRequest, "INACTIVE");
-                log.info("Set schedules to INACTIVE for doctor {} after approving leave request",
-                        userId);
-            } else if ("REJECTED".equals(leaveRequest.getStatus())) {
-                updateScheduleStatusForLeave(leaveRequest, "ACTIVE");
-                log.info("Restored schedules to ACTIVE for doctor {} after rejecting leave request",
-                        userId);
+            updateScheduleStatusForLeave(leaveRequest, "INACTIVE");
+        }
+        createOrUpdateAttendanceForApprovedLeave(leaveRequest);
+
+        // Nếu là đơn nghỉ việc (RESIGNATION) đã được duyệt thì tự động khóa tài khoản + role
+        if ("RESIGNATION".equalsIgnoreCase(leaveRequest.getType()) 
+                && "APPROVED".equals(leaveRequest.getStatus())) {
+            User user = leaveRequest.getUser();
+            if (Boolean.TRUE.equals(user.getIsActive())) {
+                user.setIsActive(false);
+                user.setUpdatedAt(Instant.now());
+                userRepo.save(user);
+
+                // Khóa tham chiếu các UserRole liên quan
+                List<UserRole> allUserRoles = userRoleRepo.findByUserId(userId);
+                if (!allUserRoles.isEmpty()) {
+                    for (UserRole userRole : allUserRoles) {
+                        if (Boolean.TRUE.equals(userRole.getIsActive())) {
+                            userRole.setIsActive(false);
+                        }
+                    }
+                    userRoleRepo.saveAll(allUserRoles);
+                }
+                
+                // Gửi email thông báo nghỉ việc đã được duyệt
+                try {
+                    LocalDate today = LocalDate.now();
+                    LocalDate resignationDate = leaveRequest.getEndDate(); // Ngày nghỉ việc chính thức
+                    String formattedResignationDate = resignationDate.format(
+                            java.time.format.DateTimeFormatter.ofPattern("dd/MM/yyyy"));
+                    
+                    // Nếu là bác sĩ, gửi email đặc biệt với thông tin về lịch phân công
+                    if (isDoctor) {
+                        // Đếm số lịch phân công ACTIVE còn lại từ hôm nay đến ngày nghỉ việc
+                        List<DoctorSchedule> remainingSchedules = doctorScheduleRepo.findByDoctorIdAndDateRange(
+                                userId, today, resignationDate);
+                        int activeSchedulesCount = (int) remainingSchedules.stream()
+                                .filter(s -> s.getStatus() != null && "ACTIVE".equals(s.getStatus()))
+                                .count();
+                        
+                        mailService.sendDoctorResignationApprovalEmail(
+                                user, formattedResignationDate, activeSchedulesCount, "vi");
+                        log.info("Doctor resignation approval email sent to {} with {} remaining active schedules", 
+                                user.getEmail(), activeSchedulesCount);
+                    } else {
+                        // Nhân viên thường: gửi email thông thường
+                        String reason = leaveRequest.getReason() != null ? leaveRequest.getReason() : "Đơn nghỉ việc đã được duyệt";
+                        mailService.sendEmployeeDeletionEmail(user, reason, "vi");
+                        log.info("Resignation approval email sent to employee: {}", user.getEmail());
+                    }
+                } catch (Exception e) {
+                    log.error("Failed to send resignation approval email to employee {}: {}", 
+                        user.getEmail(), e.getMessage(), e);
+                    // Không fail transaction nếu email lỗi
+                }
             }
         }
+    }
 
-        // Tạo hoặc cập nhật attendance cho những ngày được duyệt nghỉ (APPROVED_ABSENCE), hoặc cập nhật lại khi bị reject
-        if ("APPROVED".equals(leaveRequest.getStatus())) {
-            createOrUpdateAttendanceForApprovedLeave(leaveRequest);
-        } else if ("REJECTED".equals(leaveRequest.getStatus())) {
-            updateAttendanceForRejectedLeave(leaveRequest);
+    // Thông báo cho admin khi HR đã xác nhận đơn nghỉ
+    private void notifyAdminsOfPendingRequest(LeaveRequest leaveRequest) {
+        try {
+            List<Integer> adminIds = userRoleRepo.findUserIdsByRoleName("ADMIN");
+            String dateRange = leaveRequest.getStartDate().equals(leaveRequest.getEndDate())
+                    ? leaveRequest.getStartDate().toString()
+                    : leaveRequest.getStartDate() + " to " + leaveRequest.getEndDate();
+
+            for (Integer adminId : adminIds) {
+                NotificationRequest notiRequest = NotificationRequest.builder()
+                        .userId(adminId)
+                        .type("LEAVE_REQUEST_PENDING_ADMIN")
+                        .priority("HIGH")
+                        .title("Leave Request Pending Admin Approval")
+                        .message(String.format(
+                                "HR has verified leave request for %s (%s). Waiting for your final approval.",
+                                leaveRequest.getUser().getFullName(), dateRange))
+                        .relatedEntityType("LEAVE_REQUEST")
+                        .relatedEntityId(leaveRequest.getId())
+                        .build();
+                notificationService.sendNotification(notiRequest);
+            }
+        } catch (Exception e) {
+            log.error("Failed to notify admins: {}", e.getMessage());
         }
+    }
 
+    // Thông báo cho người gửi đơn về kết quả duyệt hoặc từ chối
+    private void notifyUserOfResult(LeaveRequest leaveRequest, User approver, String comment) {
         try {
             User requestUser = leaveRequest.getUser();
-            String dateRange = leaveRequest.getStartDate().equals(leaveRequest.getEndDate()) 
-                ? leaveRequest.getStartDate().toString()
-                : leaveRequest.getStartDate() + " to " + leaveRequest.getEndDate();
-            
-            String notificationTitle = "APPROVED".equals(leaveRequest.getStatus()) 
-                ? "Leave Request Approved" 
-                : "Leave Request Rejected";
-            
+            String dateRange = leaveRequest.getStartDate().equals(leaveRequest.getEndDate())
+                    ? leaveRequest.getStartDate().toString()
+                    : leaveRequest.getStartDate() + " to " + leaveRequest.getEndDate();
+
+            String notificationTitle = "APPROVED".equals(leaveRequest.getStatus())
+                    ? "Leave Request Approved"
+                    : "Leave Request Rejected";
+
             String notificationMessage = "APPROVED".equals(leaveRequest.getStatus())
-                ? String.format("Your leave request from %s has been approved by %s.", 
-                    dateRange, hrUser.getFullName())
-                : String.format("Your leave request from %s has been rejected by %s.", 
-                    dateRange, hrUser.getFullName());
-            
-            if (request.getComment() != null && !request.getComment().trim().isEmpty()) {
-                notificationMessage += " Comment: " + request.getComment();
+                    ? String.format("Your leave request from %s has been approved by %s.",
+                            dateRange, approver.getFullName())
+                    : String.format("Your leave request from %s has been rejected by %s.",
+                            dateRange, approver.getFullName());
+
+            if (comment != null && !comment.trim().isEmpty()) {
+                notificationMessage += " Comment: " + comment;
             }
-            
+
             NotificationRequest notiRequest = NotificationRequest.builder()
                     .userId(requestUser.getId())
-                    .type("APPROVED".equals(leaveRequest.getStatus()) 
-                        ? "LEAVE_REQUEST_APPROVED" 
-                        : "LEAVE_REQUEST_REJECTED")
+                    .type("APPROVED".equals(leaveRequest.getStatus())
+                            ? "LEAVE_REQUEST_APPROVED"
+                            : "LEAVE_REQUEST_REJECTED")
                     .priority("APPROVED".equals(leaveRequest.getStatus()) ? "MEDIUM" : "HIGH")
                     .title(notificationTitle)
                     .message(notificationMessage)
@@ -351,17 +488,52 @@ public class LeaveRequestServiceImpl implements LeaveRequestService {
                     .relatedEntityId(leaveRequest.getId())
                     .build();
             notificationService.sendNotification(notiRequest);
-            log.info("Notification sent to user {} about leave request {} being {}", 
+            log.info("Notification sent to user {} about leave request {} being {}",
                     requestUser.getId(), leaveRequest.getId(), leaveRequest.getStatus());
         } catch (Exception e) {
             log.error("Failed to send notification to user about leave request processing: {}", e.getMessage());
         }
-
-        return mapToResponse(leaveRequest);
     }
 
-    // Cập nhật trạng thái lịch làm việc của bác sĩ trong thời gian xin nghỉ
-    // Nếu có shiftType, chỉ update schedule của ca đó; nếu FULL_DAY hoặc null, update tất cả
+    // Thông báo cho HR kết quả phê duyệt cuối từ Admin
+    private void notifyHrsOfAdminResult(LeaveRequest leaveRequest, User admin, String comment) {
+        try {
+            List<Integer> hrIds = getHrUserIds();
+            String dateRange = leaveRequest.getStartDate().equals(leaveRequest.getEndDate())
+                    ? leaveRequest.getStartDate().toString()
+                    : leaveRequest.getStartDate() + " to " + leaveRequest.getEndDate();
+
+            String action = "APPROVED".equals(leaveRequest.getStatus()) ? "Approved" : "Rejected";
+            String title = "Leave Request " + action + " by Admin";
+            String message = String.format("Admin %s has %s the leave request for %s (%s).",
+                    admin.getFullName(), action.toLowerCase(), leaveRequest.getUser().getFullName(), dateRange);
+
+            if (comment != null && !comment.trim().isEmpty()) {
+                message += " Comment: " + comment;
+            }
+
+            for (Integer hrId : hrIds) {
+                try {
+                    NotificationRequest notiRequest = NotificationRequest.builder()
+                            .userId(hrId)
+                            .type("LEAVE_REQUEST_PROCESSED_BY_ADMIN")
+                            .priority("MEDIUM")
+                            .title(title)
+                            .message(message)
+                            .relatedEntityType("LEAVE_REQUEST")
+                            .relatedEntityId(leaveRequest.getId())
+                            .build();
+                    notificationService.sendNotification(notiRequest);
+                } catch (Exception e) {
+                    log.error("Failed to notify HR {}: {}", hrId, e.getMessage());
+                }
+            }
+        } catch (Exception e) {
+            log.error("Failed to notify HRs of Admin result: {}", e.getMessage());
+        }
+    }
+
+    // Cập nhật trạng thái lịch làm việc của bác sĩ khi nghỉ (chỉ cập nhật các ca phù hợp loại ca nghỉ)
     private void updateScheduleStatusForLeave(LeaveRequest leaveRequest, String status) {
         Integer userId = leaveRequest.getUser().getId();
         LocalDate startDate = leaveRequest.getStartDate();
@@ -378,37 +550,24 @@ public class LeaveRequestServiceImpl implements LeaveRequestService {
 
             for (DoctorSchedule schedule : daySchedules) {
                 if (schedule != null) {
-                    // Nếu có shiftType cụ thể (MORNING/AFTERNOON), chỉ update schedule của ca đó
+                    // Nếu nghỉ ca sáng/chiều kiểm tra phù hợp
                     if (shiftType != null && !shiftType.isEmpty() && !"FULL_DAY".equals(shiftType)) {
                         LocalTime startTime = schedule.getStartTime();
-                        if (startTime == null) {
-                            continue;
-                        }
-                        
+                        if (startTime == null) continue;
                         String scheduleShiftType = startTime.isBefore(lunchBreakStart) ? "MORNING" : "AFTERNOON";
-                        if (!shiftType.equals(scheduleShiftType)) {
-                            // Skip schedule không khớp với ca xin nghỉ
-                            continue;
-                        }
+                        if (!shiftType.equals(scheduleShiftType)) continue;
                     }
-                    // Nếu FULL_DAY hoặc null, update tất cả schedules
-
                     if (!status.equals(schedule.getStatus())) {
                         schedule.setStatus(status);
                         try {
                             doctorScheduleRepo.save(schedule);
                             totalUpdated++;
-                            log.debug("Updated schedule {} to {} for doctor {} at clinic {} on {} (shiftType: {})",
-                                    schedule.getId(), status, userId,
-                                    schedule.getClinic() != null ? schedule.getClinic().getId() : "unknown",
-                                    currentDate, shiftType != null ? shiftType : "FULL_DAY");
                         } catch (Exception e) {
                             log.warn("Failed to update schedule {} status: {}", schedule.getId(), e.getMessage());
                         }
                     }
                 }
             }
-
             currentDate = currentDate.plusDays(1);
         }
 
@@ -416,13 +575,18 @@ public class LeaveRequestServiceImpl implements LeaveRequestService {
                 totalUpdated, status, userId, startDate, endDate, shiftType != null ? shiftType : "FULL_DAY");
     }
 
-
-    // Tạo hoặc cập nhật attendance cho các ngày nghỉ đã duyệt thành APPROVED_ABSENCE, bỏ qua chủ nhật và không ghi đè nếu đã check-in
+    // Tạo hoặc cập nhật các bản ghi chấm công sang APPROVED_ABSENCE khi đơn được duyệt. Không ghi đè nếu đã check-in
     private void createOrUpdateAttendanceForApprovedLeave(LeaveRequest leaveRequest) {
         Integer userId = leaveRequest.getUser().getId();
         Integer clinicId = leaveRequest.getClinic().getId();
         LocalDate startDate = leaveRequest.getStartDate();
         LocalDate endDate = leaveRequest.getEndDate();
+        String leaveShiftType = leaveRequest.getShiftType(); // MORNING, AFTERNOON, FULL_DAY, hoặc null
+
+        // Kiểm tra xem user có phải là bác sĩ không
+        List<UserRole> userRoles = userRoleRepo.findActiveByUserId(userId);
+        boolean isDoctor = userRoles != null && userRoles.stream()
+                .anyMatch(ur -> attendanceStatusCalculator.isDoctorRole(ur));
 
         LocalDate currentDate = startDate;
         int totalCreated = 0;
@@ -434,105 +598,154 @@ public class LeaveRequestServiceImpl implements LeaveRequestService {
                 continue;
             }
 
-            java.util.Optional<sunshine_dental_care.entities.Attendance> existingAttendance =
-                    attendanceRepository.findByUserIdAndClinicIdAndWorkDate(userId, clinicId, currentDate);
-
-            sunshine_dental_care.entities.Attendance attendance;
-            if (existingAttendance.isPresent()) {
-                attendance = existingAttendance.get();
-                // Không cập nhật nếu đã check in
-                if (attendance.getCheckInTime() == null) {
-                    attendance.setAttendanceStatus("APPROVED_ABSENCE");
-                    attendanceRepository.save(attendance);
-                    totalCreated++;
-                    log.debug("Updated attendance record to APPROVED_ABSENCE for user {} at clinic {} on {}",
-                            userId, clinicId, currentDate);
+            if (isDoctor) {
+                // BÁC SĨ: một ngày có thể có 2 bản ghi (MORNING và AFTERNOON)
+                if (leaveShiftType != null && !leaveShiftType.isEmpty() && !"FULL_DAY".equals(leaveShiftType)) {
+                    // Nghỉ một ca cụ thể (MORNING hoặc AFTERNOON) - tạo 1 bản ghi cho ca đó
+                    java.util.Optional<sunshine_dental_care.entities.Attendance> existingAttendance = 
+                            attendanceRepository.findByUserIdAndClinicIdAndWorkDateAndShiftType(
+                                    userId, clinicId, currentDate, leaveShiftType);
+                    
+                    sunshine_dental_care.entities.Attendance attendance;
+                    if (existingAttendance.isPresent()) {
+                        attendance = existingAttendance.get();
+                        if (attendance.getCheckInTime() == null) {
+                            attendance.setAttendanceStatus("APPROVED_ABSENCE");
+                            attendance.setShiftType(leaveShiftType); // Đảm bảo shiftType đúng
+                            attendanceRepository.save(attendance);
+                            totalCreated++;
+                        }
+                    } else {
+                        attendance = new sunshine_dental_care.entities.Attendance();
+                        attendance.setUserId(userId);
+                        attendance.setClinicId(clinicId);
+                        attendance.setWorkDate(currentDate);
+                        attendance.setShiftType(leaveShiftType);
+                        attendance.setAttendanceStatus("APPROVED_ABSENCE");
+                        attendance.setCreatedAt(Instant.now());
+                        attendance.setUpdatedAt(Instant.now());
+                        attendanceRepository.save(attendance);
+                        totalCreated++;
+                    }
+                } else {
+                    // Nghỉ cả ngày (FULL_DAY hoặc null): tạo attendance cho mỗi ca có schedule
+                    // Mỗi ca = 1 bản ghi riêng (có thể có 2 bản ghi: MORNING và AFTERNOON)
+                    List<DoctorSchedule> schedules = doctorScheduleRepo.findByDoctorIdAndWorkDate(userId, currentDate);
+                    if (schedules != null && !schedules.isEmpty()) {
+                        // Tạo attendance cho mỗi ca có schedule tại clinic này
+                        for (DoctorSchedule schedule : schedules) {
+                            if (schedule == null || schedule.getClinic() == null) continue;
+                            Integer scheduleClinicId = schedule.getClinic().getId();
+                            if (scheduleClinicId == null) continue;
+                            
+                            // Chỉ tạo cho clinic trong leave request
+                            if (!scheduleClinicId.equals(clinicId)) continue;
+                            
+                            LocalTime startTime = schedule.getStartTime();
+                            if (startTime == null) continue;
+                            
+                            String shiftType = WorkHoursConstants.determineShiftType(startTime);
+                            // Chỉ xử lý MORNING và AFTERNOON, bỏ qua FULL_DAY
+                            if ("FULL_DAY".equals(shiftType)) continue;
+                            
+                            // Tìm hoặc tạo attendance cho ca này (MORNING hoặc AFTERNOON)
+                            java.util.Optional<sunshine_dental_care.entities.Attendance> existingAttendance = 
+                                    attendanceRepository.findByUserIdAndClinicIdAndWorkDateAndShiftType(
+                                            userId, clinicId, currentDate, shiftType);
+                            
+                            sunshine_dental_care.entities.Attendance attendance;
+                            if (existingAttendance.isPresent()) {
+                                attendance = existingAttendance.get();
+                                if (attendance.getCheckInTime() == null) {
+                                    attendance.setAttendanceStatus("APPROVED_ABSENCE");
+                                    attendance.setShiftType(shiftType); // Đảm bảo shiftType đúng (MORNING hoặc AFTERNOON)
+                                    attendanceRepository.save(attendance);
+                                    totalCreated++;
+                                }
+                            } else {
+                                attendance = new sunshine_dental_care.entities.Attendance();
+                                attendance.setUserId(userId);
+                                attendance.setClinicId(clinicId);
+                                attendance.setWorkDate(currentDate);
+                                attendance.setShiftType(shiftType); // MORNING hoặc AFTERNOON
+                                attendance.setAttendanceStatus("APPROVED_ABSENCE");
+                                attendance.setCreatedAt(Instant.now());
+                                attendance.setUpdatedAt(Instant.now());
+                                attendanceRepository.save(attendance);
+                                totalCreated++;
+                            }
+                        }
+                    }
+                    // Nếu không có schedule, không tạo attendance record (bác sĩ không có lịch thì không cần attendance)
                 }
             } else {
-                attendance = new sunshine_dental_care.entities.Attendance();
-                attendance.setUserId(userId);
-                attendance.setClinicId(clinicId);
-                attendance.setWorkDate(currentDate);
-                attendance.setAttendanceStatus("APPROVED_ABSENCE");
-                attendance.setCreatedAt(Instant.now());
-                attendance.setUpdatedAt(Instant.now());
-                attendanceRepository.save(attendance);
-                totalCreated++;
-                log.debug("Created attendance record with APPROVED_ABSENCE for user {} at clinic {} on {}",
-                        userId, clinicId, currentDate);
-            }
-
-            currentDate = currentDate.plusDays(1);
-        }
-
-        log.info("Created/updated {} attendance records with APPROVED_ABSENCE for user {} from {} to {}",
-                totalCreated, userId, startDate, endDate);
-    }
-
-    // Nếu đơn bị từ chối và ngày đó có attendance là APPROVED_ABSENCE (nhưng chưa check-in) thì đổi lại thành ABSENT
-    private void updateAttendanceForRejectedLeave(LeaveRequest leaveRequest) {
-        Integer userId = leaveRequest.getUser().getId();
-        Integer clinicId = leaveRequest.getClinic().getId();
-        LocalDate startDate = leaveRequest.getStartDate();
-        LocalDate endDate = leaveRequest.getEndDate();
-
-        LocalDate currentDate = startDate;
-        int totalUpdated = 0;
-
-        while (!currentDate.isAfter(endDate)) {
-            // Bỏ qua Chủ nhật
-            if (currentDate.getDayOfWeek() == java.time.DayOfWeek.SUNDAY) {
-                currentDate = currentDate.plusDays(1);
-                continue;
-            }
-
-            java.util.Optional<sunshine_dental_care.entities.Attendance> existingAttendance =
-                    attendanceRepository.findByUserIdAndClinicIdAndWorkDate(userId, clinicId, currentDate);
-
-            if (existingAttendance.isPresent()) {
-                sunshine_dental_care.entities.Attendance attendance = existingAttendance.get();
-                // Chỉ update nếu attendance là APPROVED_ABSENCE và chưa có check-in
-                if ("APPROVED_ABSENCE".equals(attendance.getAttendanceStatus())
-                        && attendance.getCheckInTime() == null) {
-                    attendance.setAttendanceStatus("ABSENT");
+                // Nhân viên thường: nghỉ cả ngày (FULL_DAY)
+                java.util.Optional<sunshine_dental_care.entities.Attendance> existingAttendance = 
+                        attendanceRepository.findByUserIdAndClinicIdAndWorkDate(userId, clinicId, currentDate);
+                
+                sunshine_dental_care.entities.Attendance attendance;
+                if (existingAttendance.isPresent()) {
+                    attendance = existingAttendance.get();
+                    if (attendance.getCheckInTime() == null) {
+                        attendance.setAttendanceStatus("APPROVED_ABSENCE");
+                        if (attendance.getShiftType() == null) {
+                            attendance.setShiftType("FULL_DAY");
+                        }
+                        attendanceRepository.save(attendance);
+                        totalCreated++;
+                    }
+                } else {
+                    attendance = new sunshine_dental_care.entities.Attendance();
+                    attendance.setUserId(userId);
+                    attendance.setClinicId(clinicId);
+                    attendance.setWorkDate(currentDate);
+                    attendance.setShiftType("FULL_DAY");
+                    attendance.setAttendanceStatus("APPROVED_ABSENCE");
+                    attendance.setCreatedAt(Instant.now());
+                    attendance.setUpdatedAt(Instant.now());
                     attendanceRepository.save(attendance);
-                    totalUpdated++;
-                    log.debug("Updated attendance record from APPROVED_ABSENCE to ABSENT for user {} at clinic {} on {}",
-                            userId, clinicId, currentDate);
+                    totalCreated++;
                 }
             }
-
             currentDate = currentDate.plusDays(1);
         }
 
-        if (totalUpdated > 0) {
-            log.info("Updated {} attendance records from APPROVED_ABSENCE to ABSENT for user {} from {} to {}",
-                    totalUpdated, userId, startDate, endDate);
-        }
+        log.info("Created/updated {} attendance records with APPROVED_ABSENCE for user {} from {} to {} (shiftType: {})",
+                totalCreated, userId, startDate, endDate, leaveShiftType != null ? leaveShiftType : "FULL_DAY");
     }
 
-    // Chuyển đổi entity LeaveRequest sang DTO LeaveRequestResponse
+    // Chuyển Entity LeaveRequest sang DTO trả về
     private LeaveRequestResponse mapToResponse(LeaveRequest leaveRequest) {
         if (leaveRequest == null) {
             throw new IllegalArgumentException("LeaveRequest cannot be null");
         }
-        
+
         LeaveRequestResponse response = new LeaveRequestResponse();
         response.setId(leaveRequest.getId());
-        
-        // Null check cho User
-        if (leaveRequest.getUser() != null) {
-            response.setUserId(leaveRequest.getUser().getId());
-            response.setUserName(leaveRequest.getUser().getUsername());
-            response.setUserFullName(leaveRequest.getUser().getFullName());
+
+        response.setUserId(leaveRequest.getUser().getId());
+        response.setUserName(leaveRequest.getUser().getUsername());
+        response.setUserFullName(leaveRequest.getUser().getFullName());
+
+        // Gán role cho user trong response
+        try {
+            List<UserRole> roles = leaveRequest.getUser().getUserRoles();
+            if (roles != null && !roles.isEmpty()) {
+                String roleNames = roles.stream()
+                        .filter(ur -> ur.getIsActive() == null || ur.getIsActive())
+                        .map(ur -> ur.getRole().getRoleName())
+                        .collect(Collectors.joining(", "));
+                response.setUserRole(roleNames);
+            }
+        } catch (Exception e) {
+            log.warn("Could not fetch roles for user {}: {}", leaveRequest.getUser().getId(), e.getMessage());
         }
-        
-        // Null check cho Clinic
+
         if (leaveRequest.getClinic() != null) {
             response.setClinicId(leaveRequest.getClinic().getId());
             response.setClinicName(leaveRequest.getClinic().getClinicName());
         }
-        
+
         response.setStartDate(leaveRequest.getStartDate());
         response.setEndDate(leaveRequest.getEndDate());
         response.setType(leaveRequest.getType());
@@ -544,27 +757,93 @@ public class LeaveRequestServiceImpl implements LeaveRequestService {
             response.setApprovedBy(leaveRequest.getApprovedBy().getId());
             response.setApprovedByName(leaveRequest.getApprovedBy().getFullName());
         }
-
         response.setCreatedAt(leaveRequest.getCreatedAt());
         response.setUpdatedAt(leaveRequest.getUpdatedAt());
+
+        // Tính số ngày nghỉ trong tháng hiện tại từ bảng Attendance (không tính Chủ nhật)
+        LocalDate now = LocalDate.now();
+        int currentYear = now.getYear();
+        int currentMonth = now.getMonthValue();
+        Long leaveDaysThisMonth = attendanceRepository.countLeaveDaysInMonthExcludingSunday(
+                leaveRequest.getUser().getId(), currentYear, currentMonth);
+        response.setLeaveBalance(leaveDaysThisMonth != null ? leaveDaysThisMonth.intValue() : 0);
+
+        // Tính nghỉ phép năm: Tổng 12 ngày, đã dùng, còn lại
+        int annualLeaveTotal = 12; // Tổng số phép năm
+        Integer annualLeaveUsed = leaveRequestRepo.countApprovedLeaveDays(
+                leaveRequest.getUser().getId(), currentYear);
+        if (annualLeaveUsed == null) {
+            annualLeaveUsed = 0;
+        }
+        int annualLeaveRemaining = Math.max(0, annualLeaveTotal - annualLeaveUsed);
+        
+        response.setAnnualLeaveTotal(annualLeaveTotal);
+        response.setAnnualLeaveUsed(annualLeaveUsed);
+        response.setAnnualLeaveRemaining(annualLeaveRemaining);
+
+        // Tìm người thay thế tiềm năng (bác sĩ khác cùng ca)
+        findPotentialReplacements(leaveRequest, response);
 
         return response;
     }
 
-    // Lấy danh sách ID của các user HR
+    // Tìm nhân sự thay thế bác sĩ nghỉ (lấy theo ca làm cùng ngày và trạng thái ACTIVE)
+    private void findPotentialReplacements(LeaveRequest leaveRequest, LeaveRequestResponse response) {
+        Integer userId = leaveRequest.getUser().getId();
+        Integer clinicId = leaveRequest.getClinic().getId();
+        LocalDate checkDate = leaveRequest.getStartDate();
+
+        List<UserRole> userRoles = userRoleRepo.findActiveByUserId(userId);
+        boolean isDoctor = userRoles != null && userRoles.stream()
+                .anyMatch(ur -> attendanceStatusCalculator.isDoctorRole(ur));
+
+        List<String> replacements = new java.util.ArrayList<>();
+
+        if (isDoctor) {
+            List<DoctorSchedule> schedules = doctorScheduleRepo.findByClinicAndDate(clinicId, checkDate);
+            String requestShift = leaveRequest.getShiftType();
+
+            for (DoctorSchedule schedule : schedules) {
+                if (schedule.getDoctor().getId().equals(userId)) continue;
+                if (!"ACTIVE".equals(schedule.getStatus())) continue;
+
+                boolean isMatch = false;
+                if (requestShift == null || "FULL_DAY".equals(requestShift)) {
+                    isMatch = true;
+                } else {
+                    boolean isMorningSchedule = schedule.getStartTime().isBefore(LocalTime.of(11, 0));
+                    if ("MORNING".equals(requestShift) && isMorningSchedule)
+                        isMatch = true;
+                    else if ("AFTERNOON".equals(requestShift) && !isMorningSchedule)
+                        isMatch = true;
+                }
+
+                if (isMatch) {
+                    String docName = schedule.getDoctor().getFullName();
+                    if (!replacements.contains(docName)) {
+                        replacements.add(docName);
+                    }
+                }
+            }
+        }
+
+        response.setPotentialReplacements(replacements);
+        response.setReplacementAvailable(!replacements.isEmpty());
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<LeaveRequestResponse> getApprovedLeaveRequestsInDateRange(LocalDate startDate, LocalDate endDate) {
+        List<LeaveRequest> leaveRequests = leaveRequestRepo.findApprovedByDateRange(startDate, endDate);        
+        return leaveRequests.stream()
+                .map(this::mapToResponse)
+                .collect(Collectors.toList());
+    }
+
+    // Lấy danh sách userId của HR
     private List<Integer> getHrUserIds() {
         try {
-            List<UserRole> allUserRoles = userRoleRepo.findAll();
-            return allUserRoles.stream()
-                    .filter(ur -> ur != null 
-                            && Boolean.TRUE.equals(ur.getIsActive())
-                            && ur.getRole() != null 
-                            && "HR".equalsIgnoreCase(ur.getRole().getRoleName())
-                            && ur.getUser() != null
-                            && Boolean.TRUE.equals(ur.getUser().getIsActive()))
-                    .map(ur -> ur.getUser().getId())
-                    .distinct()
-                    .collect(Collectors.toList());
+            return userRoleRepo.findUserIdsByRoleName("HR");
         } catch (Exception e) {
             log.error("Failed to get HR user IDs: {}", e.getMessage(), e);
             return List.of();

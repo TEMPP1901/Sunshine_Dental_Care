@@ -4,7 +4,9 @@ import org.springframework.web.multipart.MultipartFile;
 
 public interface ImageStorageService {
     ImageUploadResult upload(MultipartFile file, String folder) throws Exception;
+    ImageUploadResult uploadRaw(MultipartFile file, String folder) throws Exception;  // Upload raw files (PDF, DOC, DOCX, etc.)
     void delete(String publicId) throws Exception;
+    void deleteRaw(String publicId) throws Exception;  // Delete raw files
 
     class ImageUploadResult {
         private final String url;

@@ -1,11 +1,23 @@
 package sunshine_dental_care.entities;
 
-import jakarta.persistence.*;
+import java.time.Instant;
+import java.time.LocalDate;
+
 import org.hibernate.annotations.ColumnDefault;
 import org.hibernate.annotations.Nationalized;
 
-import java.time.Instant;
-import java.time.LocalDate;
+import jakarta.persistence.Column;
+import jakarta.persistence.Entity;
+import jakarta.persistence.FetchType;
+import jakarta.persistence.GeneratedValue;
+import jakarta.persistence.GenerationType;
+import jakarta.persistence.Id;
+import jakarta.persistence.JoinColumn;
+import jakarta.persistence.Lob;
+import jakarta.persistence.OneToOne;
+import jakarta.persistence.PrePersist;
+import jakarta.persistence.PreUpdate;
+import jakarta.persistence.Table;
 
 @Entity
 @Table(name = "Patients")
@@ -61,6 +73,12 @@ public class Patient {
     @ColumnDefault("sysutcdatetime()")
     @Column(name = "updatedAt", nullable = false)
     private Instant updatedAt;
+
+    @Column(name = "accumulated_spending")
+    private java.math.BigDecimal accumulatedSpending;
+
+    @Column(name = "membership_rank")
+    private String membershipRank;
 
     public Integer getId() {
         return id;
@@ -164,6 +182,19 @@ public class Patient {
 
     public void setUpdatedAt(Instant updatedAt) {
         this.updatedAt = updatedAt;
+    }
+
+    public java.math.BigDecimal getAccumulatedSpending() {
+        return accumulatedSpending;
+    }
+    public void setAccumulatedSpending(java.math.BigDecimal accumulatedSpending) {
+        this.accumulatedSpending = accumulatedSpending;
+    }
+    public String getMembershipRank() {
+        return membershipRank;
+    }
+    public void setMembershipRank(String membershipRank) {
+        this.membershipRank = membershipRank;
     }
     @PrePersist
     void prePersist() {

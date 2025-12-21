@@ -1,5 +1,6 @@
 package sunshine_dental_care.entities;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import org.hibernate.annotations.ColumnDefault;
 import org.hibernate.annotations.Nationalized;
 
@@ -21,6 +22,9 @@ public class Room {
     @Column(name = "roomId", nullable = false)
     private Integer id;
 
+    // Liên kết n-1 với bảng Clinics
+    // JsonIgnore để tránh lỗi vòng lặp vô tận khi convert sang JSON
+    @JsonIgnore
     @ManyToOne(fetch = FetchType.LAZY, optional = false)
     @JoinColumn(name = "clinicId", nullable = false)
     private Clinic clinic;
@@ -32,9 +36,6 @@ public class Room {
     @ColumnDefault("0")
     @Column(name = "isPrivate", nullable = false)
     private Boolean isPrivate = false;
-
-    @Column(name = "numberOfChairs")
-    private Integer numberOfChairs;
 
     @ColumnDefault("1")
     @Column(name = "isActive", nullable = false)
@@ -70,14 +71,6 @@ public class Room {
 
     public void setIsPrivate(Boolean isPrivate) {
         this.isPrivate = isPrivate;
-    }
-
-    public Integer getNumberOfChairs() {
-        return numberOfChairs;
-    }
-
-    public void setNumberOfChairs(Integer numberOfChairs) {
-        this.numberOfChairs = numberOfChairs;
     }
 
     public Boolean getIsActive() {

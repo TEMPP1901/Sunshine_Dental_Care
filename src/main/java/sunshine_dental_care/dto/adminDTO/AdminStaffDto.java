@@ -17,6 +17,7 @@ public class AdminStaffDto {
     private Instant createdAt;
     private Instant lastLoginAt;
     private String avatarUrl;
+    private Boolean hasApprovedResignation; // Có đơn nghỉ việc đã được duyệt không
 
     public Integer getId() {
         return id;
@@ -120,6 +121,14 @@ public class AdminStaffDto {
 
     public void setAvatarUrl(String avatarUrl) {
         this.avatarUrl = avatarUrl;
+    }
+
+    public Boolean getHasApprovedResignation() {
+        return hasApprovedResignation;
+    }
+
+    public void setHasApprovedResignation(Boolean hasApprovedResignation) {
+        this.hasApprovedResignation = hasApprovedResignation;
     }
 }
 

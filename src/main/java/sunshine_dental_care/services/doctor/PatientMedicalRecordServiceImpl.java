@@ -14,9 +14,8 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
 
-import com.lowagie.text.DocumentException;
-
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import sunshine_dental_care.dto.doctorDTO.ClinicDTO;
 import sunshine_dental_care.dto.doctorDTO.DoctorDTO;
 import sunshine_dental_care.dto.doctorDTO.MedicalRecordDTO;
@@ -25,17 +24,27 @@ import sunshine_dental_care.dto.doctorDTO.MedicalRecordRequest;
 import sunshine_dental_care.dto.doctorDTO.PatientDTO;
 import sunshine_dental_care.dto.doctorDTO.ServiceDTO;
 import sunshine_dental_care.dto.doctorDTO.ServiceVariantDTO;
-import sunshine_dental_care.entities.*;
+import sunshine_dental_care.dto.notificationDTO.NotificationRequest;
+import sunshine_dental_care.entities.Appointment;
+import sunshine_dental_care.entities.AppointmentService;
+import sunshine_dental_care.entities.Clinic;
+import sunshine_dental_care.entities.MedicalRecord;
+import sunshine_dental_care.entities.MedicalRecordImage;
+import sunshine_dental_care.entities.Patient;
+import sunshine_dental_care.entities.ServiceVariant;
+import sunshine_dental_care.entities.User;
 import sunshine_dental_care.repositories.auth.ClinicRepo;
 import sunshine_dental_care.repositories.auth.PatientRepo;
 import sunshine_dental_care.repositories.doctor.AppointmentRepository;
 import sunshine_dental_care.repositories.doctor.DentalServiceRepository;
 import sunshine_dental_care.repositories.doctor.DoctorRepo;
 import sunshine_dental_care.repositories.doctor.MedicalRecordRepository;
+import sunshine_dental_care.services.impl.notification.NotificationService;
 import sunshine_dental_care.services.upload_file.ImageStorageService;
 
 @Service
 @RequiredArgsConstructor
+@Slf4j
 public class PatientMedicalRecordServiceImpl implements PatientMedicalRecordService {
 
     private static final long MAX_IMAGE_BYTES = 5 * 1024 * 1024; // 5MB
@@ -52,7 +61,8 @@ public class PatientMedicalRecordServiceImpl implements PatientMedicalRecordServ
     private final DoctorRepo doctorRepo;
     private final AppointmentRepository appointmentRepository;
     private final DentalServiceRepository dentalServiceRepository;
-    private final  ImageStorageService imageStorageService;
+    private final ImageStorageService imageStorageService;
+    private final NotificationService notificationService;
 
     // Lấy danh sách hồ sơ bệnh án của một bệnh nhân
     @Override
@@ -131,6 +141,10 @@ public class PatientMedicalRecordServiceImpl implements PatientMedicalRecordServ
 
         // Lưu hồ sơ vào database và trả kết quả dạng DTO
         MedicalRecord saved = medicalRecordRepository.save(record);
+
+        // Gửi thông báo cho patient khi bác sĩ hoàn thành bệnh án
+        sendMedicalRecordNotification(saved, "CREATED");
+
         return toDTO(saved);
     }
 
@@ -160,7 +174,70 @@ public class PatientMedicalRecordServiceImpl implements PatientMedicalRecordServ
 
         // Lưu và trả về DTO
         MedicalRecord saved = medicalRecordRepository.save(record);
+
+        // Gửi thông báo cho patient khi bác sĩ cập nhật bệnh án
+        sendMedicalRecordNotification(saved, "UPDATED");
+
         return toDTO(saved);
+    }
+
+    /**
+     * Gửi thông báo cho patient khi bác sĩ hoàn thành/cập nhật bệnh án
+     */
+    private void sendMedicalRecordNotification(MedicalRecord record, String action) {
+        try {
+            if (record.getPatient() == null || record.getPatient().getUser() == null) {
+                log.warn("Cannot send notification: medical record {} has no patient user", record.getId());
+                return;
+            }
+
+            Integer patientUserId = record.getPatient().getUser().getId();
+            String clinicName = record.getClinic() != null ? record.getClinic().getClinicName() : "Phòng khám";
+            String doctorName = record.getDoctor() != null ? record.getDoctor().getFullName() : "Bác sĩ";
+
+            // Format ngày bệnh án
+            String dateStr = record.getRecordDate() != null
+                    ? record.getRecordDate().format(java.time.format.DateTimeFormatter.ofPattern("dd/MM/yyyy"))
+                    : "hôm nay";
+
+            String title;
+            String message;
+            String notificationType;
+            String priority = "MEDIUM";
+
+            if ("CREATED".equals(action)) {
+                title = "Bệnh án đã được hoàn thành";
+                message = String.format(
+                    "Bác sĩ %s đã hoàn thành bệnh án của bạn tại %s ngày %s. Bạn có thể xem chi tiết trong hồ sơ bệnh án.",
+                    doctorName, clinicName, dateStr);
+                notificationType = "MEDICAL_RECORD_COMPLETED";
+            } else {
+                title = "Bệnh án đã được cập nhật";
+                message = String.format(
+                    "Bác sĩ %s đã cập nhật bệnh án của bạn tại %s ngày %s. Vui lòng kiểm tra thông tin mới.",
+                    doctorName, clinicName, dateStr);
+                notificationType = "MEDICAL_RECORD_UPDATED";
+            }
+
+            NotificationRequest notiRequest = NotificationRequest.builder()
+                    .userId(patientUserId)
+                    .type(notificationType)
+                    .priority(priority)
+                    .title(title)
+                    .message(message)
+                    .actionUrl("/patients/records")
+                    .relatedEntityType("MEDICAL_RECORD")
+                    .relatedEntityId(record.getId())
+                    .build();
+
+            notificationService.sendNotification(notiRequest);
+            log.info("Sent {} notification to patient {} for medical record {} (action: {})",
+                    notificationType, patientUserId, record.getId(), action);
+        } catch (Exception e) {
+            log.error("Failed to send medical record notification for record {}: {}",
+                    record.getId(), e.getMessage(), e);
+            // Không throw exception để không ảnh hưởng đến việc tạo/cập nhật bệnh án
+        }
     }
 
     // Gán dữ liệu từ request vào entity MedicalRecord
@@ -440,24 +517,24 @@ public class PatientMedicalRecordServiceImpl implements PatientMedicalRecordServ
     public byte[] exportRecordToPDF(Integer patientId, Integer recordId) {
         // Lấy hồ sơ bệnh án từ database
         MedicalRecord record = getRecord(patientId, recordId);
-        
+
         // Đảm bảo các lazy-loaded relationships được fetch
         // Fetch clinic
         if (record.getClinic() != null) {
             record.getClinic().getClinicName();
         }
-        
+
         // Fetch patient
         if (record.getPatient() != null) {
             record.getPatient().getFullName();
             record.getPatient().getPatientCode();
         }
-        
+
         // Fetch doctor
         if (record.getDoctor() != null) {
             record.getDoctor().getFullName();
         }
-        
+
         // Fetch appointment và appointment services nếu có
         if (record.getAppointment() != null) {
             Appointment appointment = record.getAppointment();
@@ -472,12 +549,12 @@ public class PatientMedicalRecordServiceImpl implements PatientMedicalRecordServ
                 }
             }
         }
-        
+
         // Fetch service nếu có
         if (record.getService() != null) {
             record.getService().getServiceName();
         }
-        
+
         // Fetch images nếu có
         if (record.getMedicalRecordImages() != null) {
             record.getMedicalRecordImages().size();

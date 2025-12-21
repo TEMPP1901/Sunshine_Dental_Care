@@ -36,7 +36,7 @@ public class NotificationService {
     private final FirestoreService firestoreService;
     private final NotificationAsyncService notificationAsyncService;
 
-    // Gửi thông báo đến user qua DB, WebSocket, Firestore và FCM
+    // Gửi thông báo qua DB, sau khi commit thì mới gửi qua WebSocket, Firestore, FCM
     @Transactional
     public NotificationResponse sendNotification(NotificationRequest request) {
         if (request.getUserId() == null) {
@@ -44,64 +44,35 @@ public class NotificationService {
             throw new IllegalArgumentException("UserId is required");
         }
 
-        // Kiểm tra sự tồn tại của user
         if (!userRepo.existsById(request.getUserId())) {
             throw new RuntimeException("User not found: " + request.getUserId());
         }
 
-        Log notification = null;
+        // Tạo đối tượng notification, liên kết user entity
+        User user = userRepo.findById(request.getUserId())
+                .orElseThrow(() -> new RuntimeException("User not found: " + request.getUserId()));
 
-        // Lưu thông báo vào cơ sở dữ liệu SQL Server
-        try {
-            // Load User để set vào quan hệ @ManyToOne
-            User user = userRepo.findById(request.getUserId())
-                    .orElseThrow(() -> new RuntimeException("User not found: " + request.getUserId()));
+        Log notification = Log.builder()
+                .user(user)
+                .type(request.getType())
+                .priority(request.getPriority() != null ? request.getPriority() : "MEDIUM")
+                .title(request.getTitle())
+                .message(request.getMessage())
+                .actionUrl(request.getActionUrl())
+                .relatedEntityType(request.getRelatedEntityType())
+                .relatedEntityId(request.getRelatedEntityId())
+                .isRead(false)
+                .createdAt(Instant.now())
+                .expiresAt(request.getExpiresAt())
+                .build();
 
-            notification = Log.builder()
-                    .user(user) // Set user thay vì userId
-                    .type(request.getType())
-                    .priority(request.getPriority() != null ? request.getPriority() : "MEDIUM")
-                    .title(request.getTitle())
-                    .message(request.getMessage())
-                    .actionUrl(request.getActionUrl())
-                    .relatedEntityType(request.getRelatedEntityType())
-                    .relatedEntityId(request.getRelatedEntityId())
-                    .isRead(false)
-                    .createdAt(Instant.now())
-                    .expiresAt(request.getExpiresAt())
-                    .build();
-
-            notification = notificationRepository.save(notification);
-            log.info("Notification saved to SQL Server (Logs table) - ID: {}, UserId: {}",
-                    notification.getId(), request.getUserId());
-        } catch (Exception e) {
-            log.error("Failed to save notification to SQL Server: {}", e.getMessage(), e);
-        }
-
-        // Trả về response, nếu lưu DB thất bại thì dùng response tạm
-        if (notification == null) {
-            log.warn("Returning notification response without DB record (DB save failed)");
-            return NotificationResponse.builder()
-                    .userId(request.getUserId())
-                    .type(request.getType())
-                    .priority(request.getPriority() != null ? request.getPriority() : "MEDIUM")
-                    .title(request.getTitle())
-                    .message(request.getMessage())
-                    .actionUrl(request.getActionUrl())
-                    .relatedEntityType(request.getRelatedEntityType())
-                    .relatedEntityId(request.getRelatedEntityId())
-                    .isRead(false)
-                    .createdAt(Instant.now())
-                    .expiresAt(request.getExpiresAt())
-                    .build();
-        }
+        notification = notificationRepository.save(notification);
+        log.info("Notification saved to SQL Server (Logs table) - ID: {}, UserId: {}",
+                notification.getId(), request.getUserId());
 
         NotificationResponse response = toResponse(notification);
 
-        // Gọi service async để phân phối thông báo (WebSocket, Firestore, FCM)
-        // Sử dụng TransactionSynchronization để đảm bảo transaction đã commit trước khi
-        // gửi event
-        // Tránh trường hợp client nhận được event nhưng query DB chưa thấy dữ liệu mới
+        // Đảm bảo chỉ gửi thông báo realtime sau khi transaction đã commit thành công
         TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
             @Override
             public void afterCommit() {
@@ -116,7 +87,7 @@ public class NotificationService {
         return response;
     }
 
-    // Đăng ký thiết bị nhận thông báo FCM cho 1 user
+    // Đăng ký (hoặc cập nhật) thiết bị FCM cho user
     @Transactional
     public void registerDevice(Integer userId, String token, String deviceType) {
         User user = userRepo.findById(userId)
@@ -133,23 +104,20 @@ public class NotificationService {
         userDeviceRepo.save(device);
     }
 
-    // Lấy danh sách thông báo cho user với phân trang và có thể bao gồm hết hoặc
-    // chỉ đang hoạt động
+    // Lấy danh sách notification cho user (có thể lấy hết hoặc chỉ active), phân trang
     @Transactional(readOnly = true)
     public Page<NotificationResponse> getNotifications(Integer userId, int page, int size, boolean includeExpired) {
         Pageable pageable = PageRequest.of(page, size);
         Page<Log> notifications;
-
         if (includeExpired) {
             notifications = notificationRepository.findByUserIdOrderByCreatedAtDesc(userId, pageable);
         } else {
             notifications = notificationRepository.findActiveNotificationsByUserId(userId, pageable);
         }
-
         return notifications.map(this::toResponse);
     }
 
-    // Lấy danh sách thông báo chưa đọc của user
+    // Lấy danh sách notification chưa đọc
     @Transactional(readOnly = true)
     public List<NotificationResponse> getUnreadNotifications(Integer userId) {
         List<Log> notifications = notificationRepository.findUnreadNotifications(userId);
@@ -158,13 +126,13 @@ public class NotificationService {
                 .collect(Collectors.toList());
     }
 
-    // Đánh dấu 1 thông báo là đã đọc và cập nhật trạng thái trên Firestore
+    // Đánh dấu 1 notification là đã đọc, cập nhật cả Firestore
     @Transactional
     public NotificationResponse markAsRead(Integer notificationId, Integer userId) {
         Log notification = notificationRepository.findById(notificationId)
                 .orElseThrow(() -> new RuntimeException("Notification not found"));
 
-        // Kiểm tra quyền sở hữu
+        // Kiểm tra quyền user sở hữu notification này
         if (!notification.getUserId().equals(userId)) {
             throw new RuntimeException("Notification does not belong to user");
         }
@@ -173,7 +141,7 @@ public class NotificationService {
         notification.setReadAt(Instant.now());
         notification = notificationRepository.save(notification);
 
-        // Cập nhật thông báo đã đọc trên Firestore
+        // Gửi cập nhật lên Firestore, không throw lỗi để không làm rollback transaction
         try {
             firestoreService.markAsRead(userId, notificationId);
         } catch (Exception e) {
@@ -183,19 +151,25 @@ public class NotificationService {
         return toResponse(notification);
     }
 
-    // Đánh dấu tất cả thông báo là đã đọc cho user
+    // Đánh dấu tất cả là đã đọc
     @Transactional
     public void markAllAsRead(Integer userId) {
         notificationRepository.markAllAsRead(userId);
+        
+        // Gửi cập nhật lên Firestore, không throw lỗi để không làm rollback transaction
+        try {
+            firestoreService.markAllAsRead(userId);
+        } catch (Exception e) {
+            log.error("[Firestore] Error marking all as read in Firestore: {}", e.getMessage());
+        }
     }
 
-    // Đếm số lượng thông báo chưa đọc cho user
     @Transactional(readOnly = true)
     public long countUnread(Integer userId) {
         return notificationRepository.countByUserIdAndIsReadFalse(userId);
     }
 
-    // Thống kê các loại thông báo của user
+    // Thống kê số lượng các loại notification cho user
     @Transactional(readOnly = true)
     public NotificationStatistics getStatistics(Integer userId) {
         long total = notificationRepository.countTotalByUserId(userId);
@@ -227,7 +201,7 @@ public class NotificationService {
                 .build();
     }
 
-    // Đồng bộ các thông báo mới kể từ lần sync gần nhất
+    // Trả về danh sách thông báo mới kể từ lần đồng bộ gần nhất
     @Transactional(readOnly = true)
     public List<NotificationResponse> syncNotifications(Integer userId, Instant lastSyncTime) {
         List<Log> notifications = notificationRepository.findNewNotificationsSince(userId, lastSyncTime);
@@ -236,7 +210,7 @@ public class NotificationService {
                 .collect(Collectors.toList());
     }
 
-    // Chuyển đổi thực thể Log sang DTO response
+    // Convert Log entity sang NotificationResponse DTO
     private NotificationResponse toResponse(Log notification) {
         return NotificationResponse.builder()
                 .notificationId(notification.getId())

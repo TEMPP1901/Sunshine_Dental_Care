@@ -1,26 +1,33 @@
 package sunshine_dental_care.services.doctor;
 
-import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
-import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
-import sunshine_dental_care.dto.doctorDTO.ChatbotRequest;
-import sunshine_dental_care.dto.doctorDTO.ChatbotResponse;
-import sunshine_dental_care.entities.*;
-import sunshine_dental_care.repositories.auth.PatientRepo;
-import sunshine_dental_care.repositories.doctor.PatientInsightRepository;
-import sunshine_dental_care.services.impl.hr.GeminiApiClient;
-
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
-import java.util.*;
+import java.util.List;
+import java.util.Objects;
+import java.util.Optional;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
+
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import sunshine_dental_care.dto.doctorDTO.ChatbotRequest;
+import sunshine_dental_care.dto.doctorDTO.ChatbotResponse;
+import sunshine_dental_care.entities.Appointment;
+import sunshine_dental_care.entities.AppointmentService;
+import sunshine_dental_care.entities.MedicalRecord;
+import sunshine_dental_care.entities.MedicalRecordImage;
+import sunshine_dental_care.entities.Patient;
+import sunshine_dental_care.repositories.auth.PatientRepo;
+import sunshine_dental_care.repositories.doctor.PatientInsightRepository;
+import sunshine_dental_care.services.impl.hr.schedule.GeminiApiClient;
 
 @Service
 @RequiredArgsConstructor

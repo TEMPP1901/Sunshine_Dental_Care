@@ -30,6 +30,13 @@ public interface AttendanceRepository extends JpaRepository<Attendance, Integer>
     Optional<Attendance> findByUserIdAndClinicIdAndWorkDateAndShiftType(
             Integer userId, Integer clinicId, LocalDate workDate, String shiftType);
 
+    // Tìm bản ghi chấm công của user theo ca làm việc (không cần clinicId - để tránh unique constraint violation)
+    @Query("SELECT a FROM Attendance a WHERE a.userId = :userId AND a.workDate = :workDate AND a.shiftType = :shiftType")
+    Optional<Attendance> findByUserIdAndWorkDateAndShiftType(
+            @Param("userId") Integer userId, 
+            @Param("workDate") LocalDate workDate, 
+            @Param("shiftType") String shiftType);
+
     // Lấy danh sách chấm công của user trong ngày (tất cả các ca)
     List<Attendance> findAllByUserIdAndWorkDate(Integer userId, LocalDate workDate);
 
@@ -60,6 +67,9 @@ public interface AttendanceRepository extends JpaRepository<Attendance, Integer>
     List<Attendance> findByClinicIdAndWorkDateBetween(Integer clinicId, LocalDate startDate, LocalDate endDate);
 
     List<Attendance> findByWorkDate(LocalDate workDate);
+
+    // Đếm số bản ghi chấm công trong ngày
+    long countByWorkDate(LocalDate workDate);
 
     List<Attendance> findByWorkDateBetween(LocalDate startDate, LocalDate endDate);
 
@@ -116,4 +126,18 @@ public interface AttendanceRepository extends JpaRepository<Attendance, Integer>
             @Param("userId") Integer userId,
             @Param("startDate") LocalDate startDate,
             @Param("endDate") LocalDate endDate);
+
+    // Đếm số ngày nghỉ trong tháng (ABSENT hoặc APPROVED_ABSENCE), không tính Chủ nhật
+    // SQL Server: DATEPART(dw, date) trả về 1=Sunday, 2=Monday, ..., 7=Saturday
+    @Query(value = "SELECT COUNT(*) FROM Attendance " +
+            "WHERE userId = :userId " +
+            "AND YEAR(workDate) = :year " +
+            "AND MONTH(workDate) = :month " +
+            "AND (attendanceStatus = 'ABSENT' OR attendanceStatus = 'APPROVED_ABSENCE') " +
+            "AND DATEPART(dw, workDate) != 1",  // 1 = Sunday (Chủ nhật)
+            nativeQuery = true)
+    Long countLeaveDaysInMonthExcludingSunday(
+            @Param("userId") Integer userId,
+            @Param("year") int year,
+            @Param("month") int month);
 }

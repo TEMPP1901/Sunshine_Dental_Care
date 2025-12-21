@@ -12,10 +12,9 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 public class FCMService {
 
-    // Gửi notification đến một thiết bị cụ thể sử dụng FCM
     @org.springframework.scheduling.annotation.Async
     public void sendNotification(String token, String title, String body, String actionUrl,
-            String relatedEntityType, Integer relatedEntityId) {
+                                 String relatedEntityType, Integer relatedEntityId) {
         log.info("FCMService: Begin sending notification (Async)");
         log.info("Title: {}", title);
         log.info("Body: {}", body);
@@ -23,7 +22,7 @@ public class FCMService {
         log.info("ActionUrl: {}", actionUrl);
 
         try {
-            // Kiểm tra khởi tạo FirebaseMessaging
+            // Kiểm tra khởi tạo FirebaseMessaging instance
             if (FirebaseMessaging.getInstance() == null) {
                 log.error("FCMService: FirebaseMessaging instance is null!");
                 throw new IllegalStateException("FirebaseMessaging not initialized");
@@ -53,7 +52,7 @@ public class FCMService {
             Message message = messageBuilder.build();
             log.info("FCMService: Sending message to Firebase Cloud Messaging...");
 
-            // Sử dụng sendAsync thay vì send để không block
+            // Gửi FCM async (không block)
             FirebaseMessaging.getInstance().sendAsync(message);
             log.info("FCMService: FCM message sent request initiated.");
         } catch (Exception e) {
@@ -63,7 +62,7 @@ public class FCMService {
             if (e.getCause() != null) {
                 log.error("Cause: {}", e.getCause().getMessage());
             }
-            // Không throw exception để tránh rollback transaction của luồng chính
+            // Không throw để tránh rollback transaction của thread chính
         }
     }
 }

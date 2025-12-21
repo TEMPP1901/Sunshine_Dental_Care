@@ -13,4 +13,6 @@ public class RescheduleRequest {
     private Integer newDoctorId; // Có thể null nếu không đổi bác sĩ
 
     private String reason; // Lý do đổi lịch (để lưu log/note)
+
+    private String status;
 }

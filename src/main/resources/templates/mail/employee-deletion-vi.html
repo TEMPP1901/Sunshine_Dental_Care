@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Thông báo: Tài khoản đã bị vô hiệu hóa - Sunshine Dental Care</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            max-width: 600px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            background-color: #ffffff;
+            border-radius: 10px;
+            padding: 30px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .header {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        .logo {
+            color: #1A237E;
+            font-size: 28px;
+            font-weight: bold;
+            margin-bottom: 10px;
+        }
+        .title {
+            color: #d32f2f;
+            font-size: 24px;
+            font-weight: bold;
+            margin-bottom: 20px;
+        }
+        .content {
+            color: #555;
+            font-size: 16px;
+            margin-bottom: 20px;
+        }
+        .info-box {
+            background-color: #fff3e0;
+            border-left: 4px solid #ff9800;
+            padding: 15px;
+            margin: 20px 0;
+            border-radius: 5px;
+        }
+        .reason-box {
+            background-color: #f8f9fa;
+            border-left: 4px solid #d32f2f;
+            padding: 15px;
+            margin: 20px 0;
+            border-radius: 5px;
+        }
+        .info-item {
+            margin: 10px 0;
+            font-size: 14px;
+        }
+        .info-label {
+            font-weight: bold;
+            color: #1A237E;
+        }
+        .thank-you {
+            background-color: #e8f5e9;
+            border-left: 4px solid #4caf50;
+            padding: 15px;
+            margin: 20px 0;
+            border-radius: 5px;
+            color: #2e7d32;
+        }
+        .footer {
+            margin-top: 30px;
+            padding-top: 20px;
+            border-top: 1px solid #eee;
+            text-align: center;
+            color: #888;
+            font-size: 12px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <div class="logo"> Sunshine Dental Care</div>
+        </div>
+        
+        <h1 class="title">Thông báo: Tài khoản đã bị xóa vĩnh viễn</h1>
+        
+        <div class="content">
+            <p>Xin chào <strong>{{fullName}}</strong>,</p>
+            
+            <p>Chúng tôi xin thông báo rằng tài khoản của bạn trên hệ thống Sunshine Dental Care đã bị <strong style="color: #d32f2f;">xóa vĩnh viễn</strong> theo quyết định của bộ phận Nhân sự.</p>
+            
+            <div class="reason-box">
+                <div class="info-item">
+                    <span class="info-label">Lý do xóa vĩnh viễn:</span> {{reason}}
+                </div>
+            </div>
+            
+            <div class="info-box">
+                <p style="margin: 0 0 10px 0; font-weight: bold; font-size: 16px;">
+                    ⚠️ Lưu ý quan trọng:
+                </p>
+                <p style="margin: 0;">
+                    Tất cả dữ liệu liên quan đến tài khoản của bạn đã bị xóa vĩnh viễn khỏi hệ thống, bao gồm:
+                </p>
+                <ul style="margin: 10px 0 0 20px; padding: 0;">
+                    <li>Thông tin tài khoản và hồ sơ nhân viên</li>
+                    <li>Lịch sử chấm công</li>
+                    <li>Lịch làm việc đã phân công</li>
+                    <li>Đơn nghỉ phép và các yêu cầu liên quan</li>
+                    <li>Tất cả dữ liệu khác trong hệ thống</li>
+                </ul>
+                <p style="margin: 10px 0 0 0; font-weight: bold; color: #d32f2f;">
+                    Hành động này không thể hoàn tác.
+                </p>
+            </div>
+            
+            <div class="thank-you">
+                <p style="margin: 0; font-weight: bold; font-size: 16px;">💙 Cảm ơn bạn!</p>
+                <p style="margin: 10px 0 0 0;">Chúng tôi xin chân thành cảm ơn bạn đã đồng hành cùng Sunshine Dental Care trong thời gian qua. Những đóng góp của bạn đã góp phần quan trọng vào sự phát triển của chúng tôi.</p>
+            </div>
+            
+            <p>Nếu bạn có bất kỳ thắc mắc nào về quyết định này hoặc cần hỗ trợ, vui lòng liên hệ với bộ phận Nhân sự qua email hoặc số điện thoại đã được cung cấp.</p>
+            
+            <p>Chúng tôi chúc bạn mọi điều tốt đẹp trong tương lai!</p>
+            
+            <p>Trân trọng,<br>
+            <strong>Đội ngũ Sunshine Dental Care</strong></p>
+        </div>
+        
+        <div class="footer">
+            <p>Email này được gửi tự động từ hệ thống Sunshine Dental Care.</p>
+            <p>Vui lòng không trả lời email này.</p>
+        </div>
+    </div>
+</body>
+</html>
+

@@ -1,8 +1,10 @@
 package sunshine_dental_care.dto.hrDTO.helper;
 
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.stream.Stream;
 
 import org.springframework.stereotype.Component;
@@ -77,17 +79,20 @@ public class EmployeeStatisticsHelper {
         return byDepartment;
     }
 
-    // Phân loại theo vai trò
+    // Phân loại theo vai trò (mỗi user chỉ được đếm 1 lần cho mỗi role, không đếm trùng)
     private Map<String, Integer> groupByRole(List<User> users) {
-        Map<String, Integer> byRole = new HashMap<>();
+        // Sử dụng Map<roleName, Set<userId>> để đảm bảo mỗi user chỉ được đếm 1 lần cho mỗi role
+        Map<String, Set<Integer>> roleUserMap = new HashMap<>();
+        
         for (User user : users) {
-            List<UserRole> userRoles = userRoleRepo.findActiveByUserId(user.getId());
+            // Lấy TẤT CẢ UserRole (cả active và inactive) để đảm bảo tính đúng cả inactive employees
+            List<UserRole> userRoles = userRoleRepo.findByUserId(user.getId());
             for (UserRole userRole : userRoles) {
                 if (userRole.getRole() != null) {
                     try {
                         String roleName = userRole.getRole().getRoleName();
                         if (roleName != null) {
-                            byRole.put(roleName, byRole.getOrDefault(roleName, 0) + 1);
+                            roleUserMap.computeIfAbsent(roleName, k -> new HashSet<>()).add(user.getId());
                         }
                     } catch (Exception e) {
                         log.warn("Lỗi khi lấy tên vai trò cho user {}: {}", user.getId(), e.getMessage());
@@ -95,12 +100,21 @@ public class EmployeeStatisticsHelper {
                 }
             }
         }
+        
+        // Chuyển đổi từ Set<userId> sang số lượng (size của Set)
+        Map<String, Integer> byRole = new HashMap<>();
+        for (Map.Entry<String, Set<Integer>> entry : roleUserMap.entrySet()) {
+            byRole.put(entry.getKey(), entry.getValue().size());
+        }
+        
         return byRole;
     }
 
-    // Phân loại theo phòng khám
+    // Phân loại theo phòng khám (mỗi user chỉ được đếm 1 lần cho mỗi clinic, không đếm trùng)
     private Map<String, Integer> groupByClinic(List<User> users) {
-        Map<String, Integer> byClinic = new HashMap<>();
+        // Sử dụng Map<clinicName, Set<userId>> để đảm bảo mỗi user chỉ được đếm 1 lần cho mỗi clinic
+        Map<String, Set<Integer>> clinicUserMap = new HashMap<>();
+        
         for (User user : users) {
             List<UserClinicAssignment> assignments = userClinicAssignmentRepo.findByUserId(user.getId());
             for (UserClinicAssignment assignment : assignments) {
@@ -108,7 +122,7 @@ public class EmployeeStatisticsHelper {
                     try {
                         String clinicName = assignment.getClinic().getClinicName();
                         if (clinicName != null) {
-                            byClinic.put(clinicName, byClinic.getOrDefault(clinicName, 0) + 1);
+                            clinicUserMap.computeIfAbsent(clinicName, k -> new HashSet<>()).add(user.getId());
                         }
                     } catch (Exception e) {
                         log.warn("Lỗi khi lấy tên clinic cho user {}: {}", user.getId(), e.getMessage());
@@ -116,17 +130,34 @@ public class EmployeeStatisticsHelper {
                 }
             }
         }
+        
+        // Chuyển đổi từ Set<userId> sang số lượng (size của Set)
+        Map<String, Integer> byClinic = new HashMap<>();
+        for (Map.Entry<String, Set<Integer>> entry : clinicUserMap.entrySet()) {
+            byClinic.put(entry.getKey(), entry.getValue().size());
+        }
+        
         return byClinic;
     }
 
-    // Áp dụng filter vai trò cho thống kê (tương tự EmployeeFilterHelper nhưng dành cho thống kê)
+    // Áp dụng filter vai trò cho thống kê (lấy cả active và inactive UserRole để tính đúng cả inactive employees)
     public Stream<User> applyRoleFilterForStatistics(Stream<User> userStream) {
         return userStream.filter(user -> {
-            List<UserRole> userRoles = userRoleRepo.findActiveByUserId(user.getId());
+            // Lấy TẤT CẢ UserRole (cả active và inactive) để đảm bảo tính đúng cả inactive employees
+            // Vì khi user inactive, UserRole của họ cũng có thể inactive
+            List<UserRole> userRoles = userRoleRepo.findByUserId(user.getId());
+            if (userRoles == null || userRoles.isEmpty()) {
+                return false;
+            }
             return userRoles.stream()
                 .anyMatch(ur -> {
-                    String roleName = ur.getRole() != null ? ur.getRole().getRoleName() : "";
-                    if (roleName == null) return false;
+                    if (ur == null || ur.getRole() == null) {
+                        return false;
+                    }
+                    String roleName = ur.getRole().getRoleName();
+                    if (roleName == null || roleName.trim().isEmpty()) {
+                        return false;
+                    }
                     String roleUpper = roleName.toUpperCase();
                     return (
                         roleUpper.contains("RECEPTION") ||  // ✅ Bao gồm cả RECEPTION và RECEPTIONIST

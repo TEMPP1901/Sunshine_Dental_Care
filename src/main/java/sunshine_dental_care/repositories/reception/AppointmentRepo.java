@@ -3,23 +3,35 @@ package sunshine_dental_care.repositories.reception;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.List;
+import java.util.Optional;
 
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
+import org.springframework.transaction.annotation.Transactional;
 
 import sunshine_dental_care.entities.Appointment;
 
 @Repository
 public interface AppointmentRepo extends JpaRepository<Appointment, Integer> {
 
+    // --- 1. PHẦN CỦA BẠN: LẤY LỊCH SỬ KHÁM BỆNH NHÂN ---
+    List<Appointment> findByPatientIdOrderByStartDateTimeDesc(Integer patientId);
+
+    // --- 2. PHẦN CHUNG (LOGIC TÌM XUNG ĐỘT & SLOT TRỐNG) ---
+    // (Dùng bản của Long vì có comment rõ ràng, logic SQL giống hệt nhau)
+
     @Query("SELECT a FROM Appointment a " +
-            "WHERE a.status IN ('CONFIRMED', 'SCHEDULED', 'PENDING') " +
+            "WHERE a.status NOT IN ('CANCELLED', 'REJECTED') " +
+
             "AND (" +
-            "   (a.doctor.id = :doctorId AND a.endDateTime > :newStart AND a.startDateTime < :newEnd) " + // Check Doctor (Toàn hệ thống)
+            "   (a.doctor.id = :doctorId AND a.endDateTime > :newStart AND a.startDateTime < :newEnd) " +
             "   OR " +
-            "   (:roomId IS NOT NULL AND a.room.id = :roomId AND a.endDateTime > :newStart AND a.startDateTime < :newEnd) " + // Check Room (Nếu có chọn phòng)
+            "   (:roomId IS NOT NULL AND a.room.id = :roomId AND a.endDateTime > :newStart AND a.startDateTime < :newEnd) " +
             ")")
     List<Appointment> findConflictAppointments(
             @Param("doctorId") Integer doctorId,
@@ -30,12 +42,10 @@ public interface AppointmentRepo extends JpaRepository<Appointment, Integer> {
 
     /**
      * Lấy danh sách các lịch hẹn ĐÃ CÓ của bác sĩ trong ngày cụ thể.
-     * Dùng để tô đen các ô giờ đã bị người khác đặt.
-     * (Không cần lọc theo Clinic, vì bác sĩ bận ở đâu thì cũng là bận).
      */
     @Query("SELECT a FROM Appointment a " +
             "WHERE a.doctor.id = :doctorId " +
-            "AND a.status IN ('CONFIRMED', 'SCHEDULED', 'PENDING') " +
+            "AND a.status IN ('SCHEDULED', 'PENDING', 'IN-PROGRESS') " +
             "AND CAST(a.startDateTime AS date) = :date")
     List<Appointment> findBusySlotsByDoctorAndDate(
             @Param("doctorId") Integer doctorId,
@@ -44,8 +54,6 @@ public interface AppointmentRepo extends JpaRepository<Appointment, Integer> {
 
     /**
      * Lấy tất cả lịch hẹn của một Clinic trong ngày cụ thể.
-     * Dùng cho Reception Dashboard.
-     * Sắp xếp theo giờ bắt đầu để hiển thị đẹp hơn.
      */
     @Query("SELECT a FROM Appointment a " +
             "WHERE a.clinic.id = :clinicId " +
@@ -55,4 +63,155 @@ public interface AppointmentRepo extends JpaRepository<Appointment, Integer> {
             @Param("clinicId") Integer clinicId,
             @Param("date") LocalDate date
     );
+
+    // --- 3. PHẦN CỦA LONG (MỚI THÊM) ---
+    // Lấy TẤT CẢ lịch hẹn trong ngày (không filter theo clinic).
+    @Query("SELECT a FROM Appointment a " +
+            "WHERE CAST(a.startDateTime AS date) = :date " +
+            "ORDER BY a.startDateTime ASC")
+    List<Appointment> findAllByDate(
+            @Param("date") LocalDate date
+    );
+
+    // --- 4. PHẦN CỦA BẠN: LOGIC NHẮC LỊCH (SCHEDULER) ---
+
+    // Query nhắc 24h (Cũ)
+    @Query("SELECT a FROM Appointment a WHERE a.status = 'CONFIRMED' " +
+            "AND (a.isReminderSent IS NULL OR a.isReminderSent = false) " +
+            "AND a.startDateTime BETWEEN :start AND :end")
+    List<Appointment> findAppointmentsToRemind(@Param("start") Instant start,
+                                               @Param("end") Instant end);
+
+    // Query nhắc gấp 2h (Check cột isUrgentReminderSent)
+    @Query("SELECT a FROM Appointment a WHERE a.status = 'CONFIRMED' " +
+            "AND (a.isUrgentReminderSent IS NULL OR a.isUrgentReminderSent = false) " +
+            "AND a.startDateTime BETWEEN :start AND :end")
+    List<Appointment> findUrgentAppointmentsToRemind(@Param("start") Instant start,
+                                                     @Param("end") Instant end);
+
+    // --- 5. PHẦN CỦA BẠN: DASHBOARD BỆNH NHÂN ---
+
+    // Lấy lịch hẹn sắp tới (Chưa diễn ra) để hiển thị Countdown
+    @Query("SELECT a FROM Appointment a WHERE a.patient.id = :patientId AND a.startDateTime > CURRENT_TIMESTAMP AND a.status IN ('CONFIRMED', 'PENDING', 'SCHEDULED') ORDER BY a.startDateTime ASC")
+    List<Appointment> findUpcomingAppointmentsByPatient(@Param("patientId") Integer patientId);
+
+    // Đếm số lịch hẹn đã hoàn thành để tính điểm sức khỏe
+    @Query("SELECT COUNT(a) FROM Appointment a WHERE a.patient.id = :patientId AND a.status = 'COMPLETED'")
+    long countCompletedAppointments(@Param("patientId") Integer patientId);
+
+    // Check xem phòng có đang bị chiếm trong khung giờ đó không (trừ chính lịch hẹn hiện tại ra)
+    @Query("SELECT COUNT(a) > 0 FROM Appointment a " +
+            "WHERE a.room.id = :roomId " +
+            "AND a.id <> :appointmentId " + // Trừ chính nó (để update phòng khác cho chính nó ko bị lỗi)
+            "AND a.status NOT IN ('CANCELLED', 'REJECTED') " +
+            "AND (a.startDateTime < :end AND a.endDateTime > :start)")
+    boolean existsByRoomIdAndDateOverlap(@Param("roomId") Integer roomId,
+                                         @Param("appointmentId") Integer appointmentId,
+                                         @Param("start") Instant start,
+                                         @Param("end") Instant end);
+
+    // Update trực tiếp các lịch hẹn quá hạn thanh toán từ trạng thái AWAITING_PAYMENT sang CANCELLED
+    @Modifying
+    @Transactional
+    @Query("UPDATE Appointment a SET a.status = :newStatus " +
+            "WHERE a.status = :oldStatus AND a.createdAt < :expiryTime")
+    int cancelExpiredAppointments(String oldStatus, String newStatus, Instant expiryTime);
+
+    //  HÀM ĐỂ SEARCH DANH SÁCH LỊCH HẸN
+    @Query("SELECT a FROM Appointment a WHERE " +
+            "(:clinicId IS NULL OR a.clinic.id = :clinicId) " +
+            "AND (:keyword IS NULL OR :keyword = '' OR a.patient.fullName LIKE %:keyword% OR a.patient.phone LIKE %:keyword% OR a.patient.patientCode LIKE %:keyword%) " +
+            "AND (:paymentStatus IS NULL OR :paymentStatus = '' OR a.paymentStatus = :paymentStatus) " +
+            "AND (:status IS NULL OR :status = '' OR a.status = :status) " +
+            "AND (:date IS NULL OR CAST(a.startDateTime AS LocalDate) = :date)")
+    Page<Appointment> searchAppointments(
+            @Param("clinicId") Integer clinicId,
+            @Param("keyword") String keyword,
+            @Param("paymentStatus") String paymentStatus, // UNPAID, PAID...
+            @Param("status") String status,               // SCHEDULED, COMPLETED...
+            @Param("date") LocalDate date,                // Có thể null nếu muốn xem tất cả
+            Pageable pageable
+    );
+
+    // Tìm tất cả lịch hẹn của 1 bệnh nhân
+    List<Appointment> findByPatientId(Integer patientId);
+
+    // Query để tìm appointments cần gửi reminder (dùng cho scheduler)
+    @Query("SELECT a FROM Appointment a " +
+            "WHERE (a.status = 'PENDING' OR a.status = 'CONFIRMED') " +
+            "AND a.startDateTime >= :start AND a.startDateTime <= :end " +
+            "AND a.patient.user IS NOT NULL")
+    List<Appointment> findByStatusInAndStartDateTimeBetween(
+            @Param("start") Instant start,
+            @Param("end") Instant end
+    );
+
+    /**
+     * Tìm kiếm hóa đơn (Lịch hẹn đã có invoiceCode)
+     * Hỗ trợ tìm theo: Mã HĐ, Tên BN, SĐT BN, Mã BN
+     */
+    @Query("SELECT a FROM Appointment a " +
+            "WHERE a.clinic.id = :clinicId " +
+            "AND a.invoiceCode IS NOT NULL " +
+            "AND (:keyword IS NULL OR :keyword = '' OR " +
+            "    LOWER(a.invoiceCode) LIKE LOWER(CONCAT('%', :keyword, '%')) OR " +
+            "    LOWER(a.patient.fullName) LIKE LOWER(CONCAT('%', :keyword, '%')) OR " +
+            "    a.patient.phone LIKE CONCAT('%', :keyword, '%') OR " +
+            "    a.patient.patientCode LIKE CONCAT('%', :keyword, '%') " +
+            ") " +
+            "AND (:fromDate IS NULL OR a.startDateTime >= :fromDate) " +
+            "AND (:toDate IS NULL OR a.startDateTime <= :toDate) " +
+            "AND (:paymentStatus IS NULL OR :paymentStatus = '' OR a.paymentStatus = :paymentStatus)")
+    Page<Appointment> searchInvoices(
+            @Param("clinicId") Integer clinicId,
+            @Param("keyword") String keyword,
+            @Param("fromDate") Instant fromDate,
+            @Param("toDate") Instant toDate,
+            @Param("paymentStatus") String paymentStatus,
+            Pageable pageable
+    );
+
+    // Hàm tiện ích: Tìm nhanh theo mã hóa đơn chính xác (để check trùng hoặc scan QR)
+    Optional<Appointment> findByInvoiceCode(String invoiceCode);
+
+    // --- 6. PHẦN ADMIN DASHBOARD: Thống kê appointments ---
+    
+    // Đếm số appointments trong khoảng thời gian
+    @Query("SELECT COUNT(a) FROM Appointment a WHERE a.startDateTime >= :start AND a.startDateTime < :end")
+    long countByStartDateTimeBetween(
+            @Param("start") Instant start,
+            @Param("end") Instant end
+    );
+    
+    // Đếm số appointments trong khoảng thời gian với status cụ thể
+    @Query("SELECT COUNT(a) FROM Appointment a WHERE a.startDateTime >= :start AND a.startDateTime < :end AND a.status = :status")
+    long countByStartDateTimeBetweenAndStatus(
+            @Param("start") Instant start,
+            @Param("end") Instant end,
+            @Param("status") String status
+    );
+    
+    // Lấy danh sách appointments trong khoảng thời gian (để thống kê theo status)
+    @Query("SELECT a FROM Appointment a WHERE a.startDateTime >= :start AND a.startDateTime < :end")
+    List<Appointment> findByStartDateTimeBetween(
+            @Param("start") Instant start,
+            @Param("end") Instant end
+    );
+    
+    // Tính tổng doanh thu từ appointments (tất cả appointments đã thanh toán)
+    @Query("""
+            SELECT COALESCE(SUM(a.totalAmount), 0) FROM Appointment a
+            WHERE a.startDateTime >= :startInstant
+              AND a.startDateTime < :endInstant
+              AND a.paymentStatus = 'PAID'
+              AND a.status = 'COMPLETED'
+              AND a.totalAmount IS NOT NULL
+            """)
+    java.math.BigDecimal sumRevenueFromAppointments(
+            @Param("startInstant") Instant startInstant,
+            @Param("endInstant") Instant endInstant
+    );
+
+    // CHỐNG RACE CONDITION KHI ĐẶT LỊCH
+    boolean existsByDoctorIdAndStartDateTimeAndStatusNot(Integer doctorId, java.time.Instant startDateTime, String status);
 }

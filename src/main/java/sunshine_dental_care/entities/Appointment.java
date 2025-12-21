@@ -4,9 +4,22 @@ import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;
 
-import jakarta.persistence.*;
 import org.hibernate.annotations.ColumnDefault;
 import org.hibernate.annotations.Nationalized;
+
+import jakarta.persistence.CascadeType;
+import jakarta.persistence.Column;
+import jakarta.persistence.Entity;
+import jakarta.persistence.FetchType;
+import jakarta.persistence.GeneratedValue;
+import jakarta.persistence.GenerationType;
+import jakarta.persistence.Id;
+import jakarta.persistence.JoinColumn;
+import jakarta.persistence.ManyToOne;
+import jakarta.persistence.OneToMany;
+import jakarta.persistence.PrePersist;
+import jakarta.persistence.PreUpdate;
+import jakarta.persistence.Table;
 
 @Entity
 @Table(name = "Appointments")
@@ -31,7 +44,6 @@ public class Appointment {
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "serviceId")
     private Service service;
-
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "roomId")
@@ -74,130 +86,85 @@ public class Appointment {
     @Column(name = "bookingFee")
     private BigDecimal bookingFee; // Phí đặt lịch hẹn
 
+    // --- Cờ đánh dấu đã gửi nhắc nhở 24h ---
+    @Column(name = "is_reminder_sent")
+    private Boolean isReminderSent = false;
+
+    // --- MỚI THÊM: Cờ đánh dấu đã gửi nhắc nhở gấp (2h) ---
+    @Column(name = "is_urgent_reminder_sent")
+    private Boolean isUrgentReminderSent = false;
+
+    @Column(name = "paymentStatus", length = 50)
+    private String paymentStatus; // UNPAID, PAID
+
+    @Column(name = "transactionRef", length = 100)
+    private String transactionRef; // Mã giao dịch VNPay/PayPal
+
+    @Column(name = "sub_total")
+    private java.math.BigDecimal subTotal;
+
+    // 2. Số tiền được giảm giá
+    @Column(name = "discount_amount")
+    private java.math.BigDecimal discountAmount;
+
+    // 3. Tổng tiền khách thực trả (Sau khi trừ giảm giá + cọc)
+    @Column(name = "total_amount")
+    private java.math.BigDecimal totalAmount;
+
+    @Column(name = "invoice_code")
+    private String invoiceCode;
+
     // Mỗi Lịch hẹn (Appointment) có thể chứa nhiều (Many) bản ghi Chi tiết Dịch vụ Lịch hẹn (AppointmentService).
     @OneToMany(mappedBy = "appointment", cascade = CascadeType.ALL, fetch = FetchType.LAZY)
     private List<AppointmentService> appointmentServices;
 
-    public Integer getId() {
-        return id;
-    }
 
-    public void setId(Integer id) {
-        this.id = id;
-    }
+    // --- GETTERS & SETTERS ---
 
-    public Clinic getClinic() {
-        return clinic;
-    }
+    public Integer getId() { return id; }
+    public void setId(Integer id) { this.id = id; }
 
-    public void setClinic(Clinic clinic) {
-        this.clinic = clinic;
-    }
+    public Clinic getClinic() { return clinic; }
+    public void setClinic(Clinic clinic) { this.clinic = clinic; }
 
-    public Patient getPatient() {
-        return patient;
-    }
+    public Patient getPatient() { return patient; }
+    public void setPatient(Patient patient) { this.patient = patient; }
 
-    public void setPatient(Patient patient) {
-        this.patient = patient;
-    }
+    public User getDoctor() { return doctor; }
+    public void setDoctor(User doctor) { this.doctor = doctor; }
 
-    public User getDoctor() {
-        return doctor;
-    }
+    public Service getService() { return service; }
+    public void setService(Service service) { this.service = service; }
 
-    public void setDoctor(User doctor) {
-        this.doctor = doctor;
-    }
+    public Room getRoom() { return room; }
+    public void setRoom(Room room) { this.room = room; }
 
-    public Service getService() {
-        return service;
-    }
+    public Instant getStartDateTime() { return startDateTime; }
+    public void setStartDateTime(Instant startDateTime) { this.startDateTime = startDateTime; }
 
-    public void setService(Service service) {
-        this.service = service;
-    }
+    public Instant getEndDateTime() { return endDateTime; }
+    public void setEndDateTime(Instant endDateTime) { this.endDateTime = endDateTime; }
 
-    public Room getRoom() {
-        return room;
-    }
+    public String getStatus() { return status; }
+    public void setStatus(String status) { this.status = status; }
 
-    public void setRoom(Room room) {
-        this.room = room;
-    }
+    public String getChannel() { return channel; }
+    public void setChannel(String channel) { this.channel = channel; }
 
-    public Instant getStartDateTime() {
-        return startDateTime;
-    }
+    public String getNote() { return note; }
+    public void setNote(String note) { this.note = note; }
 
-    public void setStartDateTime(Instant startDateTime) {
-        this.startDateTime = startDateTime;
-    }
+    public User getCreatedBy() { return createdBy; }
+    public void setCreatedBy(User createdBy) { this.createdBy = createdBy; }
 
-    public Instant getEndDateTime() {
-        return endDateTime;
-    }
+    public Instant getCreatedAt() { return createdAt; }
+    public void setCreatedAt(Instant createdAt) { this.createdAt = createdAt; }
 
-    public void setEndDateTime(Instant endDateTime) {
-        this.endDateTime = endDateTime;
-    }
+    public Instant getUpdatedAt() { return updatedAt; }
+    public void setUpdatedAt(Instant updatedAt) { this.updatedAt = updatedAt; }
 
-    public String getStatus() {
-        return status;
-    }
-
-    public void setStatus(String status) {
-        this.status = status;
-    }
-
-    public String getChannel() {
-        return channel;
-    }
-
-    public void setChannel(String channel) {
-        this.channel = channel;
-    }
-
-    public String getNote() {
-        return note;
-    }
-
-    public void setNote(String note) {
-        this.note = note;
-    }
-
-    public User getCreatedBy() {
-        return createdBy;
-    }
-
-    public void setCreatedBy(User createdBy) {
-        this.createdBy = createdBy;
-    }
-
-    public Instant getCreatedAt() {
-        return createdAt;
-    }
-
-    public void setCreatedAt(Instant createdAt) {
-        this.createdAt = createdAt;
-    }
-
-    public Instant getUpdatedAt() {
-        return updatedAt;
-    }
-
-    public void setUpdatedAt(Instant updatedAt) {
-        this.updatedAt = updatedAt;
-    }
-
-
-    public List<AppointmentService> getAppointmentServices() {
-        return appointmentServices;
-    }
-
-    public void setAppointmentServices(List<AppointmentService> appointmentServices) {
-        this.appointmentServices = appointmentServices;
-    }
+    public List<AppointmentService> getAppointmentServices() { return appointmentServices; }
+    public void setAppointmentServices(List<AppointmentService> appointmentServices) { this.appointmentServices = appointmentServices; }
 
     public String getAppointmentType() { return appointmentType; }
     public void setAppointmentType(String appointmentType) { this.appointmentType = appointmentType; }
@@ -205,23 +172,64 @@ public class Appointment {
     public BigDecimal getBookingFee() { return bookingFee; }
     public void setBookingFee(BigDecimal bookingFee) { this.bookingFee = bookingFee; }
 
+    public Boolean getIsReminderSent() { return isReminderSent; }
+    public void setIsReminderSent(Boolean reminderSent) { isReminderSent = reminderSent; }
+
+    public Boolean getIsUrgentReminderSent() { return isUrgentReminderSent; }
+    public void setIsUrgentReminderSent(Boolean urgentReminderSent) { isUrgentReminderSent = urgentReminderSent; }
+
+    public String getPaymentStatus() {
+        return paymentStatus;
+    }
+    public void setPaymentStatus(String paymentStatus) {
+        this.paymentStatus = paymentStatus;
+    }
+    public String getTransactionRef() {
+        return transactionRef;
+    }
+    public void setTransactionRef(String transactionRef) {
+        this.transactionRef = transactionRef;
+    }
+
+    public java.math.BigDecimal getSubTotal() {
+        return subTotal;
+    }
+    public void setSubTotal(java.math.BigDecimal subTotal) {
+        this.subTotal = subTotal;
+    }
+    public java.math.BigDecimal getDiscountAmount() {
+        return discountAmount;
+    }
+    public void setDiscountAmount(java.math.BigDecimal discountAmount) {
+        this.discountAmount = discountAmount;
+    }
+    public java.math.BigDecimal getTotalAmount() {
+        return totalAmount;
+    }
+    public void setTotalAmount(java.math.BigDecimal totalAmount) {
+        this.totalAmount = totalAmount;
+    }
+
+    public String getInvoiceCode() {
+        return invoiceCode;
+    }
+
+    public void setInvoiceCode(String invoiceCode) {
+        this.invoiceCode = invoiceCode;
+    }
+
     @PrePersist
     public void prePersist() {
-        if (createdAt == null) {
-            createdAt = Instant.now();
-        }
-        if (updatedAt == null) {
-            updatedAt = Instant.now();
-        }
-        // Mặc định channel nếu chưa có
-        if (channel == null) {
-            channel = "WALK_IN";
-        }
+        if (createdAt == null) createdAt = Instant.now();
+        if (updatedAt == null) updatedAt = Instant.now();
+        if (channel == null) channel = "WALK_IN";
+        if (isReminderSent == null) isReminderSent = false;
+        // Init cờ mới
+        if (isUrgentReminderSent == null) isUrgentReminderSent = false;
     }
 
     @PreUpdate
     public void preUpdate() {
         updatedAt = Instant.now();
     }
-
 }

@@ -21,7 +21,6 @@ import lombok.RequiredArgsConstructor;
 @Configuration
 @RequiredArgsConstructor
 @EnableMethodSecurity(prePostEnabled = true)
-
 public class SecurityConfig {
 
     private final JwtAuthFilter jwtAuthFilter;
@@ -35,20 +34,18 @@ public class SecurityConfig {
                 .cors(Customizer.withDefaults())
                 .csrf(AbstractHttpConfigurer::disable)
 
-                // 2. Stateless Session (Vì dùng JWT)
+                // 2. Stateless Session
                 .sessionManagement(sm -> sm.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
 
-                // 3. Xử lý lỗi 401 (Unauthorized) & 403 (Forbidden) trả về JSON
+                // 3. Exception Handling
                 .exceptionHandling(e -> e
                         .authenticationEntryPoint((req, res, ex) -> {
-                            // Trả về JSON nếu là API request
                             String uri = req.getRequestURI();
                             if (uri != null && uri.startsWith("/api/")) {
                                 res.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
                                 res.setContentType("application/json;charset=UTF-8");
                                 res.getWriter().write("{\"error\":\"Unauthorized\",\"message\":\"Authentication required\"}");
                             } else {
-                                // Redirect login nếu là trang thường (hoặc mặc định)
                                 res.sendError(HttpServletResponse.SC_UNAUTHORIZED, ex.getMessage());
                             }
                         })
@@ -64,77 +61,95 @@ public class SecurityConfig {
                         })
                 )
 
-                // 4. Phân quyền URL
+                // 4. PHÂN QUYỀN URL
                 .authorizeHttpRequests(auth -> auth
-                        // Preflight requests
+                        // --- PREFLIGHT REQUESTS ---
                         .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
 
-                        // --- CÁC API CÔNG KHAI (KHÔNG CẦN LOGIN) ---
+                        // --- PUBLIC STATIC RESOURCES ---
                         .requestMatchers("/locale").permitAll()
                         .requestMatchers("/uploads_avatar/**").permitAll()
-                        .requestMatchers("/uploads/**").permitAll() // Public product images *huybro
-                        .requestMatchers("/api/auth/sign-up", "/api/auth/login").permitAll()
-                        .requestMatchers("/api/auth/google", "/oauth2/**", "/login/oauth2/**").permitAll()
-                        .requestMatchers( "/api/products/**").permitAll() // Public endpoints products *huybro
-                        .requestMatchers("/ws/**").permitAll() // WebSocket endpoint (authentication handled in WebSocket layer)
+                        .requestMatchers("/uploads/**").permitAll()
+                        .requestMatchers("/ws/**").permitAll()
+                        .requestMatchers("/auth/sign-up").permitAll()
 
-                        .requestMatchers("/api/doctor/**","/api/patients/{patientId}/records/**").hasRole("DOCTOR") // Chỉ bác sĩ được phép,
-                        .requestMatchers("/auth/sign-up").permitAll()  // Cho phép đăng ký PATIENT * đổi vị trí vì đây là public
+                        // Products & inventory
+                        .requestMatchers("/api/products/accountant/**").hasAnyRole("ACCOUNTANT", "ADMIN")
+                        .requestMatchers("/api/inventory/**").hasAnyRole("ACCOUNTANT", "ADMIN")
+                        .requestMatchers("/api/invoices/**").hasAnyRole("ACCOUNTANT", "ADMIN")
+                        // Payroll: Config GET và POST cho cả ACCOUNTANT và ADMIN
+                        .requestMatchers(HttpMethod.GET, "/api/payroll/config/**").hasAnyRole("ACCOUNTANT", "ADMIN")
+                        .requestMatchers(HttpMethod.POST, "/api/payroll/config").hasAnyRole("ACCOUNTANT", "ADMIN")
+                        .requestMatchers("/api/payroll/missing-configs").hasRole("ADMIN")
+                        .requestMatchers("/api/payroll/**").hasAnyRole("ACCOUNTANT", "ADMIN")
 
-                        // Products
-                        .requestMatchers("/api/products/accountant/**").hasRole("ACCOUNTANT")
-                        .requestMatchers("/api/products/**").permitAll()
-                        .requestMatchers("/api/cart/**").permitAll()
-                        .requestMatchers("/api/checkout/**").permitAll()
                         // Auth Endpoints
                         .requestMatchers(
                                 "/api/auth/sign-up",
                                 "/api/auth/login",
                                 "/api/auth/google",
+                                "/api/auth/google-mobile", // Native Mobile Login
                                 "/oauth2/**",
                                 "/login/oauth2/**",
-
-                                // === THÊM 2 DÒNG NÀY ĐỂ FIX LỖI 401 ===
                                 "/api/auth/forgot-password",
-                                "/api/auth/reset-password"
+                                "/api/auth/reset-password",
+                                "/api/auth/verify-account",
+                                "/api/auth/resend-verification",
+
+                                // API OTP & PHONE LOGIN
+                                "/api/auth/login-phone/step1",
+                                "/api/auth/login-phone/step2",
+                                "/api/auth/login-phone/password",
+
+                                // [MỚI] PUBLIC API CHO QR LOGIN
+                                "/api/auth/qr-login" // Mobile gọi API này khi chưa có token chính thức
                         ).permitAll()
 
+                        // Public Shop API
+                        .requestMatchers(
+                                "/api/products/**",
+                                "/api/cart/**",
+                                "/api/checkout/**",
+                                "/api/public/**"
+                        ).permitAll()
 
-                        // --- CÁC API CẦN LOGIN ---
+                        // --- AUTHENTICATED USER (LOGGED IN) ---
+                        // Endpoint "/api/auth/qr-generate" sẽ rơi vào đây (authenticated)
                         .requestMatchers(HttpMethod.POST, "/api/auth/change-password").authenticated()
+                        .requestMatchers("/api/booking/**").authenticated()
+                        .requestMatchers("/api/hr/employees/doctors").authenticated()
 
-                        // Phân quyền theo Role
-                        .requestMatchers("/api/hr/employees/**").hasRole("HR")
+                        // --- ROLES SPECIFIC ---
+                        .requestMatchers("/api/doctor/**", "/api/patients/{patientId}/records/**").hasRole("DOCTOR")
+                        .requestMatchers("/api/products/accountant/**").hasAnyRole("ACCOUNTANT", "ADMIN")
+                        .requestMatchers("/api/hr/management/departments", "/api/hr/management/clinics",
+                                "/api/hr/management/roles", "/api/hr/management/rooms").hasAnyRole("HR", "ADMIN")
                         .requestMatchers("/api/hr/management/**").hasRole("HR")
-                        .requestMatchers("/api/public/**").permitAll()
+                        .requestMatchers("/api/hr/employees/**").hasRole("HR")
 
                         // Cho phép mọi user đã login (bao gồm Patient) xem slot và đặt lịch
                         .requestMatchers("/api/booking/**").authenticated()
 
+                        // Cho phép User đã đăng nhập (ROLE_USER) gọi API thanh toán & API Booking
+                        .requestMatchers("/api/booking/payment/**").authenticated()
+                        .requestMatchers("/api/booking/appointments").authenticated()
+
+                        // --- RECEPTION ROLE (Admin cũng được vào) ---
                         // === only Reception and Admin can access role reception API  ===
                         .requestMatchers("/api/reception/**").hasAnyRole("RECEPTION", "ADMIN")
-
-                        // Additional auth endpoints
-                        .requestMatchers("/auth/sign-up").permitAll()  // Cho phép đăng ký PATIENT
-                        .requestMatchers("/api/hr/employees/doctors").authenticated()  // Cho phép authenticated users xem danh sách bác sĩ
-                        .requestMatchers("/api/hr/employees/**").hasRole("HR")  // Chỉ HR được phép các endpoint khác
-                        .requestMatchers("/api/admin/**").hasRole("ADMIN")
-                        .requestMatchers("/api/hr/management/**").hasRole("HR")  // HR Management endpoints
-
-                        .requestMatchers("/api/hr/employees/**").hasRole("HR")  // Chỉ HR được phép
                         .requestMatchers("/api/admin/**").hasRole("ADMIN")
 
-                        // Tất cả request còn lại phải đăng nhập
+                        // --- MẶC ĐỊNH CÒN LẠI ---
                         .anyRequest().authenticated()
                 )
 
-                // 5. Cấu hình OAuth2 (Google Login)
+                // 5. OAuth2 Login
                 .oauth2Login(oauth -> oauth
                         .userInfoEndpoint(u -> u.userService(oAuth2UserService))
                         .successHandler(oAuth2SuccessHandler)
                 )
 
-                // 6. Thêm Filter JWT
+                // 6. JWT Filter
                 .addFilterBefore(jwtAuthFilter, UsernamePasswordAuthenticationFilter.class);
 
         return http.build();

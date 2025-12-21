@@ -22,21 +22,26 @@ import sunshine_dental_care.dto.hrDTO.EmployeeRequest;
 import sunshine_dental_care.dto.hrDTO.EmployeeResponse;
 import sunshine_dental_care.services.interfaces.hr.HrEmployeeService;
 import sunshine_dental_care.services.upload_file.AvatarStorageService;
+import sunshine_dental_care.services.hr.EmployeeCvDataService;
+import sunshine_dental_care.entities.EmployeeCvData;
 
 @RestController
 @RequestMapping("/api/hr/employees")
 @Slf4j
 public class HrEmployeeController {
-    
+
     private final HrEmployeeService hrEmployeeService;
     private final AvatarStorageService avatarStorageService;
-    
-    public HrEmployeeController(HrEmployeeService hrEmployeeService, AvatarStorageService avatarStorageService) {
+    private final EmployeeCvDataService employeeCvDataService;
+
+    public HrEmployeeController(HrEmployeeService hrEmployeeService, AvatarStorageService avatarStorageService,
+                                EmployeeCvDataService employeeCvDataService) {
         this.hrEmployeeService = hrEmployeeService;
         this.avatarStorageService = avatarStorageService;
+        this.employeeCvDataService = employeeCvDataService;
     }
-    
-    // 1. TẠO NHÂN VIÊN MỚI
+
+    // Tạo mới nhân viên
     @PostMapping
     @org.springframework.security.access.prepost.PreAuthorize("hasRole('HR')")
     public ResponseEntity<EmployeeResponse> createEmployee(@Valid @RequestBody EmployeeRequest request) {
@@ -44,8 +49,8 @@ public class HrEmployeeController {
         EmployeeResponse response = hrEmployeeService.createEmployee(request);
         return ResponseEntity.ok(response);
     }
-    
-    // 1b. UPLOAD AVATAR CHO NHÂN VIÊN
+
+    // Upload avatar cho nhân viên
     @PostMapping("/{id}/avatar")
     @org.springframework.security.access.prepost.PreAuthorize("hasRole('HR')")
     public ResponseEntity<EmployeeResponse> uploadEmployeeAvatar(
@@ -61,8 +66,8 @@ public class HrEmployeeController {
             throw new RuntimeException("Failed to upload avatar: " + ex.getMessage(), ex);
         }
     }
-    
-    // 2. XEM DANH SÁCH NHÂN VIÊN (có phân trang, tìm kiếm, lọc)
+
+    // Lấy danh sách nhân viên kèm phân trang, tìm kiếm, lọc
     @GetMapping
     @org.springframework.security.access.prepost.PreAuthorize("hasRole('HR')")
     public ResponseEntity<Page<EmployeeResponse>> getEmployees(
@@ -73,31 +78,31 @@ public class HrEmployeeController {
             @RequestParam(required = false) Boolean isActive,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "10") int size) {
-        
+
         Page<EmployeeResponse> employees = hrEmployeeService.getEmployees(
                 search, clinicId, departmentId, roleId, isActive, page, size);
         return ResponseEntity.ok(employees);
     }
-    
-    // 3. XEM CHI TIẾT NHÂN VIÊN
+
+    // Lấy chi tiết nhân viên bằng id
     @GetMapping("/{id}")
     @org.springframework.security.access.prepost.PreAuthorize("hasRole('HR')")
     public ResponseEntity<EmployeeResponse> getEmployeeById(@PathVariable Integer id) {
         EmployeeResponse response = hrEmployeeService.getEmployeeById(id);
         return ResponseEntity.ok(response);
     }
-    
-    // 4. CẬP NHẬT THÔNG TIN NHÂN VIÊN
+
+    // Cập nhật thông tin nhân viên
     @PutMapping("/{id}")
     @org.springframework.security.access.prepost.PreAuthorize("hasRole('HR')")
     public ResponseEntity<EmployeeResponse> updateEmployee(
-            @PathVariable Integer id, 
+            @PathVariable Integer id,
             @Valid @RequestBody EmployeeRequest request) {
         EmployeeResponse response = hrEmployeeService.updateEmployee(id, request);
         return ResponseEntity.ok(response);
     }
-    
-    // 5. KHÓA/MỞ KHÓA TÀI KHOẢN
+
+    // Khóa/mở khóa tài khoản nhân viên
     @PutMapping("/{id}/toggle-status")
     @org.springframework.security.access.prepost.PreAuthorize("hasRole('HR')")
     public ResponseEntity<EmployeeResponse> toggleEmployeeStatus(
@@ -107,8 +112,8 @@ public class HrEmployeeController {
         EmployeeResponse response = hrEmployeeService.toggleEmployeeStatus(id, isActive, reason);
         return ResponseEntity.ok(response);
     }
-    
-    // 6. THỐNG KÊ NHÂN VIÊN
+
+    // Thống kê nhân viên theo phòng ban/chi nhánh (nếu được truyền vào)
     @GetMapping("/statistics")
     @org.springframework.security.access.prepost.PreAuthorize("hasRole('HR')")
     public ResponseEntity<Map<String, Object>> getStatistics(
@@ -117,24 +122,117 @@ public class HrEmployeeController {
         Map<String, Object> stats = hrEmployeeService.getStatistics(clinicId, departmentId);
         return ResponseEntity.ok(stats);
     }
-    
-    // 7. XÓA NHÂN VIÊN (soft delete)
-    @DeleteMapping("/{id}")
+
+    // Xóa vĩnh viễn nhân viên (hard delete) - chỉ cho phép nếu HR xác nhận đơn nghỉ việc đã được duyệt
+    @DeleteMapping("/{id}/hard-delete")
     @org.springframework.security.access.prepost.PreAuthorize("hasRole('HR')")
-    public ResponseEntity<Map<String, String>> deleteEmployee(
+    public ResponseEntity<Map<String, String>> hardDeleteEmployee(
             @PathVariable Integer id,
             @RequestParam String reason) {
-        hrEmployeeService.deleteEmployee(id, reason);
+        hrEmployeeService.hardDeleteEmployee(id, reason);
         Map<String, String> response = new java.util.HashMap<>();
-        response.put("message", "Employee deleted successfully");
+        response.put("message", "Employee permanently deleted successfully");
         return ResponseEntity.ok(response);
     }
-    
-    // 8. LẤY DANH SÁCH BÁC SĨ (public - cho phép authenticated users)
+
+    // Lấy danh sách bác sĩ (endpoint public, chỉ cần xác thực)
     @GetMapping("/doctors")
     public ResponseEntity<List<EmployeeResponse>> getAllDoctors() {
         log.info("Getting all doctors (public endpoint)");
         List<EmployeeResponse> doctors = hrEmployeeService.getAllDoctors();
         return ResponseEntity.ok(doctors);
+    }
+
+    // Preview mã nhân viên sẽ được sinh (để hiển thị trên form)
+    @GetMapping("/preview-code")
+    @org.springframework.security.access.prepost.PreAuthorize("hasRole('HR')")
+    public ResponseEntity<Map<String, String>> previewEmployeeCode() {
+        log.info("Previewing employee code");
+        String code = hrEmployeeService.previewEmployeeCode();
+        Map<String, String> response = new java.util.HashMap<>();
+        response.put("code", code);
+        return ResponseEntity.ok(response);
+    }
+
+    // Upload CV và extract text + images bằng Tesseract OCR
+    @PostMapping("/{id}/upload-cv")
+    @org.springframework.security.access.prepost.PreAuthorize("hasRole('HR')")
+    public ResponseEntity<Map<String, Object>> uploadCv(
+            @PathVariable Integer id,
+            @RequestParam("file") MultipartFile file) {
+        try {
+            log.info("Uploading CV for employee {}: {}", id, file.getOriginalFilename());
+            EmployeeCvData cvData = employeeCvDataService.uploadAndExtractCv(file, id);
+            
+            Map<String, Object> response = new java.util.HashMap<>();
+            response.put("id", cvData.getId());
+            response.put("userId", cvData.getUserId());
+            response.put("originalFileName", cvData.getOriginalFileName());
+            response.put("fileType", cvData.getFileType());
+            response.put("fileSize", cvData.getFileSize());
+            response.put("cvFileUrl", cvData.getCvFileUrl());
+            response.put("extractedText", cvData.getExtractedText());
+            response.put("extractedImages", employeeCvDataService.parseExtractedImages(cvData));
+            response.put("message", "CV uploaded and extracted successfully");
+            
+            return ResponseEntity.ok(response);
+        } catch (Exception ex) {
+            log.error("Failed to upload and extract CV: {}", ex.getMessage(), ex);
+            throw new RuntimeException("Failed to upload CV: " + ex.getMessage(), ex);
+        }
+    }
+
+    // Lấy CV data của nhân viên
+    @GetMapping("/{id}/cv")
+    @org.springframework.security.access.prepost.PreAuthorize("hasRole('HR')")
+    public ResponseEntity<Map<String, Object>> getCvData(@PathVariable Integer id) {
+        return employeeCvDataService.getCvDataByUserId(id)
+            .map(cvData -> {
+                Map<String, Object> response = new java.util.HashMap<>();
+                response.put("id", cvData.getId());
+                response.put("userId", cvData.getUserId());
+                response.put("originalFileName", cvData.getOriginalFileName());
+                response.put("fileType", cvData.getFileType());
+                response.put("fileSize", cvData.getFileSize());
+                response.put("cvFileUrl", cvData.getCvFileUrl());
+                response.put("extractedText", cvData.getExtractedText());
+                response.put("extractedImages", employeeCvDataService.parseExtractedImages(cvData));
+                response.put("createdAt", cvData.getCreatedAt());
+                response.put("updatedAt", cvData.getUpdatedAt());
+                return ResponseEntity.ok(response);
+            })
+            .orElse(ResponseEntity.notFound().build());
+    }
+
+    // Cập nhật extracted text của CV
+    @PutMapping("/{id}/cv/text")
+    @org.springframework.security.access.prepost.PreAuthorize("hasRole('HR')")
+    public ResponseEntity<Map<String, Object>> updateCvText(
+            @PathVariable Integer id,
+            @RequestBody Map<String, String> request) {
+        String extractedText = request.get("extractedText");
+        if (extractedText == null) {
+            throw new IllegalArgumentException("extractedText is required");
+        }
+        
+        EmployeeCvData cvData = employeeCvDataService.updateExtractedText(id, extractedText);
+        
+        Map<String, Object> response = new java.util.HashMap<>();
+        response.put("id", cvData.getId());
+        response.put("userId", cvData.getUserId());
+        response.put("extractedText", cvData.getExtractedText());
+        response.put("message", "CV text updated successfully");
+        
+        return ResponseEntity.ok(response);
+    }
+
+    // Xóa CV data của nhân viên
+    @DeleteMapping("/{id}/cv")
+    @org.springframework.security.access.prepost.PreAuthorize("hasRole('HR')")
+    public ResponseEntity<Map<String, String>> deleteCvData(@PathVariable Integer id) {
+        employeeCvDataService.deleteCvDataByUserId(id);
+        Map<String, String> response = new java.util.HashMap<>();
+        response.put("message", "CV data deleted successfully");
+        return ResponseEntity.ok(response);
     }
 }

@@ -1,14 +1,28 @@
 package sunshine_dental_care.entities;
 
-import jakarta.persistence.*;
+import java.time.Instant;
+
 import org.hibernate.annotations.ColumnDefault;
 import org.hibernate.annotations.Nationalized;
 
-import java.time.Instant;
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+
+import jakarta.persistence.Column;
+import jakarta.persistence.Entity;
+import jakarta.persistence.FetchType;
+import jakarta.persistence.GeneratedValue;
+import jakarta.persistence.GenerationType;
+import jakarta.persistence.Id;
+import jakarta.persistence.JoinColumn;
+import jakarta.persistence.ManyToOne;
+import jakarta.persistence.PrePersist; // Import quan trọng
+import jakarta.persistence.Table;
 
 @Entity
 @Table(name = "UserRoles")
+@JsonIgnoreProperties({"hibernateLazyInitializer", "handler"})
 public class UserRole {
+
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     @Column(name = "id", nullable = false)
@@ -34,18 +48,32 @@ public class UserRole {
     @JoinColumn(name = "assignedBy")
     private User assignedBy;
 
-    @ColumnDefault("sysutcdatetime()")
+    // Đánh dấu nullable = false để đồng bộ với DB
     @Column(name = "assignedDate", nullable = false)
     private Instant assignedDate;
 
     @ColumnDefault("1")
     @Column(name = "isActive", nullable = false)
-    private Boolean isActive = false;
+    private Boolean isActive = true;
 
     @Nationalized
-    @Column(name = "description", length = 400)
+    @Column(name = "description", length = 500)
     private String description;
 
+    // --- KHẮC PHỤC LỖI SQL 515 ---
+    @PrePersist
+    protected void onCreate() {
+        // Tự động gán thời gian hiện tại nếu chưa có
+        if (assignedDate == null) {
+            assignedDate = Instant.now();
+        }
+        // Đảm bảo isActive không null
+        if (isActive == null) {
+            isActive = true;
+        }
+    }
+
+    // Getters and Setters
     public Integer getId() {
         return id;
     }
@@ -116,11 +144,5 @@ public class UserRole {
 
     public void setDescription(String description) {
         this.description = description;
-    }
-
-    @PrePersist
-    void prePersist() {
-        if (assignedDate == null) assignedDate = java.time.Instant.now();
-        if (isActive == null) isActive = true;
     }
 }

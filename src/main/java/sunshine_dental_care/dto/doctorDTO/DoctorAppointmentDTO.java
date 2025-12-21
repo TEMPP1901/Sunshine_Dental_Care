@@ -8,6 +8,7 @@ import lombok.Setter;
 
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.util.List;
 
 @Getter
 @Setter
@@ -36,8 +37,9 @@ public class DoctorAppointmentDTO {
     private Instant updatedAt;
 
     private ServiceDTO service;
+    private List<String> serviceDetails; // list để hứng nhiều dịch vụ
     private ServiceVariantDTO serviceVariant; // Variant từ AppointmentService
-    
+
     private String appointmentType; // "VIP" hoặc "STANDARD"
     private BigDecimal bookingFee; // Phí đặt lịch hẹn
 }

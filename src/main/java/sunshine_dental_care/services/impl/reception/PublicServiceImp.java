@@ -30,7 +30,7 @@ public class PublicServiceImp implements PublicService {
     public List<ClinicResponse> getAllActiveClinics() {
         return clinicRepo.findAll().stream()
                 .filter(c -> Boolean.TRUE.equals(c.getIsActive()))
-                .map(c -> new ClinicResponse(c.getId(), c.getClinicName(), c.getClinicCode()))
+                .map(c -> new ClinicResponse(c.getId(), c.getClinicName(), c.getClinicCode(), c.getIsActive()))
                 .collect(Collectors.toList());
     }
 

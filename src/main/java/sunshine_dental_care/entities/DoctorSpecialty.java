@@ -21,7 +21,7 @@ import jakarta.persistence.Table;
 
 @Entity
 @Table(name = "DoctorSpecialties")
-@JsonIgnoreProperties({"hibernateLazyInitializer", "handler"})
+@JsonIgnoreProperties({ "hibernateLazyInitializer", "handler" })
 public class DoctorSpecialty {
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
@@ -49,7 +49,8 @@ public class DoctorSpecialty {
     private Instant updatedAt;
 
     // Constructors
-    public DoctorSpecialty() {}
+    public DoctorSpecialty() {
+    }
 
     public DoctorSpecialty(User doctor, String specialtyName) {
         this.doctor = doctor;
@@ -108,8 +109,10 @@ public class DoctorSpecialty {
 
     @PrePersist
     void prePersist() {
-        if (createdAt == null) createdAt = Instant.now();
-        if (updatedAt == null) updatedAt = createdAt;
+        if (createdAt == null)
+            createdAt = Instant.now();
+        if (updatedAt == null)
+            updatedAt = createdAt;
     }
 
     @PreUpdate
@@ -117,4 +120,3 @@ public class DoctorSpecialty {
         updatedAt = Instant.now();
     }
 }
-

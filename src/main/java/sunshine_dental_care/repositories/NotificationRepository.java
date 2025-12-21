@@ -33,10 +33,11 @@ public interface NotificationRepository extends JpaRepository<Log, Integer> {
     @Query("SELECT COUNT(n) FROM Log n WHERE n.userId = :userId AND n.isRead = false")
     long countAllUnreadByUserId(@Param("userId") Integer userId);
 
-    // Đánh dấu tất cả thông báo là đã đọc cho user
+    // Đánh dấu tất cả thông báo là đã đọc cho user (chỉ thông báo còn hiệu lực)
     @Modifying
     @Query("UPDATE Log n SET n.isRead = true, n.readAt = CURRENT_TIMESTAMP " +
-           "WHERE n.userId = :userId AND n.isRead = false")
+           "WHERE n.userId = :userId AND n.isRead = false " +
+           "AND (n.expiresAt IS NULL OR n.expiresAt > CURRENT_TIMESTAMP)")
     void markAllAsRead(@Param("userId") Integer userId);
 
     // Thống kê tổng số thông báo của user
@@ -57,8 +58,8 @@ public interface NotificationRepository extends JpaRepository<Log, Integer> {
     long countExpiredByUserId(@Param("userId") Integer userId);
 
     // Đếm số thông báo trong ngày cho user
-    @Query(value = "SELECT COUNT(n) FROM Logs n WHERE n.userId = :userId " +
-           "AND CAST(n.createdAt AS DATE) = CAST(GETDATE() AS DATE)", 
+    @Query(value = "SELECT COUNT(*) FROM Logs WHERE userId = :userId " +
+           "AND CAST(createdAt AS DATE) = CAST(GETDATE() AS DATE)", 
            nativeQuery = true)
     long countTodayByUserId(@Param("userId") Integer userId);
 
@@ -79,4 +80,18 @@ public interface NotificationRepository extends JpaRepository<Log, Integer> {
            "AND (n.expiresAt IS NULL OR n.expiresAt > CURRENT_TIMESTAMP) " +
            "ORDER BY n.createdAt DESC")
     List<Log> findUnreadNotifications(@Param("userId") Integer userId);
+
+    // Kiểm tra xem đã có notification với type và relatedEntityId cụ thể trong ngày hôm nay chưa
+    @Query(value = "SELECT COUNT(*) FROM Logs WHERE userId = :userId " +
+           "AND type = :type " +
+           "AND relatedEntityType = :relatedEntityType " +
+           "AND relatedEntityId = :relatedEntityId " +
+           "AND CAST(createdAt AS DATE) = CAST(GETDATE() AS DATE)",
+           nativeQuery = true)
+    long countByUserIdAndTypeAndEntityToday(
+        @Param("userId") Integer userId,
+        @Param("type") String type,
+        @Param("relatedEntityType") String relatedEntityType,
+        @Param("relatedEntityId") Integer relatedEntityId
+    );
 }
