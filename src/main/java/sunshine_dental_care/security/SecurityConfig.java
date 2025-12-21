@@ -77,6 +77,10 @@ public class SecurityConfig {
                         .requestMatchers("/api/products/accountant/**").hasAnyRole("ACCOUNTANT", "ADMIN")
                         .requestMatchers("/api/inventory/**").hasAnyRole("ACCOUNTANT", "ADMIN")
                         .requestMatchers("/api/invoices/**").hasAnyRole("ACCOUNTANT", "ADMIN")
+                        // Payroll: Config GET và POST cho cả ACCOUNTANT và ADMIN
+                        .requestMatchers(HttpMethod.GET, "/api/payroll/config/**").hasAnyRole("ACCOUNTANT", "ADMIN")
+                        .requestMatchers(HttpMethod.POST, "/api/payroll/config").hasAnyRole("ACCOUNTANT", "ADMIN")
+                        .requestMatchers("/api/payroll/missing-configs").hasRole("ADMIN")
                         .requestMatchers("/api/payroll/**").hasAnyRole("ACCOUNTANT", "ADMIN")
 
                         // Auth Endpoints
