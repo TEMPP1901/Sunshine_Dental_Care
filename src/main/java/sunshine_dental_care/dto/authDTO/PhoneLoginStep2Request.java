@@ -1,4 +1,5 @@
 package sunshine_dental_care.dto.authDTO;
+
 import jakarta.validation.constraints.NotBlank;
 
 public record PhoneLoginStep2Request(
@@ -6,5 +7,8 @@ public record PhoneLoginStep2Request(
         String phone,
 
         @NotBlank(message = "Vui lòng nhập mã OTP")
-        String otp
+        String otp,
+
+        // Thêm trường locale (vi/en)
+        String locale
 ) {}

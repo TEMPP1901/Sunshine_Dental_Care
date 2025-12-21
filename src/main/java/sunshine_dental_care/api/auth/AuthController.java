@@ -7,9 +7,9 @@ import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
-import org.springframework.security.access.prepost.PreAuthorize; // Import thêm cái này
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.Authentication;
-import org.springframework.security.core.context.SecurityContextHolder; // Import thêm cái này
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.*;
 
 import sunshine_dental_care.dto.authDTO.*;
@@ -24,7 +24,9 @@ public class AuthController {
 
     private final AuthService authService;
 
-    // ... [CÁC API CŨ GIỮ NGUYÊN - TỪ sign-up ĐẾN resend-verification] ...
+    // =================================================================
+    // CÁC TÍNH NĂNG CƠ BẢN
+    // =================================================================
 
     @PostMapping("/sign-up")
     public ResponseEntity<SignUpResponse> signUp(@Valid @RequestBody SignUpRequest body) {
@@ -66,6 +68,10 @@ public class AuthController {
         return ResponseEntity.ok(Map.of("message", "Kích hoạt tài khoản thành công!"));
     }
 
+    // =================================================================
+    // LOGIN PHONE & OTP
+    // =================================================================
+
     @PostMapping("/login-phone/step1")
     public ResponseEntity<?> loginPhoneStep1(@Valid @RequestBody PhoneLoginStep1Request body) {
         authService.sendLoginOtp(body);
@@ -98,24 +104,30 @@ public class AuthController {
     // =================================================================
 
     // 1. Web gọi: Lấy mã QR Token (Token ngắn hạn)
-    // Yêu cầu: Header phải có Authorization: Bearer <token_đang_đăng_nhập>
     @GetMapping("/qr-generate")
     @PreAuthorize("isAuthenticated()")
     public ResponseEntity<Map<String, String>> generateQrCode() {
-        // Lấy email user đang đăng nhập hiện tại
-        String email = SecurityContextHolder.getContext().getAuthentication().getName();
-        String qrToken = authService.generateQrToken(email);
+        // [QUAN TRỌNG] Lấy chính xác Email từ CurrentUser
+        Object principal = SecurityContextHolder.getContext().getAuthentication().getPrincipal();
+        String email;
 
-        // Trả về JSON: { "result": "eyKhongL..." }
+        if (principal instanceof CurrentUser) {
+            email = ((CurrentUser) principal).getEmail();
+        } else {
+            // Fallback: getName() thường trả về subject (email) trong JWT
+            email = SecurityContextHolder.getContext().getAuthentication().getName();
+        }
+
+        System.out.println(">>> [QR GENERATE] Generating for Email: " + email); // Debug Log
+
+        String qrToken = authService.generateQrToken(email);
         return ResponseEntity.ok(Map.of("result", qrToken));
     }
 
     // 2. Mobile gọi: Quét mã để lấy Token chính thức
-    // Public API (không cần Header Auth cũ, vì đang đi xin token mới)
     @PostMapping("/qr-login")
     public ResponseEntity<Map<String, Object>> loginWithQr(@RequestParam("token") String token) {
         LoginResponse response = authService.loginWithQrCode(token);
-        // Trả về response giống hệt login bình thường
         return ResponseEntity.ok(Map.of(
                 "message", "QR Login Success",
                 "result", response

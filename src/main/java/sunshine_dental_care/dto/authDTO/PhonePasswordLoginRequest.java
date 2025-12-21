@@ -7,5 +7,8 @@ public record PhonePasswordLoginRequest(
         String phone,
 
         @NotBlank(message = "Vui lòng nhập mật khẩu")
-        String password
+        String password,
+
+        // Thêm trường locale (vi/en)
+        String locale
 ) {}
