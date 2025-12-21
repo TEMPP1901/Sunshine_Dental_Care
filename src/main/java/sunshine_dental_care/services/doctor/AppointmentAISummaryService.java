@@ -28,53 +28,53 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 @Slf4j
 public class AppointmentAISummaryService {
-    
+
     private final DoctorAppointmentRepo appointmentRepo;
     private final MedicalRecordRepository medicalRecordRepository;
     private final PatientInsightRepository patientInsightRepository;
     private final GeminiApiClient geminiApiClient;
     private final AppointmentAISummaryCacheService cacheService;
     private final ObjectMapper objectMapper = new ObjectMapper();
-    
+
     private static final int MAX_MEDICAL_RECORDS = 5;
     private static final int MAX_RECENT_TREATMENTS = 10;
-    
+
     /**
      * Generate or retrieve cached AI summary for an appointment.
      * Validates that the doctor owns the appointment.
-     * 
+     *
      * @param appointmentId Appointment ID
      * @param doctorId Doctor ID (from authentication)
-     * @return AI-generated patient summary
+     * @return AI-generated patient summary in LEGACY format
      */
     public AIPatientSummaryResponse getAISummary(Integer appointmentId, Integer doctorId) {
         log.info("Generating AI summary for appointmentId={}, doctorId={}", appointmentId, doctorId);
-        
+
         // Check cache first
         String cachedSummary = cacheService.get(appointmentId);
         if (cachedSummary != null) {
             log.info("Returning cached summary for appointmentId={}", appointmentId);
-            return parseAISummary(cachedSummary);
+            return parseLegacyAISummary(cachedSummary);
         }
-        
+
         // Load and validate appointment
         Appointment appointment = appointmentRepo.findByIdAndDoctorId(appointmentId, doctorId);
         if (appointment == null) {
             throw new IllegalArgumentException("Appointment not found or doctor does not own this appointment");
         }
-        
+
         Integer patientId = appointment.getPatient().getId();
-        
+
         // Aggregate patient data
         List<MedicalRecord> recentRecords = getRecentMedicalRecords(patientId);
         List<AppointmentService> recentTreatments = getRecentAppointmentServices(patientId);
-        
+
         // Build context for AI
         String context = buildPatientContext(appointment, recentRecords, recentTreatments);
-        
-        // Generate prompt
-        String prompt = buildAIPrompt(context);
-        
+
+        // Generate prompt - UPDATED for Legacy Format
+        String prompt = buildLegacyAIPrompt(context);
+
         // Call Gemini AI
         String aiResponse;
         try {
@@ -86,285 +86,310 @@ public class AppointmentAISummaryService {
             log.error("Failed to generate AI summary", e);
             throw new RuntimeException("Failed to generate AI summary: " + e.getMessage(), e);
         }
-        
+
         // Cache the result
         cacheService.put(appointmentId, aiResponse);
-        
-        // Parse and return
-        return parseAISummary(aiResponse);
+
+        // Parse and return in LEGACY format
+        return parseLegacyAISummary(aiResponse);
     }
-    
+
     private List<MedicalRecord> getRecentMedicalRecords(Integer patientId) {
         List<MedicalRecord> allRecords = medicalRecordRepository.findByPatientIdOrderByRecordDateDesc(patientId);
         return allRecords.stream()
                 .limit(MAX_MEDICAL_RECORDS)
                 .collect(Collectors.toList());
     }
-    
+
     private List<AppointmentService> getRecentAppointmentServices(Integer patientId) {
         List<AppointmentService> allServices = patientInsightRepository.recentAppointmentServicesByPatientId(patientId);
         return allServices.stream()
                 .limit(MAX_RECENT_TREATMENTS)
                 .collect(Collectors.toList());
     }
-    
-    private String buildPatientContext(Appointment appointment, List<MedicalRecord> records, List<AppointmentService> treatments) {
+
+    private String buildPatientContext(Appointment appointment,
+                                       List<MedicalRecord> records,
+                                       List<AppointmentService> treatments) {
+
+        String sep = " | ";
         StringBuilder context = new StringBuilder();
-        
+
         // Patient basic info
         var patient = appointment.getPatient();
-        context.append("PATIENT INFORMATION:\n");
-        context.append("- Name: ").append(patient.getFullName()).append("\n");
-        context.append("- Patient Code: ").append(patient.getPatientCode() != null ? patient.getPatientCode() : "N/A").append("\n");
+        context.append("PATIENT INFORMATION:")
+                .append(sep).append("Name: ").append(patient.getFullName())
+                .append(sep).append("Patient Code: ")
+                .append(patient.getPatientCode() != null ? patient.getPatientCode() : "N/A");
+
         if (patient.getDateOfBirth() != null) {
-            context.append("- Date of Birth: ").append(patient.getDateOfBirth().format(DateTimeFormatter.ISO_LOCAL_DATE)).append("\n");
+            context.append(sep).append("Date of Birth: ")
+                    .append(patient.getDateOfBirth().format(DateTimeFormatter.ISO_LOCAL_DATE));
         }
         if (patient.getGender() != null) {
-            context.append("- Gender: ").append(patient.getGender()).append("\n");
+            context.append(sep).append("Gender: ").append(patient.getGender());
         }
         if (patient.getPhone() != null) {
-            context.append("- Phone: ").append(patient.getPhone()).append("\n");
+            context.append(sep).append("Phone: ").append(patient.getPhone());
         }
         if (patient.getNote() != null && !patient.getNote().trim().isEmpty()) {
-            context.append("- Patient Notes: ").append(patient.getNote()).append("\n");
+            context.append(sep).append("Patient Notes: ").append(patient.getNote());
         }
-        context.append("\n");
-        
-        // Current appointment info
-        context.append("CURRENT APPOINTMENT:\n");
-        context.append("- Appointment ID: ").append(appointment.getId()).append("\n");
-        context.append("- Date: ").append(appointment.getStartDateTime()).append("\n");
-        context.append("- Status: ").append(appointment.getStatus()).append("\n");
+
+        if ("VIP".equals(appointment.getAppointmentType())) {
+            context.append(sep).append("VIP Patient: Yes");
+        }
+
+        // Current appointment
+        context.append(sep).append("CURRENT APPOINTMENT:")
+                .append(sep).append("Appointment ID: ").append(appointment.getId())
+                .append(sep).append("Date: ").append(appointment.getStartDateTime())
+                .append(sep).append("Status: ").append(appointment.getStatus());
+
         if (appointment.getNote() != null && !appointment.getNote().trim().isEmpty()) {
-            context.append("- Appointment Note: ").append(appointment.getNote()).append("\n");
+            context.append(sep).append("Appointment Note: ").append(appointment.getNote());
         }
-        context.append("\n");
-        
-        // Recent medical records (3-5 most recent)
-        context.append("RECENT MEDICAL RECORDS (").append(records.size()).append(" records):\n");
+
+        // Medical records
+        context.append(sep).append("RECENT MEDICAL RECORDS (")
+                .append(records.size()).append("):");
+
         if (records.isEmpty()) {
-            context.append("- No medical records found.\n");
+            context.append(sep).append("No medical records found");
         } else {
             for (int i = 0; i < records.size(); i++) {
-                MedicalRecord record = records.get(i);
-                context.append("\nRecord #").append(i + 1).append(":\n");
-                context.append("- Date: ").append(record.getRecordDate()).append("\n");
-                if (record.getService() != null) {
-                    context.append("- Service: ").append(record.getService().getServiceName()).append("\n");
+                MedicalRecord r = records.get(i);
+                context.append(sep).append("Record #").append(i + 1).append(":")
+                        .append(" Date=").append(r.getRecordDate());
+
+                if (r.getService() != null) {
+                    context.append(", Service=").append(r.getService().getServiceName());
                 }
-                if (record.getServiceVariant() != null) {
-                    context.append("- Variant: ").append(record.getServiceVariant().getVariantName()).append("\n");
+                if (r.getServiceVariant() != null) {
+                    context.append(", Variant=").append(r.getServiceVariant().getVariantName());
                 }
-                if (record.getDiagnosis() != null && !record.getDiagnosis().trim().isEmpty()) {
-                    context.append("- Diagnosis: ").append(record.getDiagnosis()).append("\n");
+                if (r.getDiagnosis() != null && !r.getDiagnosis().trim().isEmpty()) {
+                    context.append(", Diagnosis=").append(r.getDiagnosis());
                 }
-                if (record.getTreatmentPlan() != null && !record.getTreatmentPlan().trim().isEmpty()) {
-                    context.append("- Treatment Plan: ").append(record.getTreatmentPlan()).append("\n");
+                if (r.getTreatmentPlan() != null && !r.getTreatmentPlan().trim().isEmpty()) {
+                    context.append(", Treatment Plan=").append(r.getTreatmentPlan());
                 }
-                if (record.getPrescriptionNote() != null && !record.getPrescriptionNote().trim().isEmpty()) {
-                    context.append("- Prescription: ").append(record.getPrescriptionNote()).append("\n");
+                if (r.getPrescriptionNote() != null && !r.getPrescriptionNote().trim().isEmpty()) {
+                    context.append(", Prescription=").append(r.getPrescriptionNote());
                 }
-                if (record.getNote() != null && !record.getNote().trim().isEmpty()) {
-                    context.append("- Notes: ").append(record.getNote()).append("\n");
+                if (r.getNote() != null && !r.getNote().trim().isEmpty()) {
+                    context.append(", Notes=").append(r.getNote());
                 }
             }
         }
-        context.append("\n");
-        
-        // Recent treatments (from AppointmentServices)
-        context.append("RECENT TREATMENTS (").append(treatments.size()).append(" treatments):\n");
+
+        // Treatments
+        context.append(sep).append("RECENT TREATMENTS (")
+                .append(treatments.size()).append("):");
+
         if (treatments.isEmpty()) {
-            context.append("- No recent treatments found.\n");
+            context.append(sep).append("No recent treatments found");
         } else {
             for (int i = 0; i < treatments.size(); i++) {
-                AppointmentService treatment = treatments.get(i);
-                context.append("\nTreatment #").append(i + 1).append(":\n");
-                if (treatment.getAppointment() != null) {
-                    context.append("- Appointment Date: ").append(treatment.getAppointment().getStartDateTime()).append("\n");
+                AppointmentService t = treatments.get(i);
+                context.append(sep).append("Treatment #").append(i + 1).append(":");
+
+                if (t.getAppointment() != null) {
+                    context.append(" Appointment Date=")
+                            .append(t.getAppointment().getStartDateTime());
                 }
-                if (treatment.getService() != null) {
-                    context.append("- Service: ").append(treatment.getService().getServiceName()).append("\n");
+                if (t.getService() != null) {
+                    context.append(", Service=").append(t.getService().getServiceName());
                 }
-                if (treatment.getServiceVariant() != null) {
-                    context.append("- Variant: ").append(treatment.getServiceVariant().getVariantName()).append("\n");
+                if (t.getServiceVariant() != null) {
+                    context.append(", Variant=").append(t.getServiceVariant().getVariantName());
                 }
-                if (treatment.getQuantity() != null) {
-                    context.append("- Quantity: ").append(treatment.getQuantity()).append("\n");
+                if (t.getQuantity() != null) {
+                    context.append(", Quantity=").append(t.getQuantity());
                 }
-                if (treatment.getNote() != null && !treatment.getNote().trim().isEmpty()) {
-                    context.append("- Notes: ").append(treatment.getNote()).append("\n");
+                if (t.getNote() != null && !t.getNote().trim().isEmpty()) {
+                    context.append(", Notes=").append(t.getNote());
                 }
             }
         }
-        
+
         return context.toString();
     }
 
-    private String buildAIPrompt(String patientContext) {
+    private String buildLegacyAIPrompt(String patientContext) {
         return """
-        You are an intelligent dental clinic assistant helping dentists quickly review and assess patient records.
+        You are an intelligent dental clinic assistant helping dentists quickly review patient records.
         
-        **CLINICAL RULES:**
-        1. DO NOT diagnose diseases or medical conditions.
-        2. DO NOT recommend or prescribe treatments.
-        3. ONLY analyze and summarize the provided data.
-        4. Detect abnormalities, inconsistencies, and missing information in the records.
-        5. Follow the principle of "do no harm".
-        
-        **PERMITTED ANALYSIS SCOPE:**
-        1. Identify general risk factors.
-        2. Underlying medical conditions (only if explicitly documented).
-        3. Repeated or recurring treatment history.
-        4. Recent invasive or high-impact procedures.
-        5. Detection of abnormal or low-quality data.
-        6. Unprofessional or inappropriate clinical notes.
-        7. Prescriptions missing dosage or duration.
-        8. Inconsistencies or contradictions across records.
+                STRICT RULES:
+                - DO NOT translate or explain offensive or unusual text.
+                - DO NOT use emotional, judgmental, or alarmist language.
+                - DO NOT add commentary outside provided data.
+                - If data appears invalid or inappropriate, mark as "Data quality issue" only.
+                - Alerts must be factual, short, neutral.
+                - NEVER use adjectives like: alarming, stupid, critical, dangerous.
+                
+                
+        **TASK:**
+        Analyze the patient data below and generate a summary in LEGACY FORMAT.
         
         **PATIENT DATA:**
         %s
         
-        **MANDATORY OUTPUT FORMAT (AI Output Contract):**
-        Return ONLY valid JSON with the following structure:
-        {
-          "overview": "A brief overview of the patient and treatment context (1–2 sentences, no raw data listing)",
-          "attentionLevel": "LOW | MEDIUM | HIGH (based on historical data, not emotion)",
-          "dataQualityIssues": [
-            {
-              "issue": "description of the data quality issue",
-              "severity": "LOW | MEDIUM | HIGH",
-              "suggestion": "recommended corrective action"
-            }
-          ],
-          "riskFactors": [
-            {
-              "factor": "name of the risk factor",
-              "evidence": "supporting evidence from the records",
-              "impact": "MINOR | MODERATE | SIGNIFICANT"
-            }
-          ],
-          "advisoryNotes": [
-            "Operational advisory notes (e.g., requires verification, requires careful review, record update needed)"
-          ],
-          "summaryReport": "A professional narrative summary written like a clinical review report"
-        }
+        **REQUIRED OUTPUT FORMAT (LEGACY FORMAT):**
         
-        **ANALYSIS GUIDELINES:**
+        # AI Support – Patient Summary
         
-        1. ATTENTION LEVEL ASSESSMENT:
-           - LOW: Records are complete and consistent, no notable concerns.
-           - MEDIUM: Some issues require review (missing data, repeated treatments).
-           - HIGH: Serious issues detected (data conflicts, critical missing information).
+        Legacy Format  
+        Updated: [current_datetime in format: MM/dd/yyyy, HH:mm:ss AM/PM]  
         
-        2. DATA QUALITY ISSUE DETECTION:
-           - Notes that do not meet professional clinical standards.
-           - Prescriptions missing dosage or treatment duration.
-           - Ambiguous, subjective, or emotional wording.
-           - Missing essential clinical information.
+        ---
         
-        3. RISK FACTOR IDENTIFICATION:
-           - Documented underlying medical conditions.
-           - Repeated treatments for the same condition.
-           - Recent invasive or high-risk procedures.
-           - Abnormal intervals between visits or treatments.
+        ## Attention Level ([Attention Level])
+        Based on analysis of treatment history and data quality  
         
-        4. ADVISORY NOTES:
-           - "Requires verification: [information to verify]"
-           - "Requires careful review by the doctor: [item to review]"
-           - "Record update required: [information to be added or corrected]"
+        ---
         
-        5. SUMMARY REPORT:
-           - Written in a professional clinical reporting style.
-           - Concise and focused on actionable information.
-           - Structure: Overview → Issues → Advisory notes.
+        ### Using Legacy Format
+        Enhanced AI analysis features not available. Update to new API format for full capabilities.
         
-        **IMPORTANT NOTES:**
-        - All output must be in English.
-        - The JSON must be 100% valid and parsable.
-        - Base all conclusions strictly on the provided data.
-        - Prioritize identifying issues over positive commentary.
-        - Act as a “clinical record quality auditor,” not a clinician.
+        ---
+        
+        ### Overview
+        [Provide a 2-3 sentence overview of the patient. Mention if VIP, key observations]
+        
+        ---
+        
+        ### Alerts [Important or leave blank]
+        [List important alerts, concerns, or unusual findings. If no significant alerts, write "No significant alerts"]
+        
+        ---
+        
+        ### Recent Treatments
+        [List recent treatments in chronological order, most recent first]
+        
+        **IMPORTANT RULES:**
+        1. For Attention Level: Use "Low Attention", "Moderate Attention", or "High Attention" based on:
+           - Low: No concerning findings, complete records
+           - Moderate: Some issues requiring review
+           - High: Serious concerns or critical missing information
+        
+        2. For Alerts section:
+           - Include if there are: serious diagnoses, unusual findings, missing information, data conflicts
+           - Mark as "Important" if there are alerts
+           - If no alerts, just write "No significant alerts"
+        
+        3. For Recent Treatments:
+           - List treatments in bullet points
+           - Include dates and brief descriptions
+           - Focus on the most recent 3-5 treatments
+        
+        4. Use concise, professional language
+        5. Base all conclusions strictly on provided data
+        6. Current datetime example: 12/21/2025, 11:09:03 PM
+        
+        **EXAMPLE OUTPUT:**
+        # AI Support – Patient Summary
+        
+        Legacy Format  
+        Updated: 12/21/2025, 11:09:03 PM  
+        
+        ---
+        
+        ## Attention Level (Moderate Attention)
+        Based on analysis of treatment history and data quality  
+        
+        ---
+        
+        ### Using Legacy Format
+        Enhanced AI analysis features not available. Update to new API format for full capabilities.
+        
+        ---
+        
+        ### Overview
+        Patient Nguyễn Văn A (SDC-001) is a VIP patient with a history of recent and varied dental procedures. The most recent medical records indicate ongoing dental issues and significant systemic health concerns.
+        
+        ---
+        
+        ### Alerts Important
+        Patient has a documented diagnosis of 'tiểu đường' (diabetes). There is also a diagnosis of 'sâu răng viêm nướu nặng' (severe tooth decay and gingivitis) with a prescribed 3-month course of Amoxicillin and Chlorhexidine. A highly unusual and concerning diagnosis of 'sắp chết' (dying soon) was recorded on 2025-12-16, which requires immediate verification.
+        
+        ---
+        
+        ### Recent Treatments
+        Recent treatments include a Permanent Implant on 2025-12-20. On 2025-12-16, the patient received a Children Dental Checkup (Fluoride varnish application), underwent Wisdom Tooth Removal (both milk tooth and surgical wisdom tooth extraction), and had Veneers & Whitening (1 veneer).
         """.formatted(patientContext);
     }
 
-
-    private AIPatientSummaryResponse parseAISummary(String aiResponse) {
+    private AIPatientSummaryResponse parseLegacyAISummary(String aiResponse) {
         try {
-            JsonNode jsonNode = objectMapper.readTree(aiResponse);
+            // Extract sections from the legacy format
+            String overview = extractSection(aiResponse, "### Overview", "### Alerts");
+            String alerts = extractSection(aiResponse, "### Alerts", "### Recent Treatments");
+            String recentTreatments = extractSection(aiResponse, "### Recent Treatments", null);
 
-            // Parse basic fields
-            String overview = jsonNode.path("overview").asText("");
-            String attentionLevel = jsonNode.path("attentionLevel").asText("LOW");
-            String summaryReport = jsonNode.path("summaryReport").asText("");
+            // Clean up the text
+            overview = overview != null ? overview.trim() : "";
+            alerts = (alerts == null || alerts.isBlank())
+                    ? "No significant alerts"
+                    : alerts;
 
-            // Parse data quality issues
-            List<AIPatientSummaryResponse.DataQualityIssue> dataQualityIssues = new ArrayList<>();
-            JsonNode issuesNode = jsonNode.path("dataQualityIssues");
-            if (issuesNode.isArray()) {
-                for (JsonNode issueNode : issuesNode) {
-                    AIPatientSummaryResponse.DataQualityIssue issue =
-                            AIPatientSummaryResponse.DataQualityIssue.builder()
-                                    .issue(issueNode.path("issue").asText(""))
-                                    .severity(issueNode.path("severity").asText("LOW"))
-                                    .suggestion(issueNode.path("suggestion").asText(""))
-                                    .build();
-                    dataQualityIssues.add(issue);
-                }
+            recentTreatments = recentTreatments != null ? recentTreatments.trim() : "";
+
+            // Remove "Important" label from alerts if present
+            if (alerts.startsWith("Important")) {
+                alerts = alerts.substring(9).trim();
             }
 
-            // Parse risk factors
-            List<AIPatientSummaryResponse.RiskFactor> riskFactors = new ArrayList<>();
-            JsonNode risksNode = jsonNode.path("riskFactors");
-            if (risksNode.isArray()) {
-                for (JsonNode riskNode : risksNode) {
-                    AIPatientSummaryResponse.RiskFactor risk =
-                            AIPatientSummaryResponse.RiskFactor.builder()
-                                    .factor(riskNode.path("factor").asText(""))
-                                    .evidence(riskNode.path("evidence").asText(""))
-                                    .impact(riskNode.path("impact").asText("MINOR"))
-                                    .build();
-                    riskFactors.add(risk);
-                }
-            }
-
-            // Parse advisory notes
-            List<String> advisoryNotes = new ArrayList<>();
-            JsonNode notesNode = jsonNode.path("advisoryNotes");
-            if (notesNode.isArray()) {
-                for (JsonNode noteNode : notesNode) {
-                    advisoryNotes.add(noteNode.asText(""));
-                }
-            }
+            log.info("Parsed Legacy AI Summary:");
+            log.info("Overview: {}", overview);
+            log.info("Alerts: {}", alerts);
+            log.info("Recent Treatments: {}", recentTreatments);
 
             return AIPatientSummaryResponse.builder()
                     .overview(overview)
-                    .attentionLevel(attentionLevel)
-                    .dataQualityIssues(dataQualityIssues)
-                    .riskFactors(riskFactors)
-                    .advisoryNotes(advisoryNotes)
-                    .summaryReport(summaryReport)
+                    .alerts(alerts.isEmpty() ? "No significant alerts" : alerts)
+                    .recentTreatments(recentTreatments.isEmpty() ? "No recent treatments found" : recentTreatments)
                     .rawSummary(aiResponse)
                     .build();
 
         } catch (Exception e) {
-            log.warn("Failed to parse AI response as JSON: {}", e.getMessage());
+            log.error("Failed to parse legacy AI response: {}", e.getMessage());
 
-            // Fallback: create a basic response
+            // Fallback: return basic response
             return AIPatientSummaryResponse.builder()
-                    .overview(aiResponse)
-                    .attentionLevel("MEDIUM")
-                    .dataQualityIssues(List.of(
-                            AIPatientSummaryResponse.DataQualityIssue.builder()
-                                    .issue("AI response is not in the expected format")
-                                    .severity("HIGH")
-                                    .suggestion("Review AI configuration or prompt definition")
-                                    .build()
-                    ))
-                    .riskFactors(new ArrayList<>())
-                    .advisoryNotes(List.of("AI output requires manual review"))
-                    .summaryReport("Unable to analyze patient records due to AI response formatting error")
+                    .overview("Unable to generate AI summary. Please try again.")
+                    .alerts("AI analysis unavailable")
+                    .recentTreatments("Recent treatments data not available")
                     .rawSummary(aiResponse)
                     .build();
+        }
+    }
+
+    private String extractSection(String text, String startMarker, String endMarker) {
+        try {
+            int startIndex = text.indexOf(startMarker);
+            if (startIndex == -1) {
+                return "";
+            }
+
+            // Move to the content after the marker
+            startIndex += startMarker.length();
+
+            // Find the end of the section
+            int endIndex;
+            if (endMarker != null) {
+                endIndex = text.indexOf(endMarker, startIndex);
+                if (endIndex == -1) {
+                    endIndex = text.length();
+                }
+            } else {
+                endIndex = text.length();
+            }
+
+            return text.substring(startIndex, endIndex).trim();
+        } catch (Exception e) {
+            log.warn("Error extracting section with markers {} - {}: {}", startMarker, endMarker, e.getMessage());
+            return "";
         }
     }
 }
