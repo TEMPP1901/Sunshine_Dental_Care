@@ -16,6 +16,7 @@ import sunshine_dental_care.repositories.doctor.PatientInsightRepository;
 import sunshine_dental_care.services.impl.hr.GeminiApiClient;
 
 import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.stream.Collectors;
 
@@ -198,59 +199,170 @@ public class AppointmentAISummaryService {
         
         return context.toString();
     }
-    
+
     private String buildAIPrompt(String patientContext) {
         return """
-            You are a dental clinic assistant helping a dentist quickly understand a patient's key information.
-            
-            IMPORTANT RULES:
-            1. You are providing READ-ONLY, ADVISORY information only
-            2. You do NOT diagnose or recommend treatments
-            3. You summarize existing medical records and treatment history
-            4. Focus on important alerts, patterns, and key information
-            
-            PATIENT DATA:
-            %s
-            
-            Please generate a concise JSON summary with the following structure:
+        You are an intelligent dental clinic assistant helping dentists quickly review and assess patient records.
+        
+        **CLINICAL RULES:**
+        1. DO NOT diagnose diseases or medical conditions.
+        2. DO NOT recommend or prescribe treatments.
+        3. ONLY analyze and summarize the provided data.
+        4. Detect abnormalities, inconsistencies, and missing information in the records.
+        5. Follow the principle of "do no harm".
+        
+        **PERMITTED ANALYSIS SCOPE:**
+        1. Identify general risk factors.
+        2. Underlying medical conditions (only if explicitly documented).
+        3. Repeated or recurring treatment history.
+        4. Recent invasive or high-impact procedures.
+        5. Detection of abnormal or low-quality data.
+        6. Unprofessional or inappropriate clinical notes.
+        7. Prescriptions missing dosage or duration.
+        8. Inconsistencies or contradictions across records.
+        
+        **PATIENT DATA:**
+        %s
+        
+        **MANDATORY OUTPUT FORMAT (AI Output Contract):**
+        Return ONLY valid JSON with the following structure:
+        {
+          "overview": "A brief overview of the patient and treatment context (1–2 sentences, no raw data listing)",
+          "attentionLevel": "LOW | MEDIUM | HIGH (based on historical data, not emotion)",
+          "dataQualityIssues": [
             {
-              "overview": "Brief patient overview (demographics, basic info, key characteristics)",
-              "alerts": "Important alerts, medical history concerns, allergies, risks, or warnings (if any)",
-              "recentTreatments": "Summary of recent treatments and procedures (last 3-5 visits)"
+              "issue": "description of the data quality issue",
+              "severity": "LOW | MEDIUM | HIGH",
+              "suggestion": "recommended corrective action"
             }
-            
-            Guidelines:
-            - Keep each field concise (2-4 sentences max)
-            - Highlight important medical history or concerns in "alerts"
-            - If no alerts exist, use "No significant alerts" in alerts field
-            - Focus on actionable information for the dentist
-            - Use clear, professional medical language
-            """.formatted(patientContext);
+          ],
+          "riskFactors": [
+            {
+              "factor": "name of the risk factor",
+              "evidence": "supporting evidence from the records",
+              "impact": "MINOR | MODERATE | SIGNIFICANT"
+            }
+          ],
+          "advisoryNotes": [
+            "Operational advisory notes (e.g., requires verification, requires careful review, record update needed)"
+          ],
+          "summaryReport": "A professional narrative summary written like a clinical review report"
+        }
+        
+        **ANALYSIS GUIDELINES:**
+        
+        1. ATTENTION LEVEL ASSESSMENT:
+           - LOW: Records are complete and consistent, no notable concerns.
+           - MEDIUM: Some issues require review (missing data, repeated treatments).
+           - HIGH: Serious issues detected (data conflicts, critical missing information).
+        
+        2. DATA QUALITY ISSUE DETECTION:
+           - Notes that do not meet professional clinical standards.
+           - Prescriptions missing dosage or treatment duration.
+           - Ambiguous, subjective, or emotional wording.
+           - Missing essential clinical information.
+        
+        3. RISK FACTOR IDENTIFICATION:
+           - Documented underlying medical conditions.
+           - Repeated treatments for the same condition.
+           - Recent invasive or high-risk procedures.
+           - Abnormal intervals between visits or treatments.
+        
+        4. ADVISORY NOTES:
+           - "Requires verification: [information to verify]"
+           - "Requires careful review by the doctor: [item to review]"
+           - "Record update required: [information to be added or corrected]"
+        
+        5. SUMMARY REPORT:
+           - Written in a professional clinical reporting style.
+           - Concise and focused on actionable information.
+           - Structure: Overview → Issues → Advisory notes.
+        
+        **IMPORTANT NOTES:**
+        - All output must be in English.
+        - The JSON must be 100% valid and parsable.
+        - Base all conclusions strictly on the provided data.
+        - Prioritize identifying issues over positive commentary.
+        - Act as a “clinical record quality auditor,” not a clinician.
+        """.formatted(patientContext);
     }
-    
+
+
     private AIPatientSummaryResponse parseAISummary(String aiResponse) {
         try {
-            // Try to parse as JSON first
             JsonNode jsonNode = objectMapper.readTree(aiResponse);
-            
+
+            // Parse basic fields
             String overview = jsonNode.path("overview").asText("");
-            String alerts = jsonNode.path("alerts").asText("");
-            String recentTreatments = jsonNode.path("recentTreatments").asText("");
-            
+            String attentionLevel = jsonNode.path("attentionLevel").asText("LOW");
+            String summaryReport = jsonNode.path("summaryReport").asText("");
+
+            // Parse data quality issues
+            List<AIPatientSummaryResponse.DataQualityIssue> dataQualityIssues = new ArrayList<>();
+            JsonNode issuesNode = jsonNode.path("dataQualityIssues");
+            if (issuesNode.isArray()) {
+                for (JsonNode issueNode : issuesNode) {
+                    AIPatientSummaryResponse.DataQualityIssue issue =
+                            AIPatientSummaryResponse.DataQualityIssue.builder()
+                                    .issue(issueNode.path("issue").asText(""))
+                                    .severity(issueNode.path("severity").asText("LOW"))
+                                    .suggestion(issueNode.path("suggestion").asText(""))
+                                    .build();
+                    dataQualityIssues.add(issue);
+                }
+            }
+
+            // Parse risk factors
+            List<AIPatientSummaryResponse.RiskFactor> riskFactors = new ArrayList<>();
+            JsonNode risksNode = jsonNode.path("riskFactors");
+            if (risksNode.isArray()) {
+                for (JsonNode riskNode : risksNode) {
+                    AIPatientSummaryResponse.RiskFactor risk =
+                            AIPatientSummaryResponse.RiskFactor.builder()
+                                    .factor(riskNode.path("factor").asText(""))
+                                    .evidence(riskNode.path("evidence").asText(""))
+                                    .impact(riskNode.path("impact").asText("MINOR"))
+                                    .build();
+                    riskFactors.add(risk);
+                }
+            }
+
+            // Parse advisory notes
+            List<String> advisoryNotes = new ArrayList<>();
+            JsonNode notesNode = jsonNode.path("advisoryNotes");
+            if (notesNode.isArray()) {
+                for (JsonNode noteNode : notesNode) {
+                    advisoryNotes.add(noteNode.asText(""));
+                }
+            }
+
             return AIPatientSummaryResponse.builder()
                     .overview(overview)
-                    .alerts(alerts)
-                    .recentTreatments(recentTreatments)
+                    .attentionLevel(attentionLevel)
+                    .dataQualityIssues(dataQualityIssues)
+                    .riskFactors(riskFactors)
+                    .advisoryNotes(advisoryNotes)
+                    .summaryReport(summaryReport)
                     .rawSummary(aiResponse)
                     .build();
-                    
+
         } catch (Exception e) {
-            log.warn("Failed to parse AI response as JSON, treating as plain text: {}", e.getMessage());
-            // Fallback: treat entire response as overview
+            log.warn("Failed to parse AI response as JSON: {}", e.getMessage());
+
+            // Fallback: create a basic response
             return AIPatientSummaryResponse.builder()
                     .overview(aiResponse)
-                    .alerts("Unable to parse structured summary")
-                    .recentTreatments("See overview for details")
+                    .attentionLevel("MEDIUM")
+                    .dataQualityIssues(List.of(
+                            AIPatientSummaryResponse.DataQualityIssue.builder()
+                                    .issue("AI response is not in the expected format")
+                                    .severity("HIGH")
+                                    .suggestion("Review AI configuration or prompt definition")
+                                    .build()
+                    ))
+                    .riskFactors(new ArrayList<>())
+                    .advisoryNotes(List.of("AI output requires manual review"))
+                    .summaryReport("Unable to analyze patient records due to AI response formatting error")
                     .rawSummary(aiResponse)
                     .build();
         }

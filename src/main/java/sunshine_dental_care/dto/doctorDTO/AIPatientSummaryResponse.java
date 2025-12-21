@@ -1,10 +1,8 @@
 package sunshine_dental_care.dto.doctorDTO;
 
-import lombok.AllArgsConstructor;
-import lombok.Builder;
-import lombok.Getter;
-import lombok.NoArgsConstructor;
-import lombok.Setter;
+import lombok.*;
+
+import java.util.List;
 
 /**
  * Response DTO for AI-generated patient summary.
@@ -15,24 +13,29 @@ import lombok.Setter;
 @NoArgsConstructor
 @AllArgsConstructor
 @Builder
+@Data
 public class AIPatientSummaryResponse {
-    /**
-     * Overall patient overview (demographics, basic info)
-     */
     private String overview;
-    
-    /**
-     * Important alerts (medical history, allergies, risks, etc.)
-     */
-    private String alerts;
-    
-    /**
-     * Recent treatment notes and procedures
-     */
-    private String recentTreatments;
-    
-    /**
-     * Raw JSON summary from AI (if needed for debugging)
-     */
+    private String attentionLevel; // LOW | MEDIUM | HIGH
+    private List<DataQualityIssue> dataQualityIssues;
+    private List<RiskFactor> riskFactors;
+    private List<String> advisoryNotes;
+    private String summaryReport;
     private String rawSummary;
+
+    @Data
+    @Builder
+    public static class DataQualityIssue {
+        private String issue;
+        private String severity; // LOW | MEDIUM | HIGH
+        private String suggestion;
+    }
+
+    @Data
+    @Builder
+    public static class RiskFactor {
+        private String factor;
+        private String evidence;
+        private String impact; // MINOR | MODERATE | SIGNIFICANT
+    }
 }
