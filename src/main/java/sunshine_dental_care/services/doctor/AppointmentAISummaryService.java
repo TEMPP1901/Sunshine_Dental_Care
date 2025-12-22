@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Service;
 import sunshine_dental_care.dto.doctorDTO.AIPatientSummaryResponse;
 import sunshine_dental_care.entities.Appointment;
@@ -13,7 +14,6 @@ import sunshine_dental_care.repositories.doctor.AppointmentServiceRepository;
 import sunshine_dental_care.repositories.doctor.DoctorAppointmentRepo;
 import sunshine_dental_care.repositories.doctor.MedicalRecordRepository;
 import sunshine_dental_care.repositories.doctor.PatientInsightRepository;
-import sunshine_dental_care.services.impl.hr.GeminiApiClient;
 
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
@@ -28,11 +28,11 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 @Slf4j
 public class AppointmentAISummaryService {
-
+    @Qualifier("doctorGeminiApiClient")
+    private final GeminiApiClient geminiApiClient;
     private final DoctorAppointmentRepo appointmentRepo;
     private final MedicalRecordRepository medicalRecordRepository;
     private final PatientInsightRepository patientInsightRepository;
-    private final GeminiApiClient geminiApiClient;
     private final AppointmentAISummaryCacheService cacheService;
     private final ObjectMapper objectMapper = new ObjectMapper();
 

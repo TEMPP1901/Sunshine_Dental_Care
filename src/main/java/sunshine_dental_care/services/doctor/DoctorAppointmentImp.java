@@ -176,7 +176,6 @@ public class DoctorAppointmentImp implements DoctorAppointmentService{
                 .id(room.getId())
                 .roomName(room.getRoomName())
                 .isPrivate(room.getIsPrivate())
-                .numberOfChairs(room.getNumberOfChairs())
                 .build();
     }
 

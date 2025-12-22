@@ -244,6 +244,11 @@ public class HrServiceImpl implements HrService {
                 .collect(Collectors.toList());
     }
 
+    @Override
+    public List<DoctorScheduleDto> getMyScheduleByDate(Integer userId, LocalDate date) {
+        return List.of();
+    }
+
     // validateSchedule và validateAssignment đã được chuyển sang
     // ScheduleValidationServiceImpl
 
