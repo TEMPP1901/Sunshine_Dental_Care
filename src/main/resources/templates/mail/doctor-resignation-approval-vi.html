@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Thông báo: Đơn nghỉ việc đã được duyệt - Sunshine Dental Care</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            max-width: 600px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            background-color: #ffffff;
+            border-radius: 10px;
+            padding: 30px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .header {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        .logo {
+            color: #1A237E;
+            font-size: 28px;
+            font-weight: bold;
+            margin-bottom: 10px;
+        }
+        .title {
+            color: #1976d2;
+            font-size: 24px;
+            font-weight: bold;
+            margin-bottom: 20px;
+        }
+        .content {
+            color: #555;
+            font-size: 16px;
+            margin-bottom: 20px;
+        }
+        .info-box {
+            background-color: #e3f2fd;
+            border-left: 4px solid #1976d2;
+            padding: 15px;
+            margin: 20px 0;
+            border-radius: 5px;
+        }
+        .warning-box {
+            background-color: #fff3e0;
+            border-left: 4px solid #ff9800;
+            padding: 20px;
+            margin: 20px 0;
+            border-radius: 5px;
+        }
+        .important-box {
+            background-color: #ffebee;
+            border-left: 4px solid #d32f2f;
+            padding: 20px;
+            margin: 20px 0;
+            border-radius: 5px;
+        }
+        .info-item {
+            margin: 10px 0;
+            font-size: 15px;
+        }
+        .info-label {
+            font-weight: bold;
+            color: #1A237E;
+        }
+        .highlight {
+            color: #d32f2f;
+            font-weight: bold;
+            font-size: 18px;
+        }
+        .schedule-count {
+            font-size: 24px;
+            font-weight: bold;
+            color: #1976d2;
+            text-align: center;
+            padding: 10px;
+            background-color: #e3f2fd;
+            border-radius: 5px;
+            margin: 15px 0;
+        }
+        .footer {
+            margin-top: 30px;
+            padding-top: 20px;
+            border-top: 1px solid #eee;
+            text-align: center;
+            color: #888;
+            font-size: 12px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <div class="logo"> Sunshine Dental Care</div>
+        </div>
+        
+        <h1 class="title">Thông báo: Đơn nghỉ việc đã được duyệt</h1>
+        
+        <div class="content">
+            <p>Xin chào <strong>{{fullName}}</strong>,</p>
+            
+            <p>Chúng tôi xin thông báo rằng đơn nghỉ việc của bạn đã được phê duyệt bởi bộ phận Nhân sự và Ban Quản trị.</p>
+            
+            <div class="info-box">
+                <div class="info-item">
+                    <span class="info-label"> Ngày nghỉ việc chính thức:</span> 
+                    <span style="font-size: 18px; font-weight: bold; color: #1976d2;">{{resignationDate}}</span>
+                </div>
+            </div>
+            
+            <div class="important-box">
+                <p style="margin: 0 0 15px 0; font-weight: bold; font-size: 18px; color: #d32f2f;">
+                     LƯU Ý QUAN TRỌNG
+                </p>
+                <p style="margin: 0 0 10px 0;">
+                    Bạn cần <strong style="color: #d32f2f;">hoàn tất tất cả lịch phân công</strong> đến ngày nghỉ việc chính thức (<strong>{{resignationDate}}</strong>).
+                </p>
+                <p style="margin: 0;">
+                    Vui lòng đảm bảo bạn đã hoàn thành tất cả công việc đã được phân công trước ngày nghỉ việc.
+                </p>
+            </div>
+            
+            <div class="warning-box">
+                <p style="margin: 0 0 10px 0; font-weight: bold; font-size: 16px;">
+                     Tình trạng lịch phân công hiện tại:
+                </p>
+                <div class="schedule-count">
+                    {{remainingSchedules}} lịch làm việc còn lại
+                </div>
+                <p style="margin: 10px 0 0 0; text-align: center; font-size: 14px; color: #666;">
+                    Cần hoàn tất trước ngày {{resignationDate}}
+                </p>
+            </div>
+            
+            <p>Nếu bạn có bất kỳ thắc mắc nào về lịch phân công hoặc cần hỗ trợ, vui lòng liên hệ với bộ phận Nhân sự ngay lập tức.</p>
+            
+            <p>Chúng tôi xin chân thành cảm ơn bạn đã đồng hành cùng Sunshine Dental Care trong thời gian qua. Những đóng góp của bạn đã góp phần quan trọng vào sự phát triển của chúng tôi.</p>
+            
+            <p>Chúc bạn mọi điều tốt đẹp trong tương lai!</p>
+            
+            <p>Trân trọng,<br>
+            <strong>Đội ngũ Sunshine Dental Care</strong></p>
+        </div>
+        
+        <div class="footer">
+            <p>Email này được gửi tự động từ hệ thống Sunshine Dental Care.</p>
+            <p>Vui lòng không trả lời email này.</p>
+        </div>
+    </div>
+</body>
+</html>
+

@@ -1,23 +1,33 @@
-HELP.md
+# =====================================
+# 1. BUILD & DEPENDENCIES (Maven)
+# =====================================
 target/
-.mvn/wrapper/maven-wrapper.jar
+!.mvn/wrapper/maven-wrapper.jar
 !**/src/main/**/target/
 !**/src/test/**/target/
 
-### STS ###
+# =====================================
+# 2. IDE & EDITOR FILES (Không cần push)
+# =====================================
+### IntelliJ IDEA ###
+.idea/
+*.iws
+*.iml
+*.ipr
+out/
+
+### Eclipse / STS ###
 .apt_generated
 .classpath
 .factorypath
 .project
-.settings
+.settings/
 .springBeans
 .sts4-cache
+bin/
 
-### IntelliJ IDEA ###
-.idea
-*.iws
-*.iml
-*.ipr
+### VS Code ###
+.vscode/
 
 ### NetBeans ###
 /nbproject/private/
@@ -29,5 +39,40 @@ build/
 !**/src/main/**/build/
 !**/src/test/**/build/
 
-### VS Code ###
-.vscode/
+# =====================================
+# 3. OS FILES (File rác hệ điều hành)
+# =====================================
+.DS_Store
+Thumbs.db
+
+# =====================================
+# 4. SENSITIVE & CONFIG FILES (QUAN TRỌNG)
+# =====================================
+# Chặn file môi trường chứa mật khẩu
+.env
+!.env
+Sunshine_Dental_Care/src/main/resources/application.properties
+
+# Chặn file cấu hình Firebase chứa Key
+firebase-service-account.json
+
+# Chặn file cấu hình Log (tùy chọn)
+*.log
+
+# =====================================
+# 5. LARGE FILES (File quá nặng)
+# =====================================
+# Model nhận diện khuôn mặt (thường >100MB, Git không nhận)
+src/main/resources/sunshine_dental_care/utils/arcface.onnx
+
+# =====================================
+# 6. MISC
+# =====================================
+HELP.md
+
+### Application Properties ###
+application.properties
+application-*.properties
+application.yml
+application-*.yml
+/.env
